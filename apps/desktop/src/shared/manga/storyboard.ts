@@ -2,7 +2,19 @@ import { z } from 'zod'
 import { defaultBalloonPlaces } from './balloons'
 import { MAX_PANELS_PER_PAGE, PAGE_LAYOUTS, layoutById, layoutForCount } from './layouts'
 import { extractJson, storyMemory, type MemoryRequest } from './memory'
-import { BALLOON_KINDS, SHOTS, emptyPanel, type MangaChapter, type MangaPage, type MangaPanel, type MangaSeries, type Shot } from './model'
+import {
+  BALLOON_KINDS,
+  MAX_CAST,
+  MAX_DIALOGUE,
+  SHOTS,
+  emptyPanel,
+  mangaPageSchema,
+  type MangaChapter,
+  type MangaPage,
+  type MangaPanel,
+  type MangaSeries,
+  type Shot,
+} from './model'
 
 /**
  * 分镜: the language model turns a chapter outline into pages of panels. It
@@ -97,6 +109,9 @@ export interface ParsedStoryboard {
 
 const normalizeName = (name: string): string => name.replace(/\s+/g, '').toLowerCase()
 
+/** The document's limits (model.ts), so a storyboard that parses can always be saved. */
+const LIMITS = { scene: 4000, expression: 200, pose: 200, text: 1000, pages: 200 } as const
+
 export function parseStoryboard(
   text: string,
   series: Pick<MangaSeries, 'characters' | 'readingDirection'>,
@@ -107,6 +122,12 @@ export function parseStoryboard(
   const warnings = new Set<string>()
   const byName = new Map(series.characters.map((character) => [normalizeName(character.name), character]))
 
+  const clip = (text: string, max: number): string => {
+    const value = text.trim()
+    if (value.length <= max) return value
+    warnings.add('有的描述或台词太长，已截断')
+    return value.slice(0, max)
+  }
   const pages: MangaPage[] = []
   for (const rawPage of parsed.data.pages) {
     // A page with more panels than any template is split across pages.
@@ -119,7 +140,7 @@ export function parseStoryboard(
 
       const panels = rawPanels.map((raw): MangaPanel => {
         const panel = emptyPanel(makeId('panel'))
-        panel.scene = raw.scene.trim()
+        panel.scene = clip(raw.scene, LIMITS.scene)
         panel.shot = (SHOTS as readonly string[]).includes(raw.shot) ? (raw.shot as Shot) : 'medium'
         for (const member of raw.cast) {
           const character = byName.get(normalizeName(member.name))
@@ -128,16 +149,22 @@ export function parseStoryboard(
             continue
           }
           if (panel.cast.some((item) => item.characterId === character.id)) continue
+          if (panel.cast.length >= MAX_CAST) {
+            warnings.add(`一格最多 ${MAX_CAST} 个人物，多出的已去掉`)
+            break
+          }
           const outfit = member.outfit?.trim() ? character.outfits.find((item) => item.name === member.outfit!.trim()) : undefined
           if (member.outfit?.trim() && !outfit) warnings.add(`${character.name}没有「${member.outfit.trim()}」这套服装，用了默认服装`)
           panel.cast.push({
             characterId: character.id,
             ...(outfit ? { outfitId: outfit.id } : {}),
-            expression: member.expression?.trim() ?? '',
-            pose: member.pose?.trim() ?? '',
+            expression: clip(member.expression ?? '', LIMITS.expression),
+            pose: clip(member.pose ?? '', LIMITS.pose),
           })
         }
-        const lines = raw.dialogue.filter((line) => line.text.trim())
+        const spoken = raw.dialogue.filter((line) => line.text.trim())
+        if (spoken.length > MAX_DIALOGUE) warnings.add(`一格最多 ${MAX_DIALOGUE} 句对白，多出的已去掉`)
+        const lines = spoken.slice(0, MAX_DIALOGUE)
         const places = defaultBalloonPlaces(lines.length, series.readingDirection)
         panel.dialogue = lines.map((line, index) => {
           const kind = (BALLOON_KINDS as readonly string[]).includes(line.kind ?? '')
@@ -148,7 +175,7 @@ export function parseStoryboard(
             id: makeId('line'),
             kind,
             ...(speaker && kind !== 'narration' ? { speakerId: speaker.id } : {}),
-            text: line.text.trim(),
+            text: clip(line.text, LIMITS.text),
             ...places[index]!,
           }
         })
@@ -158,6 +185,14 @@ export function parseStoryboard(
       while (panels.length < layout.rects.length) panels.push(emptyPanel(makeId('panel')))
       pages.push({ id: makeId('page'), layoutId: layout.id, panels })
     }
+  }
+  if (pages.length > LIMITS.pages) {
+    warnings.add(`一话最多 ${LIMITS.pages} 页，多出的已去掉`)
+    pages.length = LIMITS.pages
+  }
+  // Whatever slipped past the limits above would make every later save fail: refuse it here instead.
+  for (const page of pages) {
+    if (!mangaPageSchema.safeParse(page).success) throw new Error('语言模型返回的分镜有无法保存的内容，请再试一次')
   }
   return { pages, warnings: [...warnings] }
 }

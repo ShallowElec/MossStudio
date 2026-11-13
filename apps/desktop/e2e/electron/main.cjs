@@ -45,12 +45,13 @@ function fixtureImage(url) {
 }
 
 app.whenReady().then(() => {
-  protocol.handle(
-    'clover',
-    (request) =>
-      new Response(fixtureImage(request.url), {
-        headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store', 'access-control-allow-origin': '*' },
-      }),
+  protocol.handle('clover', (request) =>
+    // A path with "missing" in it is a picture that is gone (deleted from 作品): specs check how pages handle that.
+    decodeURIComponent(request.url).includes('missing')
+      ? new Response('Not found', { status: 404 })
+      : new Response(fixtureImage(request.url), {
+          headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store', 'access-control-allow-origin': '*' },
+        }),
   )
   const win = new BrowserWindow({
     width: 1600,

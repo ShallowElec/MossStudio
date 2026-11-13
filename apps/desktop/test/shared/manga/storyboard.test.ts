@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { mangaPageSchema } from '@shared/manga/model'
 import { parseStoryboard, storyboardRequest } from '@shared/manga/storyboard'
 import { mangaSeriesFixture } from '../../mocks/backend/manga'
 
@@ -93,5 +94,36 @@ describe('parseStoryboard', () => {
     expect(() => parseStoryboard('我不太明白', series, counter())).toThrow('语言模型没有返回可读的结果，请再试一次')
     expect(() => parseStoryboard('{"pages": []}', series, counter())).toThrow('语言模型返回的分镜格式不对，请再试一次')
     expect(() => parseStoryboard('{"pages": [}', series, counter())).toThrow('语言模型返回的结果格式不对，请再试一次')
+  })
+
+  it('keeps every field within what the document can save', () => {
+    const long = (n: number) => '长'.repeat(n)
+    const answer = JSON.stringify({
+      pages: [
+        {
+          layout: 'single',
+          panels: [
+            {
+              scene: '港口',
+              shot: 'wide',
+              cast: [{ name: '阿秋', expression: long(300), pose: long(250) }],
+              dialogue: Array.from({ length: 15 }, (_, i) => ({
+                speaker: '阿秋',
+                kind: 'speech',
+                text: i === 0 ? long(1200) : `第 ${i} 句`,
+              })),
+            },
+          ],
+        },
+      ],
+    })
+    const { pages, warnings } = parseStoryboard(answer, series, counter())
+    const panel = pages[0]!.panels[0]!
+    expect(panel.cast[0]!.expression).toHaveLength(200)
+    expect(panel.cast[0]!.pose).toHaveLength(200)
+    expect(panel.dialogue).toHaveLength(12)
+    expect(panel.dialogue[0]!.text).toHaveLength(1000)
+    expect(warnings).toEqual(expect.arrayContaining(['有的描述或台词太长，已截断', '一格最多 12 句对白，多出的已去掉']))
+    expect(mangaPageSchema.safeParse(pages[0]).success).toBe(true)
   })
 })

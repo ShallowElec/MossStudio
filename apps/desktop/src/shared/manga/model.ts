@@ -83,6 +83,10 @@ export const mangaTakeSchema = z.object({
  * a job is drawing it; `review`: a take waits for a person; `approved`:
  * a take is chosen; `failed`: it gave up after its retries.
  */
+/** Characters and balloons one panel holds at most. */
+export const MAX_CAST = 6
+export const MAX_DIALOGUE = 12
+
 export const PANEL_STATES = ['draft', 'queued', 'running', 'review', 'approved', 'failed'] as const
 export type PanelState = (typeof PANEL_STATES)[number]
 
@@ -91,8 +95,8 @@ export const mangaPanelSchema = z.object({
   /** What happens in the picture (画面描述). */
   scene: z.string().max(4000),
   shot: z.enum(SHOTS),
-  cast: z.array(mangaCastSchema).max(6),
-  dialogue: z.array(mangaBalloonSchema).max(12),
+  cast: z.array(mangaCastSchema).max(MAX_CAST),
+  dialogue: z.array(mangaBalloonSchema).max(MAX_DIALOGUE),
   /** Replaces the compiled description when set (精修). */
   promptOverride: z.string().max(8000).optional(),
   state: z.enum(PANEL_STATES),

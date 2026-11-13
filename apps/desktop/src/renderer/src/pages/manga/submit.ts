@@ -67,8 +67,9 @@ export function panelRequest(input: {
   const rect = layout ? orientedRects(layout, series.readingDirection)[index] : undefined
   const size = rect ? panelGenerationSize(rect) : { width: 1024, height: 1024 }
   const pageNumber = chapter.pages.findIndex((item) => item.id === page.id) + 1
-  const steps = choice.bundle.defaults?.steps ?? series.style.steps
-  const cfg = choice.bundle.defaults?.cfg ?? series.style.cfg
+  // The series' 质量 decides; a model's own steps and CFG (few-step models) are put into it when the model is chosen.
+  const steps = series.style.steps
+  const cfg = series.style.cfg
 
   return {
     ok: true,

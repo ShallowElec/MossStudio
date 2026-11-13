@@ -127,9 +127,24 @@ export async function loadPagePictures(page: MangaPage, cache: PictureCache): Pr
   )
 }
 
-/** The page as PNG bytes, for 导出. */
-export async function renderPagePng(series: PageLook, page: MangaPage, cache: PictureCache): Promise<Uint8Array> {
+/**
+ * Panels of `page` whose picture could not be read (deleted from 作品, moved, unreadable), 1-based. Export refuses
+ * a page with any, rather than drawing grey frames where approved pictures belong.
+ */
+export function missingPictures(page: MangaPage, cache: PictureCache): number[] {
+  return page.panels.flatMap((panel, index) => {
+    const picture = panelPicture(panel)
+    return picture && !cache.get(picture.path) ? [index + 1] : []
+  })
+}
+
+/** The page as PNG bytes, for 导出; `label` (第 2 页) names it when a picture is missing. */
+export async function renderPagePng(series: PageLook, page: MangaPage, cache: PictureCache, label = '这一页'): Promise<Uint8Array> {
   await loadPagePictures(page, cache)
+  const missing = missingPictures(page, cache)
+  if (missing.length) {
+    throw new Error(`${label}第 ${missing.join('、')} 格的图片读不到了（可能已在「作品」里删除），请重画后再导出`)
+  }
   const canvas = document.createElement('canvas')
   canvas.width = PAGE_WIDTH
   canvas.height = PAGE_HEIGHT

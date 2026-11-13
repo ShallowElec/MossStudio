@@ -5,8 +5,9 @@ import type { MangaSeries } from '@shared/manga/model'
 import { Notice } from '../../components/common/Notice'
 import { Button, ConfirmDialog, Field, Input, Section, Segmented, Select, Switch, Textarea } from '../../components/ui'
 import { useApp } from '../../store'
-import { QUALITY_PRESETS, qualityFor } from '../studio/defaults'
-import { installedBundles } from '../studio/readiness'
+import { QUALITY_PRESETS, qualityFor, samplingForBundle } from '../studio/defaults'
+import { installedBundles, resolveBundle } from '../studio/readiness'
+import { readPreferredBundle } from './preferences'
 import { AdapterEditor, useProviders } from './parts'
 import type { SeriesUpdate } from './useSeries'
 
@@ -83,7 +84,12 @@ export function SettingsTab({
           <Field label="模型">
             <Select
               value={style.modelBundleId ?? ''}
-              onValueChange={(id) => setStyle({ modelBundleId: id || undefined })}
+              onValueChange={(id) => {
+                // As in 创作: a few-step model brings its own steps and CFG, and leaving one restores 标准.
+                const pick = (bundleId: string | undefined) => resolveBundle(catalog, bundleId, readPreferredBundle()).bundle
+                const sampling = samplingForBundle(style, pick(style.modelBundleId), pick(id || undefined))
+                setStyle({ modelBundleId: id || undefined, ...sampling })
+              }}
               options={[
                 { value: '', label: '和创作页一样' },
                 ...bundles.map((bundle) => ({ value: bundle.id, label: bundle.name })),

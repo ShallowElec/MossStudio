@@ -129,6 +129,9 @@ export function applyJob(panel: MangaPanel, job: Pick<JobRecord, 'id' | 'state' 
       attempts: 0,
       error: undefined,
       retryAt: undefined,
+      // A redraw of an approved panel is reviewed afresh: the old choice no longer stands, so the new picture shows
+      // and 通过 approves what is shown.
+      chosen: undefined,
       takes: [...panel.takes, ...takes].slice(-30),
     }
   }

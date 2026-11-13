@@ -114,4 +114,12 @@ describe('panelRequest', () => {
     const gone = { ...series, style: { ...series.style, modelBundleId: 'removed-bundle' } }
     expect(request({ series: gone })).toMatchObject({ ok: false, message: '这部漫画用的模型已经不在模型库里，请在「设定」里换一个' })
   })
+
+  it('draws with the series quality even on a model with its own steps and CFG', () => {
+    const base = catalog()
+    const withDefaults = { ...base, bundles: base.bundles.map((bundle) => ({ ...bundle, defaults: { steps: 8, cfg: 1 } })) }
+    const result = request({ catalog: withDefaults, series: { ...series, style: { ...series.style, steps: 50, cfg: 4.5 } } })
+    if (!result.ok) throw new Error(result.message)
+    expect(result.body).toMatchObject({ steps: 50, cfg: 4.5 })
+  })
 })

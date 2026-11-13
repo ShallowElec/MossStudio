@@ -154,7 +154,7 @@ function ChapterEditor({
     setError(null)
     try {
       const pages: Uint8Array[] = []
-      for (const page of chapter.pages) pages.push(await renderPagePng(series, page, pictures))
+      for (const [index, page] of chapter.pages.entries()) pages.push(await renderPagePng(series, page, pictures, `第 ${index + 1} 页`))
       const folder = await call<string | null>(Ipc.mangaExport, { title: series.title, chapterNumber: chapter.number, pages })
       if (folder) toast.push(`已导出 ${pages.length} 页到 ${folder}`, 'success')
     } catch (reason) {

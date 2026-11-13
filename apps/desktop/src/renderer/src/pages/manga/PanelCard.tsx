@@ -1,7 +1,7 @@
 import { Check, MessageSquarePlus, Play, RotateCcw, Square, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { BALLOON_KIND_LABEL, BALLOON_SPOTS, defaultBalloonPlaces, nearestSpot } from '@shared/manga/balloons'
-import { BALLOON_KINDS, SHOTS, newId, panelPicture, type MangaPanel, type MangaSeries } from '@shared/manga/model'
+import { MAX_DIALOGUE, MAX_CAST, BALLOON_KINDS, SHOTS, newId, panelPicture, type MangaPanel, type MangaSeries } from '@shared/manga/model'
 import { SHOT_LABEL, compilePanelPrompt } from '@shared/manga/prompt'
 import { approve, reject } from '@shared/manga/queue'
 import { Ipc } from '@shared/channels'
@@ -208,6 +208,8 @@ export function PanelCard({
             <Button
               size="xs"
               tone="ghost"
+              disabled={panel.cast.length >= MAX_CAST}
+              title={panel.cast.length >= MAX_CAST ? `一格最多 ${MAX_CAST} 个人物` : undefined}
               onClick={() => {
                 const next = characters.find((item) => !panel.cast.some((member) => member.characterId === item.id)) ?? characters[0]!
                 set({ cast: [...panel.cast, { characterId: next.id, expression: '', pose: '' }] })
@@ -219,6 +221,8 @@ export function PanelCard({
           <Button
             size="xs"
             tone="ghost"
+            disabled={panel.dialogue.length >= MAX_DIALOGUE}
+            title={panel.dialogue.length >= MAX_DIALOGUE ? `一格最多 ${MAX_DIALOGUE} 句对白` : undefined}
             onClick={() => {
               const spot = defaultBalloonPlaces(panel.dialogue.length + 1, series.readingDirection).at(-1)!
               set({ dialogue: [...panel.dialogue, { id: newId('line'), kind: 'speech', text: '', x: spot.x, y: spot.y }] })

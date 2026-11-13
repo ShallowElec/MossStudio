@@ -255,6 +255,37 @@ describe('manga', () => {
       .toBe(true)
   })
 
+  it('stops adding lines and characters at the limits, and refuses to export a page whose picture is gone', async () => {
+    const page = await openSeries(() => {
+      const { mangaSeriesFixture } = window.__mock.fixtures
+      const series = mangaSeriesFixture()
+      const take = (path: string) => ({ path, width: 1024, height: 768, seed: 1, jobId: 'job-old' })
+      const [first, second, third] = series.chapters[0]!.pages[0]!.panels
+      first!.dialogue = Array.from({ length: 12 }, (_, i) => ({
+        id: `l${i}`,
+        kind: 'speech' as const,
+        text: `第 ${i + 1} 句`,
+        x: 0.5,
+        y: 0.5,
+      }))
+      first!.cast = Array.from({ length: 6 }, () => ({ characterId: 'char-aki', expression: '', pose: '' }))
+      for (const panel of [first!, second!, third!])
+        Object.assign(panel, { state: 'approved', takes: [take('/fixture/outputs/ok.png')], chosen: 0 })
+      second!.takes = [take('/fixture/outputs/missing.png')]
+      window.__mock.state.manga = [series]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    await page.getByRole('heading', { name: '雨夜侦探' }).waitFor()
+    const first = panel(page, 'panel-1')
+    expect(await first.getByRole('button', { name: '加对白' }).isDisabled()).toBe(true)
+    expect(await first.getByRole('button', { name: '加人物' }).isDisabled()).toBe(true)
+    expect(await panel(page, 'panel-2').getByRole('button', { name: '加对白' }).isDisabled()).toBe(false)
+
+    await page.getByRole('button', { name: '导出这一话' }).click()
+    await page.getByText('第 1 页第 2 格的图片读不到了（可能已在「作品」里删除），请重画后再导出').waitFor()
+    expect(await app.calls('manga:export')).toEqual([])
+  })
+
   it('adds reference pictures and outfits to a character card', async () => {
     const page = await openSeries(() => {
       const { mangaSeriesFixture } = window.__mock.fixtures

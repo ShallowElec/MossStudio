@@ -16,7 +16,7 @@ import {
   reject,
   updatePanel,
 } from '@shared/manga/queue'
-import type { MangaSeries } from '@shared/manga/model'
+import { panelPicture, type MangaSeries } from '@shared/manga/model'
 import { mangaPanelFixture, mangaSeriesFixture } from '../../mocks/backend/manga'
 
 const panelsOf = (series: MangaSeries) => chapterPanels(series.chapters[0]!)
@@ -126,5 +126,22 @@ describe('reconcile', () => {
     expect(panelsOf(partial).map((panel) => panel.state)).toEqual(['review', 'running', 'draft'])
     expect(panelsOf(reconcile(series, jobs, true))[1]).toMatchObject({ state: 'queued', error: '找不到这次生成的记录' })
     expect(reconcile(partial, jobs)).toBe(partial)
+  })
+})
+
+describe('redrawing an approved panel', () => {
+  it('reviews the new picture, not the one approved before', () => {
+    const take = { path: '/out/old.png', width: 1, height: 1, seed: 1, jobId: 'old' }
+    let series = updatePanel(mangaSeriesFixture(), 'chapter-1', 'panel-1', (panel) => ({
+      ...panel,
+      state: 'approved',
+      takes: [take],
+      chosen: 0,
+    }))
+    series = enqueue(series, 'chapter-1', ['panel-1'])
+    const running = markSubmitted(panelsOf(series)[0]!, 'job-new')
+    const done = applyJob(running, { id: 'job-new', state: 'succeeded', outputs: [{ path: '/out/new.png', width: 1, height: 1, seed: 2 }] })
+    expect(done).toMatchObject({ state: 'review', chosen: undefined })
+    expect(panelPicture(done)?.path).toBe('/out/new.png')
   })
 })
