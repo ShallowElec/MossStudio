@@ -400,3 +400,27 @@ describe('conversations', () => {
     expect(api.AI_PROVIDER_KINDS).toEqual(['openai', 'anthropic', 'gemini', 'ollama'])
   })
 })
+
+describe('complete', () => {
+  it('asks once with no tools and no conversation, and returns the text', async () => {
+    const { api, id } = await provider('openai')
+    replies.push(() => Response.json({ choices: [{ message: { content: '{"pages": []}' } }] }))
+    await expect(api.complete({ providerId: id, system: '分镜师', prompt: '大纲' })).resolves.toBe('{"pages": []}')
+    const body = requests[0]!.body
+    expect(body['messages']).toEqual([
+      { role: 'system', content: '分镜师' },
+      { role: 'user', content: '大纲' },
+    ])
+    expect(body).not.toHaveProperty('tools')
+    expect(api.listConversations()).toEqual([])
+  })
+
+  it('uses the first provider when none is named, and says when there is none or no answer', async () => {
+    const api = await load()
+    await expect(api.complete({ system: 's', prompt: 'p' })).rejects.toThrow('还没有连接语言模型，请先在助手里添加')
+    api.saveProvider({ name: 'local', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'm' })
+    replies.push(() => Response.json({ message: { content: '  ' } }))
+    await expect(api.complete({ system: 's', prompt: 'p' })).rejects.toThrow('语言模型没有回答，请再试一次')
+    expect(requests[0]!.url).toBe('http://127.0.0.1:11434/api/chat')
+  })
+})

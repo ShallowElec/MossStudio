@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { agentCardAnswerSchema } from './agent/cards'
 import { UPDATE_CHANNELS } from './install'
+import { mangaSeriesSaveSchema } from './manga/model'
 
 const pathLike = z.string().trim().min(1, '目录路径不能为空').max(4096)
 const urlLike = z
@@ -724,6 +725,20 @@ export const schemas = {
       mode: z.enum(['auto', 'advanced']).optional(),
     })
     .refine((value) => Boolean(value.regenerate || value.message?.trim()), { message: '需要消息或重新生成标记' }),
+
+  aiComplete: z.object({
+    providerId: z.string().min(1).max(120).optional(),
+    system: z.string().min(1).max(16000),
+    prompt: z.string().min(1).max(64000),
+  }),
+
+  mangaId: z.object({ id: z.string().min(1).max(120) }),
+  mangaSave: mangaSeriesSaveSchema,
+  mangaExport: z.object({
+    title: z.string().min(1).max(120),
+    chapterNumber: z.number().int().min(1).max(9999),
+    pages: z.array(z.instanceof(Uint8Array)).min(1).max(200),
+  }),
 
   aiToolResult: z.object({
     callId: z.string().min(1).max(200),
