@@ -1,6 +1,6 @@
 ---
 status: current
-last-verified: 2026-11-12 (afff0ea)
+last-verified: 2026-11-13 (afff0ea)
 code: apps/desktop/src/shared/manga/, apps/desktop/src/main/services/manga.ts, apps/desktop/src/renderer/src/pages/manga/, apps/desktop/src/main/services/ai.ts
 ---
 
@@ -62,9 +62,9 @@ A panel's `state` is the queue (`shared/manga/queue.ts`):
 - the description is the 画风, the shot, the scene, one line per character (trigger words, appearance, outfit, expression, pose), where the balloons go (`balloonRoomHint`: 构图：右上留出空白放对白…) and the reviewer's note;
 - 文字，对白框，水印 is added to the negative description, so lettering is never drawn into the picture, and 彩色 when the series is `monochrome`;
 - the LoRA list is the style's LoRA plus each character's, without repeats;
-- the first reference picture of each character is attached.
+- the first reference picture of each character goes into the prompt as `visionReferences` (MossInfer's `vision_references`: the text encoder's vision tower turns it into prompt tokens). A head-and-shoulders picture carries the character; a whole scene gets copied, so the card asks for portraits.
 
-LoRA and references the engine does not support (`engine:features`) are left out with a notice. A missing model or LoRA, or an empty scene, fails the panel without a retry. Every attempt draws a new seed.
+LoRA and pictures the engine does not support (`engine:features`; pictures need `visionReferences`, which MossInfer declares as `vision_references` in `hello`) are left out with a notice. The engine's other `references` belong to an edit adapter and do nothing without one, so 漫画 never sends them. A missing model or LoRA, or an empty scene, fails the panel without a retry. Every attempt draws a new seed.
 
 ## 5. Lettering and export
 

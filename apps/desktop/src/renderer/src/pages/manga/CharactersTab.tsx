@@ -170,7 +170,10 @@ function CharacterEditor({
         </Field>
       </Section>
 
-      <Section title="参考图" description="第一张会作为参考图和描述一起交给引擎（引擎支持时），让脸和发型更稳定。">
+      <Section
+        title="参考图"
+        description="第一张会放进描述里交给引擎，让脸、发型和服装每一格都更一致（需要支持人物参考图的引擎）。用只有人物头肩的图效果最好；整张场景图会让画面照搬它的场景。"
+      >
         <div className="flex flex-wrap gap-2">
           {character.references.map((image, index) => (
             <div key={image.path} className="group relative size-24 overflow-hidden rounded-lg bg-panel">

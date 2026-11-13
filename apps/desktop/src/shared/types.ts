@@ -866,8 +866,6 @@ export interface EngineFeatures {
   references: boolean
   /** Vision references (`vision_references`): pictures put into the prompt, no adapter needed. Absent on older engines. */
   visionReferences?: boolean
-  /** `vision_references.weight` guides the sampling (`vision_guidance`); before, it faded the pictures toward gray. */
-  visionGuidance?: boolean
   hires: boolean
   samplers: boolean
   /** LoRA adapters (`adapters`). */

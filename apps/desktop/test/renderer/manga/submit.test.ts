@@ -30,6 +30,7 @@ const features = (patch: Partial<EngineFeatures> = {}): EngineFeatures =>
     imageInput: true,
     control: true,
     references: true,
+    visionReferences: true,
     hires: true,
     samplers: true,
     lora: true,
@@ -68,7 +69,7 @@ describe('panelRequest', () => {
         { id: 'ink-style', strength: 1 },
         { id: 'aki-lora', strength: 0.8 },
       ],
-      references: { paths: ['/fixture/projects/project-manga/assets/aki.png'] },
+      visionReferences: { paths: ['/fixture/projects/project-manga/assets/aki.png'] },
       seed: 1073741823,
       mode: 'runner',
     })
@@ -82,11 +83,20 @@ describe('panelRequest', () => {
   })
 
   it('leaves out what the engine cannot do, and says so', () => {
-    const result = request({ features: features({ lora: false, references: false }) })
+    const result = request({ features: features({ lora: false, visionReferences: false }) })
     if (!result.ok) throw new Error(result.message)
     expect(result.body['adapters']).toEqual([])
+    expect(result.body).not.toHaveProperty('visionReferences')
+    expect(result.notes).toEqual([
+      '当前引擎不支持 LoRA，这一格没有用人物和画风的 LoRA',
+      '当前引擎还不支持人物参考图，这一格只用了文字描述和 LoRA',
+    ])
+    // Edit-adapter references are never sent: without an edit adapter the engine ignores them.
     expect(result.body).not.toHaveProperty('references')
-    expect(result.notes).toEqual(['当前引擎不支持 LoRA，这一格没有用人物和画风的 LoRA', '当前引擎不支持参考图，这一格没有用人物参考图'])
+    // An engine that does not say (an older one, or unknown) gets no pictures either.
+    const unknown = request({ features: null })
+    if (!unknown.ok) throw new Error(unknown.message)
+    expect(unknown.body).not.toHaveProperty('visionReferences')
   })
 
   it('waits for the model library instead of failing while it is still being read', () => {

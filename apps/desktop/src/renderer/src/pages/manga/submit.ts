@@ -54,9 +54,11 @@ export function panelRequest(input: {
     notes.push('当前引擎不支持 LoRA，这一格没有用人物和画风的 LoRA')
     adapters = []
   }
+  // Character pictures go into the prompt through the text encoder's vision tower (vision_references). The engine's
+  // other `references` belong to an edit adapter and do nothing without one, so they are never sent from here.
   let references = compiled.references
-  if (references.length && features && !features.references) {
-    notes.push('当前引擎不支持参考图，这一格没有用人物参考图')
+  if (references.length && !features?.visionReferences) {
+    notes.push('当前引擎还不支持人物参考图，这一格只用了文字描述和 LoRA')
     references = []
   }
 
@@ -80,7 +82,7 @@ export function panelRequest(input: {
       prompt: compiled.prompt,
       negativePrompt: compiled.negative,
       adapters,
-      ...(references.length ? { references: { paths: references } } : {}),
+      ...(references.length ? { visionReferences: { paths: references } } : {}),
       width: size.width,
       height: size.height,
       steps,

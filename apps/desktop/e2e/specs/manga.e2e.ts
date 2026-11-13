@@ -148,7 +148,7 @@ describe('manga', () => {
         { id: 'ink-style', strength: 1 },
         { id: 'aki-lora', strength: 0.8 },
       ],
-      references: { paths: ['/fixture/projects/project-manga/assets/aki.png'] },
+      visionReferences: { paths: ['/fixture/projects/project-manga/assets/aki.png'] },
     })
     expect(String(first!['prompt'])).toContain('阿秋：akiOC，短黑发')
     await expect.poll(() => panel(page, 'panel-3').getAttribute('data-state')).toBe('queued')
@@ -201,6 +201,24 @@ describe('manga', () => {
     expect(exported).toMatchObject({ title: '雨夜侦探', chapterNumber: 1 })
     expect(exported!.pages).toHaveLength(1)
     await page.getByText('已导出 1 页到 /fixture/export/雨夜侦探').waitFor()
+  })
+
+  it('sends character pictures only to an engine with vision references, and says so otherwise', async () => {
+    const page = await openSeries(() => {
+      const { mangaSeriesFixture, engineFeaturesFixture } = window.__mock.fixtures
+      const series = mangaSeriesFixture({ style: { ...mangaSeriesFixture().style, adapters: [] } })
+      series.characters = series.characters.map((character) => ({ ...character, adapters: [] }))
+      window.__mock.state.manga = [series]
+      window.__mock.state.engineFeatures = engineFeaturesFixture({ visionReferences: false })
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    await page.getByRole('heading', { name: '雨夜侦探' }).waitFor()
+    await panel(page, 'panel-1').getByRole('button', { name: '生成' }).click()
+    await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(1)
+    const [job] = await app.calls<Record<string, unknown>>(JOBS)
+    expect(job).not.toHaveProperty('visionReferences')
+    expect(job).not.toHaveProperty('references')
+    await page.getByText('当前引擎还不支持人物参考图，这一格只用了文字描述和 LoRA').waitFor()
   })
 
   it('after a restart, waits for the model library before drawing what was queued', async () => {
