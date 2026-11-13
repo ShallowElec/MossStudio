@@ -133,6 +133,8 @@ describe('manga', () => {
       localStorage.setItem('mossstudio.manga.open', 'manga-1')
     })
     await page.getByRole('heading', { name: '雨夜侦探' }).waitFor()
+    // The page's clock keeps running; the retry wait below jumps it forward instead of sleeping.
+    await page.clock.install()
     // Not every panel is approved yet: nothing to export.
     expect(await page.getByRole('button', { name: '导出这一话' }).isDisabled()).toBe(true)
 
@@ -156,8 +158,14 @@ describe('manga', () => {
     // A slot came free: the third panel goes.
     await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(3)
 
-    // A failed run goes back in the queue and is drawn again.
-    await page.evaluate(() => window.__mock.finishJob('job-e2e-2', { fail: { code: 'E_GPU', message: '显存不够' } }))
+    // A failed run goes back in the queue, waits so the graphics memory can free up, and is drawn again.
+    await page.evaluate(() => window.__mock.finishJob('job-e2e-2', { fail: { code: 'E_OOM', message: '显存不够' } }))
+    await panel(page, 'panel-2')
+      .getByText(/上次没成功，\d+ 秒后重试：显存不够/)
+      .waitFor()
+    expect(await panel(page, 'panel-2').getAttribute('data-state')).toBe('queued')
+    expect(await app.calls(JOBS).then((calls) => calls.length)).toBe(3)
+    await page.clock.fastForward(16_000)
     await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(4)
     await panel(page, 'panel-2').getByText('上次没成功，正在重试：显存不够').waitFor()
     expect((await app.calls<{ canvasId: string }>(JOBS)).at(-1)!.canvasId).toBe('panel-2')
@@ -193,6 +201,40 @@ describe('manga', () => {
     expect(exported).toMatchObject({ title: '雨夜侦探', chapterNumber: 1 })
     expect(exported!.pages).toHaveLength(1)
     await page.getByText('已导出 1 页到 /fixture/export/雨夜侦探').waitFor()
+  })
+
+  it('after a restart, waits for the model library before drawing what was queued', async () => {
+    const page = await openSeries(() => {
+      const { mangaSeriesFixture } = window.__mock.fixtures
+      const series = mangaSeriesFixture({ style: { ...mangaSeriesFixture().style, adapters: [] } })
+      series.characters = series.characters.map((character) => ({ ...character, adapters: [] }))
+      for (const panel of series.chapters[0]!.pages[0]!.panels) panel.state = 'queued'
+      window.__mock.state.manga = [series]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+      ;(window as unknown as { heldCatalog: unknown }).heldCatalog = window.__mock.hold('models:catalog')
+    })
+    await page.getByRole('heading', { name: '雨夜侦探' }).waitFor()
+    // The library is still being read: nothing is sent, and nothing is marked as failed.
+    await page.waitForTimeout(400)
+    expect(await app.calls(JOBS)).toEqual([])
+    expect(await page.locator('[data-manga-panel][data-state="queued"]').count()).toBe(3)
+    expect(await page.getByText('还没有可用的模型').count()).toBe(0)
+    await page.evaluate(() => (window as unknown as { heldCatalog: { release: () => Promise<void> } }).heldCatalog.release())
+    await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(2)
+  })
+
+  it('turns pages strictly black and white from 设定', async () => {
+    const page = await openSeries(() => {
+      window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    await page.getByRole('tab', { name: '设定' }).click()
+    const toggle = page.getByRole('switch', { name: '成品为纯黑白' })
+    expect(await toggle.getAttribute('aria-checked')).toBe('false')
+    await toggle.click()
+    await expect
+      .poll(() => app.calls<{ style: { monochrome?: boolean } }>('manga:save').then((calls) => calls.at(-1)?.style.monochrome))
+      .toBe(true)
   })
 
   it('adds reference pictures and outfits to a character card', async () => {

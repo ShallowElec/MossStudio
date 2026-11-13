@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { MangaSeries } from '@shared/manga/model'
 import { Notice } from '../../components/common/Notice'
-import { Button, ConfirmDialog, Field, Input, Section, Segmented, Select, Textarea } from '../../components/ui'
+import { Button, ConfirmDialog, Field, Input, Section, Segmented, Select, Switch, Textarea } from '../../components/ui'
 import { useApp } from '../../store'
 import { QUALITY_PRESETS, qualityFor } from '../studio/defaults'
 import { installedBundles } from '../studio/readiness'
@@ -67,6 +67,17 @@ export function SettingsTab({
         <Field label="不想出现的内容">
           <Textarea rows={2} value={style.negative} onChange={(event) => setStyle({ negative: event.target.value })} />
         </Field>
+        <label className="flex items-center justify-between gap-4 rounded-lg bg-panel px-4 py-3">
+          <span className="flex flex-col gap-0.5">
+            <span className="text-control text-ink">成品为纯黑白</span>
+            <span className="text-caption text-ink-2">引擎偶尔会画出彩色，打开后预览和导出的页面一律转成黑白。</span>
+          </span>
+          <Switch
+            aria-label="成品为纯黑白"
+            checked={Boolean(style.monochrome)}
+            onCheckedChange={(monochrome) => setStyle({ monochrome })}
+          />
+        </label>
         <AdapterEditor label="画风 LoRA" adapters={style.adapters} onChange={(adapters) => setStyle({ adapters })} />
         <div className="grid grid-cols-2 gap-4">
           <Field label="模型">

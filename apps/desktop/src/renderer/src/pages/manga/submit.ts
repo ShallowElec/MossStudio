@@ -28,6 +28,8 @@ export function panelRequest(input: {
   random?: () => number
 }): PanelRequest {
   const { series, chapter, page, panel, catalog, features } = input
+  // Read at start-up; until it arrives nothing can be judged missing.
+  if (!catalog) return { ok: false, message: '正在读取模型库…', retry: true }
   const compiled = compilePanelPrompt(series, panel)
   if (compiled.problems.length) return { ok: false, message: compiled.problems[0]!, retry: false }
 

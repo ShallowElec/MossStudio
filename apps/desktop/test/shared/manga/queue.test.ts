@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   MAX_ATTEMPTS,
+  RETRY_BACKOFF_MS,
   applyJob,
   approve,
   chapterPanels,
@@ -9,6 +10,7 @@ import {
   enqueue,
   markSubmitFailed,
   markSubmitted,
+  nextRetryAt,
   nextToSubmit,
   reconcile,
   reject,
@@ -38,6 +40,18 @@ describe('the drawing queue', () => {
     expect(nextToSubmit(running.chapters[0]!).map((panel) => panel.id)).toEqual(['panel-2'])
   })
 
+  it('holds a retry back until its time, and says when the next one is due', () => {
+    const now = Date.parse('2026-11-12T10:00:00.000Z')
+    let series = enqueue(mangaSeriesFixture(), 'chapter-1')
+    series = updatePanel(series, 'chapter-1', 'panel-1', (panel) => markSubmitFailed(markSubmitted(panel, 'j'), 'E_OOM', true, now))
+    expect(nextToSubmit(series.chapters[0]!, 2, now).map((panel) => panel.id)).toEqual(['panel-2', 'panel-3'])
+    expect(nextToSubmit(series.chapters[0]!, 3, now + RETRY_BACKOFF_MS).map((panel) => panel.id)).toEqual(['panel-1', 'panel-2', 'panel-3'])
+    expect(nextRetryAt(series, now)).toBe(now + RETRY_BACKOFF_MS)
+    expect(nextRetryAt(series, now + RETRY_BACKOFF_MS)).toBeNull()
+    // Queueing it by hand does not wait.
+    expect(panelsOf(enqueue(series, 'chapter-1', ['panel-1']))[0]!.retryAt).toBeUndefined()
+  })
+
   it('stops what is still waiting, and leaves drawn panels in review', () => {
     let series = enqueue(mangaSeriesFixture(), 'chapter-1')
     series = updatePanel(series, 'chapter-1', 'panel-2', (panel) => ({ ...panel, takes: [{ ...output, jobId: 'j' }] }))
@@ -54,17 +68,19 @@ describe('a job ending', () => {
     expect(done.takes).toEqual([{ ...output, jobId: 'job-1' }])
   })
 
-  it('retries a failed run until it gives up', () => {
+  it('retries a failed run until it gives up, waiting longer each time', () => {
+    const now = Date.parse('2026-11-12T10:00:00.000Z')
     let panel = running
     for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt += 1) {
-      panel = applyJob(panel, { id: 'job-1', state: 'failed', error: { code: 'E', message: '显存不够' } })
+      panel = applyJob(panel, { id: 'job-1', state: 'failed', error: { code: 'E', message: '显存不够' } }, now)
       expect(panel).toMatchObject({ state: 'queued', attempts: attempt, error: '显存不够' })
+      expect(Date.parse(panel.retryAt!) - now).toBe(RETRY_BACKOFF_MS * attempt)
       panel = markSubmitted(panel, 'job-1')
       // While the retry runs, the failure it retries is still shown.
       expect(panel).toMatchObject({ state: 'running', error: '显存不够' })
     }
-    panel = applyJob(panel, { id: 'job-1', state: 'failed' })
-    expect(panel).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS, error: '生成失败了' })
+    panel = applyJob(panel, { id: 'job-1', state: 'failed' }, now)
+    expect(panel).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS, error: '生成失败了', retryAt: undefined })
   })
 
   it('does not retry a run a person stopped, nor a submit that cannot work', () => {

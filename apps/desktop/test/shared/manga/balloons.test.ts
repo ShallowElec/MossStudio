@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { defaultBalloonPlaces, layoutBalloon, shoutOutline, wrapText } from '@shared/manga/balloons'
+import { balloonRoomHint, defaultBalloonPlaces, layoutBalloon, nearestSpot, shoutOutline, wrapText } from '@shared/manga/balloons'
 
 /** Every character is 10 px wide. */
 const measure = (text: string): number => text.length * 10
@@ -17,12 +17,43 @@ describe('wrapText', () => {
 })
 
 describe('balloon placement', () => {
-  it('starts on the reading side and alternates height', () => {
-    const rtl = defaultBalloonPlaces(3, 'rtl')
-    expect(rtl[0]!.x).toBeGreaterThan(rtl[2]!.x)
-    expect(rtl.map((place) => place.y)).toEqual([0.16, 0.3, 0.16])
-    expect(defaultBalloonPlaces(1, 'ltr')).toEqual([{ x: 0.18, y: 0.16 }])
+  it('fills the corners in reading order before the edges', () => {
+    expect(defaultBalloonPlaces(3, 'rtl')).toEqual([
+      { x: 1, y: 0 },
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ])
+    expect(defaultBalloonPlaces(1, 'ltr')).toEqual([{ x: 0, y: 0 }])
+    expect(defaultBalloonPlaces(6, 'ltr').slice(4)).toEqual([
+      { x: 0.5, y: 0 },
+      { x: 0.5, y: 1 },
+    ])
     expect(defaultBalloonPlaces(0, 'rtl')).toEqual([])
+  })
+
+  it('puts a corner balloon against its corner, not over the middle', () => {
+    const measure = (size: number) => (text: string) => text.length * size
+    const corner = layoutBalloon({ kind: 'speech', text: '这里有脚印！即使雨水冲刷了旧港口的栈道', x: 1, y: 0 }, 1200, 860, measure)
+    // Its right edge sits a margin inside the panel, and it stays in the right half.
+    expect(1200 - (corner.cx + corner.rx)).toBeCloseTo(Math.round(corner.fontSize * 0.6), 0)
+    expect(corner.cx - corner.rx).toBeGreaterThan(600)
+    expect(corner.cy - corner.ry).toBeCloseTo(Math.round(corner.fontSize * 0.6), 0)
+    const middle = layoutBalloon({ kind: 'speech', text: '中间', x: 0.5, y: 0.5 }, 1200, 860, measure)
+    expect(middle.cx).toBeCloseTo(600)
+  })
+
+  it('names spots and tells the engine where the balloons go', () => {
+    expect(nearestSpot(0.8, 0.16).value).toBe('tr')
+    expect(nearestSpot(0.45, 0.55).label).toBe('中间')
+    expect(
+      balloonRoomHint([
+        { x: 1, y: 0, text: '一' },
+        { x: 0.9, y: 0.1, text: '二' },
+        { x: 0, y: 1, text: '三' },
+        { x: 0.5, y: 0.5, text: ' ' },
+      ]),
+    ).toBe('构图：右上、左下留出空白放对白，人物的脸不要放在这些位置')
+    expect(balloonRoomHint([])).toBe('')
   })
 
   it('keeps a balloon inside its panel', () => {

@@ -82,12 +82,10 @@ function drawBalloon(ctx: CanvasRenderingContext2D, balloon: MangaBalloon, x: nu
 }
 
 /** Draw `page` at full size; the pictures it needs must be in `cache` (missing ones show as a grey frame). */
-export function drawPage(
-  ctx: CanvasRenderingContext2D,
-  series: Pick<MangaSeries, 'readingDirection'>,
-  page: MangaPage,
-  cache: PictureCache,
-): void {
+/** What of the series changes how a page looks. */
+export type PageLook = Pick<MangaSeries, 'readingDirection'> & { style: Pick<MangaSeries['style'], 'monochrome'> }
+
+export function drawPage(ctx: CanvasRenderingContext2D, series: PageLook, page: MangaPage, cache: PictureCache): void {
   ctx.fillStyle = PAPER
   ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
   const layout = layoutById(page.layoutId)
@@ -103,8 +101,12 @@ export function drawPage(
     ctx.beginPath()
     ctx.rect(x, y, w, h)
     ctx.clip()
-    if (image) coverImage(ctx, image, x, y, w, h)
-    else {
+    if (image) {
+      // Only the picture: paper, frames and balloons are black and white already.
+      if (series.style.monochrome) ctx.filter = 'grayscale(1)'
+      coverImage(ctx, image, x, y, w, h)
+      ctx.filter = 'none'
+    } else {
       ctx.fillStyle = EMPTY
       ctx.fillRect(x, y, w, h)
     }
@@ -126,11 +128,7 @@ export async function loadPagePictures(page: MangaPage, cache: PictureCache): Pr
 }
 
 /** The page as PNG bytes, for 导出. */
-export async function renderPagePng(
-  series: Pick<MangaSeries, 'readingDirection'>,
-  page: MangaPage,
-  cache: PictureCache,
-): Promise<Uint8Array> {
+export async function renderPagePng(series: PageLook, page: MangaPage, cache: PictureCache): Promise<Uint8Array> {
   await loadPagePictures(page, cache)
   const canvas = document.createElement('canvas')
   canvas.width = PAGE_WIDTH

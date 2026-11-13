@@ -11,7 +11,7 @@ import { strength } from '../../lib/format'
 import { FieldLabel, IconButton, Select, cn } from '../../components/ui'
 import { useApp } from '../../store'
 import { SliderField } from '../studio/InputControls'
-import { drawPage, loadPagePictures, type PictureCache } from './render'
+import { drawPage, loadPagePictures, type PageLook, type PictureCache } from './render'
 
 /** The LoRA rows of the 画风 or a character: each with its weight, plus a picker of installed ones. */
 export function AdapterEditor({
@@ -83,7 +83,7 @@ export function PagePreview({
   className,
   label,
 }: {
-  series: Pick<MangaSeries, 'readingDirection'>
+  series: PageLook
   page: MangaPage
   className?: string
   label: string

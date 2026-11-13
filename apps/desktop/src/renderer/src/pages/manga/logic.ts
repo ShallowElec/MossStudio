@@ -4,6 +4,7 @@ import {
   newId,
   type MangaChapter,
   type MangaPage,
+  type MangaPanel,
   type MangaSeries,
   type MangaSeriesSave,
   type PanelState,
@@ -41,7 +42,14 @@ export function newSeries(): MangaSeriesSave {
     title: '未命名漫画',
     logline: '',
     readingDirection: 'rtl',
-    style: { prompt: '黑白日式漫画，网点，干净利落的线条', negative: '', adapters: [], steps: quality.steps, cfg: quality.cfg },
+    style: {
+      prompt: '黑白日式漫画，纯黑白，网点，干净利落的线条',
+      negative: '',
+      adapters: [],
+      monochrome: true,
+      steps: quality.steps,
+      cfg: quality.cfg,
+    },
     characters: [],
     chapters: [newChapter(1)],
     facts: [],
@@ -103,23 +111,16 @@ export function exportBlockers(chapter: MangaChapter): string | null {
   return waiting ? `还有 ${waiting} 格没有通过审核` : null
 }
 
-/** Where a balloon sits, as nine named spots (right-to-left reading puts 右上 first). */
-export const BALLOON_SPOTS = [
-  { value: 'tr', label: '右上', x: 0.8, y: 0.16 },
-  { value: 'tc', label: '中上', x: 0.5, y: 0.16 },
-  { value: 'tl', label: '左上', x: 0.2, y: 0.16 },
-  { value: 'mr', label: '右中', x: 0.8, y: 0.5 },
-  { value: 'mc', label: '中间', x: 0.5, y: 0.5 },
-  { value: 'ml', label: '左中', x: 0.2, y: 0.5 },
-  { value: 'br', label: '右下', x: 0.8, y: 0.84 },
-  { value: 'bc', label: '中下', x: 0.5, y: 0.84 },
-  { value: 'bl', label: '左下', x: 0.2, y: 0.84 },
-] as const
-
-export function nearestSpot(x: number, y: number): (typeof BALLOON_SPOTS)[number]['value'] {
-  let best: (typeof BALLOON_SPOTS)[number] = BALLOON_SPOTS[0]
-  for (const spot of BALLOON_SPOTS) {
-    if (Math.hypot(spot.x - x, spot.y - y) < Math.hypot(best.x - x, best.y - y)) best = spot
+/**
+ * The line under a panel that did not draw. A request that could not be sent
+ * at all (no model) was never tried, so it says only why; a retry says it is
+ * waiting when it is.
+ */
+export function panelErrorText(panel: Pick<MangaPanel, 'state' | 'attempts' | 'error' | 'retryAt'>, now = Date.now()): string {
+  const reason = panel.error ?? ''
+  if (panel.state === 'failed') return panel.attempts > 0 ? `试了 ${panel.attempts} 次都没成功：${reason}` : reason
+  if (panel.retryAt && Date.parse(panel.retryAt) > now) {
+    return `上次没成功，${Math.ceil((Date.parse(panel.retryAt) - now) / 1000)} 秒后重试：${reason}`
   }
-  return best.value
+  return `上次没成功，正在重试：${reason}`
 }

@@ -99,6 +99,8 @@ export const mangaPanelSchema = z.object({
   jobId: z.string().max(200).optional(),
   /** Failed runs since the last success or manual retry. */
   attempts: z.number().int().min(0),
+  /** A failed run is not retried before this moment (ISO), so a GPU short of memory can free it first. */
+  retryAt: z.string().max(40).optional(),
   error: z.string().max(2000).optional(),
   takes: z.array(mangaTakeSchema).max(30),
   /** Index into `takes` of the approved picture. */
@@ -137,6 +139,11 @@ export const mangaStyleSchema = z.object({
   negative: z.string().max(4000),
   adapters: z.array(mangaAdapterSchema).max(8),
   modelBundleId: z.string().max(200).optional(),
+  /**
+   * 纯黑白: pages are drawn in grayscale, whatever colour the engine put in a
+   * picture (a description alone does not keep it black and white).
+   */
+  monochrome: z.boolean().optional(),
   steps: z.number().int().min(1).max(200),
   cfg: z.number().min(0).max(30),
 })

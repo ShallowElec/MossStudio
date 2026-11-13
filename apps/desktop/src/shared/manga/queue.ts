@@ -12,6 +12,8 @@ import type { MangaChapter, MangaPanel, MangaSeries, PanelState } from './model'
 export const MAX_ATTEMPTS = 3
 /** Panels sent to the engine at once; the engine queues them anyway, this keeps retries close. */
 export const MAX_ACTIVE = 2
+/** Wait before retry N is this times N (15 s, then 30 s): a run that ran out of graphics memory rarely succeeds at once. */
+export const RETRY_BACKOFF_MS = 15_000
 
 export interface PanelAddress {
   chapterId: string
@@ -66,22 +68,33 @@ export function enqueue(series: MangaSeries, chapterId: string, panelIds?: reado
   return mapPanels(series, chapterId, (panel) => {
     const wanted = chosen ? chosen.has(panel.id) : NEEDS_DRAWING.has(panel.state)
     if (!wanted || panel.state === 'running' || !(panel.scene.trim() || panel.promptOverride?.trim())) return panel
-    return { ...panel, state: 'queued', attempts: 0, error: undefined }
+    return { ...panel, state: 'queued', attempts: 0, error: undefined, retryAt: undefined }
   })
 }
 
 /** Take queued panels out of the queue (停止); a running job is not touched here. */
 export function dequeue(series: MangaSeries, chapterId: string): MangaSeries {
   return mapPanels(series, chapterId, (panel) =>
-    panel.state === 'queued' ? { ...panel, state: panel.takes.length ? 'review' : 'draft' } : panel,
+    panel.state === 'queued' ? { ...panel, state: panel.takes.length ? 'review' : 'draft', retryAt: undefined } : panel,
   )
 }
 
-/** The panels to send now, in reading order, keeping at most MAX_ACTIVE running. */
-export function nextToSubmit(chapter: Pick<MangaChapter, 'pages'>, limit = MAX_ACTIVE): MangaPanel[] {
+const waiting = (panel: MangaPanel, now: number): boolean => Boolean(panel.retryAt && Date.parse(panel.retryAt) > now)
+
+/** The panels to send now, in reading order, keeping at most MAX_ACTIVE running; a retry waits for its time. */
+export function nextToSubmit(chapter: Pick<MangaChapter, 'pages'>, limit = MAX_ACTIVE, now = Date.now()): MangaPanel[] {
   const panels = chapterPanels(chapter)
   const running = panels.filter((panel) => panel.state === 'running').length
-  return panels.filter((panel) => panel.state === 'queued').slice(0, Math.max(0, limit - running))
+  return panels.filter((panel) => panel.state === 'queued' && !waiting(panel, now)).slice(0, Math.max(0, limit - running))
+}
+
+/** When the next waiting retry of `series` is due (ms since epoch), or null when none waits. */
+export function nextRetryAt(series: Pick<MangaSeries, 'chapters'>, now = Date.now()): number | null {
+  const due = series.chapters
+    .flatMap((chapter) => chapterPanels(chapter))
+    .filter((panel) => panel.state === 'queued' && waiting(panel, now))
+    .map((panel) => Date.parse(panel.retryAt!))
+  return due.length ? Math.min(...due) : null
 }
 
 /** The last failure stays shown while its retry runs; a success clears it. */
@@ -89,29 +102,37 @@ export function markSubmitted(panel: MangaPanel, jobId: string): MangaPanel {
   return { ...panel, state: 'running', jobId }
 }
 
-function failed(panel: MangaPanel, message: string): MangaPanel {
+function failed(panel: MangaPanel, message: string, now: number): MangaPanel {
   const attempts = panel.attempts + 1
   const rest = { ...panel, jobId: undefined, attempts, error: message }
   // Retrying keeps the panel in the queue; the next submit draws a new seed.
-  if (attempts < MAX_ATTEMPTS) return { ...rest, state: 'queued' }
-  return { ...rest, state: 'failed' }
+  if (attempts < MAX_ATTEMPTS) return { ...rest, state: 'queued', retryAt: new Date(now + RETRY_BACKOFF_MS * attempts).toISOString() }
+  return { ...rest, state: 'failed', retryAt: undefined }
 }
 
 /** Sending the job failed before the engine took it (no model, engine down…). */
-export function markSubmitFailed(panel: MangaPanel, message: string, retry = true): MangaPanel {
-  if (!retry) return { ...panel, jobId: undefined, state: 'failed', error: message }
-  return failed(panel, message)
+export function markSubmitFailed(panel: MangaPanel, message: string, retry = true, now = Date.now()): MangaPanel {
+  if (!retry) return { ...panel, jobId: undefined, state: 'failed', error: message, retryAt: undefined }
+  return failed(panel, message, now)
 }
 
 /** What a job's latest record means for its panel; other jobs leave it unchanged. */
-export function applyJob(panel: MangaPanel, job: Pick<JobRecord, 'id' | 'state' | 'outputs' | 'error'>): MangaPanel {
+export function applyJob(panel: MangaPanel, job: Pick<JobRecord, 'id' | 'state' | 'outputs' | 'error'>, now = Date.now()): MangaPanel {
   if (!panel.jobId || panel.jobId !== job.id) return panel
   if (job.state === 'succeeded') {
     const takes = (job.outputs ?? []).map((output) => ({ ...output, jobId: job.id }))
-    if (!takes.length) return failed(panel, '生成完成了，但没有拿到图片')
-    return { ...panel, state: 'review', jobId: undefined, attempts: 0, error: undefined, takes: [...panel.takes, ...takes].slice(-30) }
+    if (!takes.length) return failed(panel, '生成完成了，但没有拿到图片', now)
+    return {
+      ...panel,
+      state: 'review',
+      jobId: undefined,
+      attempts: 0,
+      error: undefined,
+      retryAt: undefined,
+      takes: [...panel.takes, ...takes].slice(-30),
+    }
   }
-  if (job.state === 'failed') return failed(panel, job.error?.message ?? '生成失败了')
+  if (job.state === 'failed') return failed(panel, job.error?.message ?? '生成失败了', now)
   // Stopped by a person: not retried.
   if (job.state === 'canceled') return { ...panel, jobId: undefined, state: panel.takes.length ? 'review' : 'draft' }
   return panel.state === 'running' ? panel : { ...panel, state: 'running' }
@@ -125,7 +146,14 @@ export function approve(panel: MangaPanel, take: number): MangaPanel {
 /** 重画: back into the queue, with what the reviewer wants changed. */
 export function reject(panel: MangaPanel, note: string): MangaPanel {
   const trimmed = note.trim()
-  return { ...panel, state: 'queued', attempts: 0, error: undefined, ...(trimmed ? { note: trimmed } : { note: undefined }) }
+  return {
+    ...panel,
+    state: 'queued',
+    attempts: 0,
+    error: undefined,
+    retryAt: undefined,
+    ...(trimmed ? { note: trimmed } : { note: undefined }),
+  }
 }
 
 export type ChapterProgress = Record<PanelState, number> & { total: number }
@@ -148,6 +176,7 @@ export function reconcile(
   series: MangaSeries,
   jobs: readonly Pick<JobRecord, 'id' | 'state' | 'outputs' | 'error'>[],
   complete = false,
+  now = Date.now(),
 ): MangaSeries {
   const byId = new Map(jobs.map((job) => [job.id, job]))
   let changed = false
@@ -160,7 +189,7 @@ export function reconcile(
         panels: page.panels.map((panel) => {
           const job = panel.jobId ? byId.get(panel.jobId) : undefined
           if (!job && !(complete && panel.state === 'running')) return panel
-          const updated = job ? applyJob(panel, job) : failed(panel, '找不到这次生成的记录')
+          const updated = job ? applyJob(panel, job, now) : failed(panel, '找不到这次生成的记录', now)
           if (updated !== panel && JSON.stringify(updated) !== JSON.stringify(panel)) {
             touched = true
             return updated

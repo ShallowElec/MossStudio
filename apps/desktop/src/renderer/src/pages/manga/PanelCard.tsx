@@ -1,6 +1,6 @@
 import { Check, MessageSquarePlus, Play, RotateCcw, Square, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
-import { BALLOON_KIND_LABEL } from '@shared/manga/balloons'
+import { BALLOON_KIND_LABEL, BALLOON_SPOTS, defaultBalloonPlaces, nearestSpot } from '@shared/manga/balloons'
 import { BALLOON_KINDS, SHOTS, newId, panelPicture, type MangaPanel, type MangaSeries } from '@shared/manga/model'
 import { SHOT_LABEL, compilePanelPrompt } from '@shared/manga/prompt'
 import { approve, reject } from '@shared/manga/queue'
@@ -10,7 +10,7 @@ import { cloverUrl } from '../../lib/clover'
 import { Notice } from '../../components/common/Notice'
 import { PromptBlock } from '../../components/common/PromptBlock'
 import { Advanced, Button, Card, Field, IconButton, Input, Pill, ProgressBar, Select, Textarea, cn } from '../../components/ui'
-import { BALLOON_SPOTS, PANEL_STATE_LABEL, PANEL_STATE_TONE, nearestSpot } from './logic'
+import { PANEL_STATE_LABEL, PANEL_STATE_TONE, panelErrorText } from './logic'
 
 /**
  * One panel (格): its picture and takes, what it shows, who is in it and what
@@ -57,7 +57,11 @@ export function PanelCard({
         <div className="flex w-40 shrink-0 flex-col gap-1.5">
           <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg bg-well">
             {picture ? (
-              <img src={cloverUrl(picture.path)} alt={`${label}的画面`} className="size-full object-contain" />
+              <img
+                src={cloverUrl(picture.path)}
+                alt={`${label}的画面`}
+                className={cn('size-full object-contain', series.style.monochrome && 'grayscale')}
+              />
             ) : (
               <span className="text-caption text-ink-2">{panel.state === 'running' ? '正在画…' : '还没有画面'}</span>
             )}
@@ -73,7 +77,7 @@ export function PanelCard({
                   onClick={() => setShown(index)}
                   className={cn('size-8 overflow-hidden rounded-md bg-well', index === shownIndex && 'outline-2 outline-accent')}
                 >
-                  <img src={cloverUrl(take.path)} alt="" className="size-full object-cover" />
+                  <img src={cloverUrl(take.path)} alt="" className={cn('size-full object-cover', series.style.monochrome && 'grayscale')} />
                 </button>
               ))}
             </div>
@@ -181,7 +185,7 @@ export function PanelCard({
               <Select
                 aria-label="气泡位置"
                 className="w-20"
-                value={nearestSpot(line.x, line.y)}
+                value={nearestSpot(line.x, line.y).value}
                 onValueChange={(value) => {
                   const spot = BALLOON_SPOTS.find((item) => item.value === value)
                   if (spot) setLine({ x: spot.x, y: spot.y })
@@ -216,7 +220,7 @@ export function PanelCard({
             size="xs"
             tone="ghost"
             onClick={() => {
-              const spot = BALLOON_SPOTS[Math.min(panel.dialogue.length, 2)]!
+              const spot = defaultBalloonPlaces(panel.dialogue.length + 1, series.readingDirection).at(-1)!
               set({ dialogue: [...panel.dialogue, { id: newId('line'), kind: 'speech', text: '', x: spot.x, y: spot.y }] })
             }}
           >
@@ -226,9 +230,7 @@ export function PanelCard({
       </div>
 
       {panel.error && panel.state !== 'review' && panel.state !== 'approved' ? (
-        <Notice tone={panel.state === 'failed' ? 'danger' : 'warn'}>
-          {panel.state === 'failed' ? `试了 ${panel.attempts} 次都没成功：${panel.error}` : `上次没成功，正在重试：${panel.error}`}
-        </Notice>
+        <Notice tone={panel.state === 'failed' ? 'danger' : 'warn'}>{panelErrorText(panel)}</Notice>
       ) : null}
 
       <PanelActions

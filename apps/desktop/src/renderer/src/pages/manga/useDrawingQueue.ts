@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Ipc } from '@shared/channels'
 import type { BackendInfo } from '@shared/backend'
 import type { MangaSeries } from '@shared/manga/model'
-import { applyJob, markSubmitFailed, markSubmitted, nextToSubmit, reconcile, updatePanel } from '@shared/manga/queue'
+import { applyJob, markSubmitFailed, markSubmitted, nextRetryAt, nextToSubmit, reconcile, updatePanel } from '@shared/manga/queue'
 import type { EngineFeatures } from '@shared/types'
 import { call } from '../../lib/api'
 import { electronStudioClient } from '../../lib/studioClient'
@@ -41,9 +41,16 @@ export function useDrawingQueue(options: {
 
   const { series } = options
   useEffect(() => {
-    if (!series || sending.current) return
+    // Until the model library has loaded every panel would fail with 还没有可用的模型; it reruns when it arrives.
+    if (!series || !catalog || sending.current) return
     const pending = series.chapters.flatMap((chapter) => nextToSubmit(chapter).map((panel) => ({ chapter, panel })))
-    if (!pending.length) return
+    if (!pending.length) {
+      // A retry that is still waiting wakes the queue when it is due.
+      const due = nextRetryAt(series)
+      if (due === null) return
+      const timer = window.setTimeout(() => setRound((value) => value + 1), Math.max(0, due - Date.now()) + 50)
+      return () => window.clearTimeout(timer)
+    }
     sending.current = true
     let failures = 0
     const notes = new Set<string>()

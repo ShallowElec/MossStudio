@@ -89,6 +89,10 @@ describe('panelRequest', () => {
     expect(result.notes).toEqual(['当前引擎不支持 LoRA，这一格没有用人物和画风的 LoRA', '当前引擎不支持参考图，这一格没有用人物参考图'])
   })
 
+  it('waits for the model library instead of failing while it is still being read', () => {
+    expect(request({ catalog: null })).toEqual({ ok: false, message: '正在读取模型库…', retry: true })
+  })
+
   it('refuses without retrying when the model or a LoRA is missing, or the panel is empty', () => {
     expect(request({ catalog: catalogFixture() })).toEqual({ ok: false, message: '还没有可用的模型，请先到模型页下载', retry: false })
     expect(request({ catalog: catalog([lora('ink-style')]) })).toEqual({

@@ -14,7 +14,10 @@ describe('compilePanelPrompt', () => {
       '远景，人物很小，交代环境',
       '雨夜的街道，霓虹灯倒映在积水里',
       '阿秋：akiOC，短黑发，琥珀色眼睛，左眉有小疤，深蓝色水手服，红色领结，皱眉，撑伞',
+      // The narration sits top right: the engine is told to keep faces out of there.
+      '构图：右上留出空白放对白，人物的脸不要放在这些位置',
     ])
+    expect(compilePanelPrompt(series, { ...first!, dialogue: [] }).prompt).not.toContain('构图')
   })
 
   it('uses the outfit chosen for this panel over the default one', () => {
@@ -35,6 +38,15 @@ describe('compilePanelPrompt', () => {
       '/fixture/projects/project-manga/assets/aki.png',
       '/fixture/projects/project-manga/assets/aki.png',
     ])
+  })
+
+  it('asks for no colour when the series is 纯黑白, once', () => {
+    const mono = { ...series, style: { ...series.style, negative: '', monochrome: true } }
+    expect(compilePanelPrompt(mono, third!).negative).toBe('彩色，文字，对白框，水印')
+    // The fixture's negative already says 彩色: it is not repeated.
+    expect(compilePanelPrompt({ ...series, style: { ...series.style, monochrome: true } }, third!).negative).toBe(
+      '彩色，文字，对白框，水印',
+    )
   })
 
   it('keeps lettering out of the picture and adds the reviewer note', () => {

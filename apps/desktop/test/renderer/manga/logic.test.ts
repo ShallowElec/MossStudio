@@ -3,7 +3,7 @@ import {
   approveAll,
   changeLayout,
   exportBlockers,
-  nearestSpot,
+  panelErrorText,
   newPage,
   newSeries,
   nextChapterNumber,
@@ -50,9 +50,20 @@ describe('manga page logic', () => {
     expect(exportBlockers({ ...series.chapters[0]!, pages: [] })).toBe('这一话还没有页面')
   })
 
-  it('names the nearest balloon spot', () => {
-    expect(nearestSpot(0.8, 0.16)).toBe('tr')
-    expect(nearestSpot(0.45, 0.55)).toBe('mc')
+  it('explains a panel that did not draw, without counting a request that was never sent', () => {
+    const now = Date.parse('2026-11-12T10:00:00.000Z')
+    expect(panelErrorText({ state: 'failed', attempts: 0, error: '还没有可用的模型，请先到模型页下载' }, now)).toBe(
+      '还没有可用的模型，请先到模型页下载',
+    )
+    expect(panelErrorText({ state: 'failed', attempts: 3, error: '显存不够' }, now)).toBe('试了 3 次都没成功：显存不够')
+    expect(panelErrorText({ state: 'queued', attempts: 1, error: '显存不够', retryAt: '2026-11-12T10:00:14.200Z' }, now)).toBe(
+      '上次没成功，15 秒后重试：显存不够',
+    )
+    expect(panelErrorText({ state: 'running', attempts: 1, error: '显存不够' }, now)).toBe('上次没成功，正在重试：显存不够')
+  })
+
+  it('starts new series in strict black and white', () => {
+    expect(newSeries().style.monochrome).toBe(true)
   })
 
   it('saves with fallbacks for fields emptied while typing', () => {
