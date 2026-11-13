@@ -55,6 +55,7 @@ The Rail (`components/shell/Rail.tsx`) lists `PRIMARY_ROUTES` from `components/s
 | Route | Page | Shown |
 | --- | --- | --- |
 | `/studio` | 创作, `pages/Studio.tsx` → `pages/studio/StudioPage.tsx` | Always; the default |
+| `/manga` | 漫画, `pages/Manga.tsx` → `pages/manga/MangaPage.tsx` ([manga.md](/docs/reference/manga.md)) | Always |
 | `/library` | 作品, `pages/Library.tsx` | Always |
 | `/models` | 模型, `pages/Models.tsx` | Always |
 | `/training` | 训练, `pages/Training.tsx` | When `Settings.trainingEnabled` |
@@ -73,6 +74,7 @@ Old routes redirect (`LEGACY_REDIRECTS`): `/gallery` → `/library`; `/engines`,
 | `components/shell/` | Rail, Titlebar, ActivityPanel, routes |
 | `components/update/` | The update chip and its model |
 | `pages/studio/` | The node board: cards, wires, ports, runs, recipes, assistant |
+| `pages/manga/` | The 漫画 workflow: series, characters, chapters, the drawing queue and page rendering ([manga.md](/docs/reference/manga.md)) |
 | `pages/library/`, `pages/models/`, `pages/settings/`, `pages/setup/`, `pages/training/`, `pages/install/` | One folder per page; `pages/<Name>.tsx` is the page's entry |
 | `pages/Terminal.tsx` | The SSH terminal sheet opened from 远程主机 |
 | `lib/api.ts` | `call(channel, payload)` and `onEvent(channel, cb)` over `window.clover` |
