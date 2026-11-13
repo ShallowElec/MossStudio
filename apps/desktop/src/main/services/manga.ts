@@ -27,7 +27,7 @@ function root(): string {
 }
 
 function seriesFile(id: string): string {
-  if (!PROJECT_ID_PATTERN.test(id) || !id.startsWith('manga-')) throw codedError('E_INPUT', '作品无效，请重新打开')
+  if (!PROJECT_ID_PATTERN.test(id) || !id.startsWith('manga-')) throw codedError('E_INPUT', '漫画无效，请重新打开')
   return join(root(), `${id}.json`)
 }
 
@@ -70,9 +70,9 @@ const projectName = (title: string): string => `漫画 · ${title}`.slice(0, 200
 
 export function saveSeries(input: MangaSeriesSave): MangaSeries {
   const existing = input.id ? readSeries(input.id) : null
-  if (input.id && !existing) throw codedError('E_NOT_FOUND', '这部作品已经删除了')
+  if (input.id && !existing) throw codedError('E_NOT_FOUND', '这部漫画已经删除了')
   const now = new Date().toISOString()
-  const title = input.title.trim() || '未命名作品'
+  const title = input.title.trim() || '未命名漫画'
   const id = existing?.id ?? `manga-${randomUUID().slice(0, 8)}`
   // The backing project is made once; a project deleted from the Studio is made again.
   const project = existing ? getProject(existing.projectId) : null

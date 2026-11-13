@@ -60,6 +60,8 @@ describe('a job ending', () => {
       panel = applyJob(panel, { id: 'job-1', state: 'failed', error: { code: 'E', message: '显存不够' } })
       expect(panel).toMatchObject({ state: 'queued', attempts: attempt, error: '显存不够' })
       panel = markSubmitted(panel, 'job-1')
+      // While the retry runs, the failure it retries is still shown.
+      expect(panel).toMatchObject({ state: 'running', error: '显存不够' })
     }
     panel = applyJob(panel, { id: 'job-1', state: 'failed' })
     expect(panel).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS, error: '生成失败了' })

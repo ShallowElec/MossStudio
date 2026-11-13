@@ -14,6 +14,7 @@ import { Rail } from './components/shell/Rail'
 import { LEGACY_REDIRECTS, routeRoot, visibleRoutes } from './components/shell/routes'
 import { Titlebar } from './components/shell/Titlebar'
 import { LibraryPage } from './pages/Library'
+import { MangaPage } from './pages/Manga'
 import { ModelsPage } from './pages/Models'
 import { SettingsPage } from './pages/Settings'
 import { SetupPage } from './pages/Setup'
@@ -25,6 +26,7 @@ import { TrainingPage } from './pages/Training'
 
 const PAGE_COMPONENTS: Record<string, React.ComponentType> = {
   '/studio': StudioPage,
+  '/manga': MangaPage,
   '/library': LibraryPage,
   '/models': ModelsPage,
   '/training': TrainingPage,

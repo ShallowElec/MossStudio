@@ -84,8 +84,9 @@ export function nextToSubmit(chapter: Pick<MangaChapter, 'pages'>, limit = MAX_A
   return panels.filter((panel) => panel.state === 'queued').slice(0, Math.max(0, limit - running))
 }
 
+/** The last failure stays shown while its retry runs; a success clears it. */
 export function markSubmitted(panel: MangaPanel, jobId: string): MangaPanel {
-  return { ...panel, state: 'running', jobId, error: undefined }
+  return { ...panel, state: 'running', jobId }
 }
 
 function failed(panel: MangaPanel, message: string): MangaPanel {

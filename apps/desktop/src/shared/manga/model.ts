@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 /**
- * The 漫画 workflow's document: one series (作品) with its characters (人物卡),
+ * The 漫画 workflow's document: one series with its characters (人物卡),
  * chapters (章节), pages, panels (格) and story memory (剧情记忆). Main stores
  * it as JSON and validates it with these schemas; the renderer edits it. The
  * series' pictures (reference images) live in a backing Studio project's

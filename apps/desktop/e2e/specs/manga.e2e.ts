@@ -1,0 +1,224 @@
+/**
+ * 漫画: a series from nothing to an exported chapter. The language model's
+ * storyboard and memory, the drawing queue with its retry, review (通过,
+ * 重画 with a note), export, and character reference pictures.
+ */
+import { describe, expect, it } from 'vitest'
+import type { Page } from 'playwright-core'
+import { useApp } from '../support/app'
+
+const JOBS = 'http:POST /api/engine-jobs'
+
+const STORYBOARD = JSON.stringify({
+  pages: [
+    {
+      layout: 'two-rows',
+      panels: [
+        {
+          scene: '旧港口，雾很浓',
+          shot: 'wide',
+          cast: [{ name: '阿秋', expression: '警惕' }],
+          dialogue: [{ kind: 'narration', text: '午夜，旧港口。' }],
+        },
+        { scene: '阿秋回头', shot: 'close', cast: [{ name: '阿秋' }], dialogue: [{ speaker: '阿秋', kind: 'speech', text: '谁在那里？' }] },
+      ],
+    },
+  ],
+})
+
+const MEMORY = JSON.stringify({ summary: '阿秋在旧港口察觉有人跟踪。', facts: ['旧港口有人跟踪阿秋'] })
+
+describe('manga', () => {
+  const app = useApp()
+
+  const panels = (page: Page) => page.locator('[data-manga-panel]')
+  const panel = (page: Page, id: string) => page.locator(`[data-manga-panel="${id}"]`)
+
+  async function openSeries(seed: () => void): Promise<Page> {
+    const page = await app.open({ scenario: 'ready', route: '/manga', theme: 'light', defer: true })
+    await page.evaluate(seed)
+    await app.start()
+    return page
+  }
+
+  it('creates a series, writes a character and storyboards a chapter with the language model', async () => {
+    const page = await openSeries(() => {
+      localStorage.removeItem('mossstudio.manga.open')
+      const mock = window.__mock
+      mock.state.aiProviders = [
+        {
+          id: 'p1',
+          name: 'DeepSeek',
+          kind: 'openai',
+          baseUrl: 'https://api.example',
+          model: 'deepseek-chat',
+          temperature: 0.7,
+          hasKey: true,
+        },
+      ]
+    })
+    await page.evaluate(
+      (answers) => {
+        window.__mock.state.aiCompletions = answers
+      },
+      [STORYBOARD, MEMORY],
+    )
+    await page.getByRole('heading', { name: '漫画' }).waitFor()
+    await page.getByRole('button', { name: '新建漫画' }).click()
+    await page.getByRole('heading', { name: '未命名漫画' }).waitFor()
+    // A new series gets its own project for pictures.
+    await expect.poll(() => page.evaluate(() => window.__mock.state.projects.map((project) => project.name))).toContain('漫画 · 未命名漫画')
+
+    await page.getByRole('tab', { name: /人物/ }).click()
+    await page.getByRole('button', { name: '添加人物' }).click()
+    await page.getByLabel('名字').fill('阿秋')
+    await page.getByLabel('外貌').fill('短黑发，琥珀色眼睛')
+
+    await page.getByRole('tab', { name: /章节/ }).click()
+    await page.getByLabel('大纲', { exact: true }).fill('阿秋深夜去旧港口调查，察觉有人跟踪。')
+    await page.getByRole('button', { name: '生成分镜' }).click()
+    await expect.poll(() => panels(page).count()).toBe(2)
+
+    const [request] = await app.calls<{ system: string; prompt: string }>('ai:complete')
+    expect(request!.system).toContain('只输出一个 JSON 对象')
+    expect(request!.prompt).toContain('- 阿秋')
+    expect(request!.prompt).toContain('阿秋深夜去旧港口调查')
+    expect(await panels(page).first().getByLabel('画面描述').inputValue()).toBe('旧港口，雾很浓')
+    expect(await panels(page).nth(1).getByLabel('台词').inputValue()).toBe('谁在那里？')
+    expect(await page.getByRole('img', { name: '第 1 页预览' }).isVisible()).toBe(true)
+
+    // The storyboard is saved with the character mapped by name.
+    await expect
+      .poll(() =>
+        app
+          .calls<{
+            characters: Array<{ id: string; name: string }>
+            chapters: Array<{ pages: Array<{ panels: Array<{ cast: Array<{ characterId: string }> }> }> }>
+          }>('manga:save')
+          .then((calls) => {
+            const last = calls.at(-1)
+            const aki = last?.characters.find((item) => item.name === '阿秋')
+            return Boolean(aki && last?.chapters[0]?.pages[0]?.panels[0]?.cast[0]?.characterId === aki.id)
+          }),
+      )
+      .toBe(true)
+
+    // 写入剧情记忆: the summary and the new fact show under 剧情记忆.
+    await page.getByRole('button', { name: '写入剧情记忆' }).click()
+    await page.getByText('已记下这一话，新增 1 条设定').waitFor()
+    await page.getByRole('tab', { name: '剧情记忆' }).click()
+    expect(await page.getByRole('textbox', { name: '设定 1' }).inputValue()).toBe('旧港口有人跟踪阿秋')
+    expect(await page.getByLabel('第 1 话').inputValue()).toBe('阿秋在旧港口察觉有人跟踪。')
+  })
+
+  it('draws a chapter two panels at a time, retries a failure, and exports after review', async () => {
+    const page = await openSeries(() => {
+      const { mangaSeriesFixture } = window.__mock.fixtures
+      const lora = (id: string, name: string) => ({
+        id,
+        name,
+        provider: 'local' as const,
+        repo: '',
+        revision: '',
+        kind: 'lora' as const,
+        license: '',
+        files: [],
+        sizeBytes: 1,
+        tags: [],
+        installed: true,
+        installedBytes: 1,
+      })
+      window.__mock.state.catalog = { ...window.__mock.state.catalog, adapters: [lora('ink-style', '墨线'), lora('aki-lora', '阿秋')] }
+      window.__mock.state.manga = [mangaSeriesFixture()]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    await page.getByRole('heading', { name: '雨夜侦探' }).waitFor()
+    // Not every panel is approved yet: nothing to export.
+    expect(await page.getByRole('button', { name: '导出这一话' }).isDisabled()).toBe(true)
+
+    await page.getByRole('button', { name: '生成全部' }).click()
+    await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(2)
+    const [first] = await app.calls<Record<string, unknown>>(JOBS)
+    expect(first).toMatchObject({
+      projectId: 'project-manga',
+      canvasId: 'panel-1',
+      adapters: [
+        { id: 'ink-style', strength: 1 },
+        { id: 'aki-lora', strength: 0.8 },
+      ],
+      references: { paths: ['/fixture/projects/project-manga/assets/aki.png'] },
+    })
+    expect(String(first!['prompt'])).toContain('阿秋：akiOC，短黑发')
+    await expect.poll(() => panel(page, 'panel-3').getAttribute('data-state')).toBe('queued')
+
+    await page.evaluate(() => window.__mock.finishJob('job-e2e-1'))
+    await expect.poll(() => panel(page, 'panel-1').getAttribute('data-state')).toBe('review')
+    // A slot came free: the third panel goes.
+    await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(3)
+
+    // A failed run goes back in the queue and is drawn again.
+    await page.evaluate(() => window.__mock.finishJob('job-e2e-2', { fail: { code: 'E_GPU', message: '显存不够' } }))
+    await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(4)
+    await panel(page, 'panel-2').getByText('上次没成功，正在重试：显存不够').waitFor()
+    expect((await app.calls<{ canvasId: string }>(JOBS)).at(-1)!.canvasId).toBe('panel-2')
+
+    await page.evaluate(() => {
+      window.__mock.finishJob('job-e2e-3')
+      window.__mock.finishJob('job-e2e-4')
+    })
+    await expect.poll(() => page.locator('[data-manga-panel][data-state="review"]').count()).toBe(3)
+
+    // 重画 with a note: the next run is told what to change.
+    await panel(page, 'panel-3')
+      .getByLabel(/要改什么/)
+      .fill('眼神更凶一点')
+    await panel(page, 'panel-3').getByRole('button', { name: '重画' }).click()
+    await expect.poll(() => app.calls(JOBS).then((calls) => calls.length)).toBe(5)
+    expect(String((await app.calls<{ prompt: string }>(JOBS)).at(-1)!.prompt)).toContain('修改要求：眼神更凶一点')
+    await page.evaluate(() => window.__mock.finishJob('job-e2e-5'))
+    await expect.poll(() => panel(page, 'panel-3').getAttribute('data-state')).toBe('review')
+    // Two takes now: either can be shown and approved.
+    expect(await panel(page, 'panel-3').getByRole('button', { name: '第 1 次结果' }).isVisible()).toBe(true)
+
+    await panel(page, 'panel-1').getByRole('button', { name: '通过' }).click()
+    await expect.poll(() => panel(page, 'panel-1').getAttribute('data-state')).toBe('approved')
+    await page.getByRole('button', { name: '全部通过' }).click()
+    await expect.poll(() => page.locator('[data-manga-panel][data-state="approved"]').count()).toBe(3)
+
+    await page.getByRole('button', { name: '导出这一话' }).click()
+    await expect
+      .poll(() => app.calls<{ title: string; chapterNumber: number; pages: unknown[] }>('manga:export').then((calls) => calls.length))
+      .toBe(1)
+    const [exported] = await app.calls<{ title: string; chapterNumber: number; pages: unknown[] }>('manga:export')
+    expect(exported).toMatchObject({ title: '雨夜侦探', chapterNumber: 1 })
+    expect(exported!.pages).toHaveLength(1)
+    await page.getByText('已导出 1 页到 /fixture/export/雨夜侦探').waitFor()
+  })
+
+  it('adds reference pictures and outfits to a character card', async () => {
+    const page = await openSeries(() => {
+      const { mangaSeriesFixture } = window.__mock.fixtures
+      window.__mock.state.manga = [mangaSeriesFixture()]
+      window.__mock.state.pickedImages = ['/home/user/ren-front.png']
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    await page.getByRole('tab', { name: /人物/ }).click()
+    await page.getByRole('button', { name: /莲/ }).click()
+    const card = page.getByRole('region', { name: '人物卡：莲' })
+    await card.getByRole('button', { name: '添加参考图' }).click()
+    await card.getByRole('img', { name: '参考图 1' }).waitFor()
+    expect(await app.calls('studio:import-image')).toEqual([{ projectId: 'project-manga', path: '/home/user/ren-front.png' }])
+
+    await card.getByRole('button', { name: '添加服装' }).click()
+    await card.getByLabel('样子').fill('白大褂')
+    // The first outfit becomes the default.
+    expect(await card.getByRole('switch', { name: /设为默认/ }).getAttribute('aria-checked')).toBe('true')
+    await expect
+      .poll(() =>
+        app
+          .calls<{ characters: Array<{ id: string; references: unknown[]; outfits: Array<{ prompt: string }> }> }>('manga:save')
+          .then((calls) => calls.at(-1)?.characters.find((item) => item.id === 'char-ren')),
+      )
+      .toMatchObject({ references: [{ path: '/fixture/projects/project-manga/assets/ren-front.png' }], outfits: [{ prompt: '白大褂' }] })
+  })
+})

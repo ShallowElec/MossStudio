@@ -74,6 +74,22 @@ async function seedStudio(page: Page): Promise<void> {
   })
 }
 
+/** A series with its first chapter storyboarded, one panel drawn and waiting for review, reopened where it was left. */
+async function seedManga(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const series = window.__mock.fixtures.mangaSeriesFixture()
+    const first = series.chapters[0]!.pages[0]!.panels[0]!
+    first.state = 'review'
+    first.takes = [{ path: '/fixture/outputs/run-0.png', width: 1024, height: 768, seed: 4, jobId: 'job-done' }]
+    window.__mock.state.manga = [series]
+    localStorage.setItem('mossstudio.manga.open', series.id)
+  })
+}
+
+async function clearManga(page: Page): Promise<void> {
+  await page.evaluate(() => localStorage.removeItem('mossstudio.manga.open'))
+}
+
 async function seedJobs(page: Page): Promise<void> {
   await page.evaluate(() => {
     const { jobFixture, jobLogFixture } = window.__mock.fixtures
@@ -144,6 +160,44 @@ const STOPS: Stop[] = [
     seed: seedStudio,
     prepare: async (page) => {
       await page.locator('[data-project-switcher]').click()
+    },
+  },
+  { page: 'manga', state: 'empty', open: { scenario: 'ready', route: '/manga' }, seed: clearManga },
+  { page: 'manga', state: 'chapter', open: { scenario: 'ready', route: '/manga' }, seed: seedManga },
+  {
+    page: 'manga',
+    state: 'panels',
+    open: { scenario: 'ready', route: '/manga' },
+    seed: seedManga,
+    prepare: async (page) => {
+      await page.locator('[data-manga-panel="panel-1"]').scrollIntoViewIfNeeded()
+    },
+  },
+  {
+    page: 'manga',
+    state: 'characters',
+    open: { scenario: 'ready', route: '/manga' },
+    seed: seedManga,
+    prepare: async (page) => {
+      await page.getByRole('tab', { name: /人物/ }).click()
+    },
+  },
+  {
+    page: 'manga',
+    state: 'memory',
+    open: { scenario: 'ready', route: '/manga' },
+    seed: seedManga,
+    prepare: async (page) => {
+      await page.getByRole('tab', { name: '剧情记忆' }).click()
+    },
+  },
+  {
+    page: 'manga',
+    state: 'settings',
+    open: { scenario: 'ready', route: '/manga' },
+    seed: seedManga,
+    prepare: async (page) => {
+      await page.getByRole('tab', { name: '设定' }).click()
     },
   },
   { page: 'library', state: 'list', open: { scenario: 'ready', route: '/library' } },

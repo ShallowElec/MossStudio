@@ -1,4 +1,4 @@
-import { Box, GraduationCap, LayoutGrid, PencilLine, type LucideIcon } from 'lucide-react'
+import { BookOpen, Box, GraduationCap, LayoutGrid, PencilLine, type LucideIcon } from 'lucide-react'
 import type { Settings } from '@shared/types'
 
 export interface AppRoute {
@@ -13,6 +13,7 @@ export interface AppRoute {
 /** Primary destinations, in the order people use them. */
 export const PRIMARY_ROUTES: AppRoute[] = [
   { to: '/studio', label: '创作', description: '描述画面、布置区域并生成', icon: PencilLine },
+  { to: '/manga', label: '漫画', description: '连载、人物卡、分镜、出图和排版', icon: BookOpen },
   { to: '/library', label: '作品', description: '浏览和复用生成过的图片', icon: LayoutGrid },
   { to: '/models', label: '模型', description: '下载和管理模型', icon: Box },
   { to: '/training', label: '训练', description: '训练自己的 LoRA', icon: GraduationCap, feature: 'trainingEnabled' },

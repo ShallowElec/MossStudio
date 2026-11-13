@@ -4,6 +4,7 @@
  * A scenario is plain data: handlers in ./index.ts read and write this state, so
  * a test changes what the "main process" knows by editing `backend.state`.
  */
+import type { MangaSeries } from '@shared/manga/model'
 import type { AiConversationInfo, AiProviderInfo } from '@shared/ai'
 import type { GbcParseResult, GbcStatus } from '@shared/gbc'
 import type { UpdaterState } from '@shared/update'
@@ -85,6 +86,12 @@ export interface MockBackendState {
   hosts: ManagedHost[]
   gallery: GalleryItem[]
   projects: ProjectDocument[]
+  /** 漫画 series (manga:*); a new one also gets a backing project in `projects`, as main does. */
+  manga: MangaSeries[]
+  /** Answers ai:complete gives, in order (storyboard, memory); empty = the request fails. */
+  aiCompletions: string[]
+  /** What 选择图片 (dialog:pick-images) returns. */
+  pickedImages: string[]
   aiProviders: AiProviderInfo[]
   conversations: AiConversationInfo[]
   /** The folder 「使用本地文件夹」 picks (models:import-folder); null = the dialog is canceled. */
@@ -169,6 +176,9 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
       galleryItemFixture(2),
     ],
     projects: [],
+    manga: [],
+    aiCompletions: [],
+    pickedImages: [],
     aiProviders: [],
     conversations: [],
     gbc: { status: gbcStatusFixture(false), versions: [], parse: gbcParseFixture() },

@@ -40,7 +40,7 @@ describe('manga series storage', () => {
     deleteSeries(created.id)
     const fresh = saveSeries(input())
     expect(fresh.projectId).not.toBe(created.projectId)
-    expect(() => saveSeries({ ...input(), id: created.id })).toThrow('这部作品已经删除了')
+    expect(() => saveSeries({ ...input(), id: created.id })).toThrow('这部漫画已经删除了')
   })
 
   it('removes the series and its pictures together', () => {
@@ -57,7 +57,7 @@ describe('manga series storage', () => {
     writeFileSync(join(dataRoot(), 'manga', 'notes.txt'), 'x')
     expect(listSeries()).toEqual([])
     expect(getSeries('../projects')).toBeNull()
-    expect(() => deleteSeries('project-1')).toThrow('作品无效，请重新打开')
+    expect(() => deleteSeries('project-1')).toThrow('漫画无效，请重新打开')
   })
 })
 

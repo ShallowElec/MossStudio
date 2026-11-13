@@ -834,3 +834,6 @@ export function controlAdapterFixture(patch: Partial<ControlAdapterEntry> = {}):
 
 /** Machines for the engine chooser (./machines.ts), here so E2E specs reach them through `__mock.fixtures`. */
 export { machineFixture, inventoryDevicesFor } from './machines'
+
+/** 漫画 fixtures, reachable from E2E specs as window.__mock.fixtures. */
+export * from './manga'
