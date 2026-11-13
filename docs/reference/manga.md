@@ -1,6 +1,6 @@
 ---
 status: current
-last-verified: 2026-11-13 (afff0ea)
+last-verified: 2026-11-12 (ba93dd0)
 code: apps/desktop/src/shared/manga/, apps/desktop/src/main/services/manga.ts, apps/desktop/src/renderer/src/pages/manga/, apps/desktop/src/main/services/ai.ts
 ---
 
