@@ -14,10 +14,12 @@ describe('compilePanelPrompt', () => {
       '远景，人物很小，交代环境',
       '雨夜的街道，霓虹灯倒映在积水里',
       '阿秋：akiOC，短黑发，琥珀色眼睛，左眉有小疤，深蓝色水手服，红色领结，皱眉，撑伞',
-      // The narration sits top right: the engine is told to keep faces out of there.
-      '构图：右上留出空白放对白，人物的脸不要放在这些位置',
     ])
-    expect(compilePanelPrompt(series, { ...first!, dialogue: [] }).prompt).not.toContain('构图')
+    // The panel has a narration line, yet the description says nothing about balloons: a line asking for room
+    // for them made the model draw gibberish balloons of its own (docs/records/2026-11-13-manga-consistency.md).
+    expect(first!.dialogue.length).toBeGreaterThan(0)
+    expect(compiled.prompt).not.toMatch(/对白|构图/)
+    expect(compiled.negative).toContain('对白框')
   })
 
   it('uses the outfit chosen for this panel over the default one', () => {

@@ -1,4 +1,3 @@
-import { balloonRoomHint } from './balloons'
 import type { MangaAdapter, MangaCharacter, MangaPanel, MangaSeries, Shot } from './model'
 
 /**
@@ -86,7 +85,6 @@ export function compilePanelPrompt(series: Pick<MangaSeries, 'style' | 'characte
           SHOT_PROMPT[panel.shot],
           panel.scene,
           ...cast.map(({ character, item }) => castLine(character, item)),
-          balloonRoomHint(panel.dialogue),
           panel.note ? `修改要求：${panel.note}` : undefined,
         ],
         '\n',
@@ -94,7 +92,8 @@ export function compilePanelPrompt(series: Pick<MangaSeries, 'style' | 'characte
 
   return {
     prompt,
-    // Lettering is added afterwards, so the picture itself should carry none.
+    // Lettering is added afterwards, so the picture itself should carry none. The description never mentions
+    // balloons, not even where to leave room for them: any word about them makes the model draw its own.
     negative: joinParts([
       series.style.negative,
       series.style.monochrome && !series.style.negative.includes('彩色') ? '彩色' : undefined,

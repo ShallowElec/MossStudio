@@ -68,16 +68,6 @@ export function defaultBalloonPlaces(count: number, direction: 'rtl' | 'ltr'): A
   return Array.from({ length: Math.max(0, count) }, (_, index) => ({ ...order[index % order.length]! }))
 }
 
-/**
- * A line for the picture's description: where the balloons go, so the engine
- * leaves room there instead of putting a face under them. Empty without lines.
- */
-export function balloonRoomHint(balloons: ReadonlyArray<Pick<MangaBalloon, 'x' | 'y' | 'text'>>): string {
-  const spots = [...new Set(balloons.filter((line) => line.text.trim()).map((line) => nearestSpot(line.x, line.y).label))]
-  if (!spots.length) return ''
-  return `构图：${spots.join('、')}留出空白放对白，人物的脸不要放在这些位置`
-}
-
 export type Measure = (text: string) => number
 
 /**

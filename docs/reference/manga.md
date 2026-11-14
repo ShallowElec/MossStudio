@@ -59,7 +59,7 @@ A panel's `state` is the queue (`shared/manga/queue.ts`):
 
 `panelRequest` (`pages/manga/submit.ts`) builds the same request the Studio posts to `/api/engine-jobs` (see [project-and-backend.md](/docs/reference/project-and-backend.md)). `projectId` is the series' project and `canvasId` is the panel id. The parts come from `compilePanelPrompt` (`shared/manga/prompt.ts`):
 
-- the description is the 画风, the shot, the scene, one line per character (trigger words, appearance, outfit, expression, pose), where the balloons go (`balloonRoomHint`: 构图：右上留出空白放对白…) and the reviewer's note;
+- the description is the 画风, the shot, the scene, one line per character (trigger words, appearance, outfit, expression, pose) and the reviewer's note. It never mentions balloons, not even to leave room for them: such a line made the model draw gibberish balloons of its own ([consistency test](/docs/records/2026-11-13-manga-consistency.md));
 - 文字，对白框，水印 is added to the negative description, so lettering is never drawn into the picture, and 彩色 when the series is `monochrome`;
 - the LoRA list is the style's LoRA plus each character's, without repeats;
 - the first reference picture of each character goes into the prompt as `visionReferences` (MossInfer's `vision_references`: the text encoder's vision tower turns it into prompt tokens). A head-and-shoulders picture carries the character; a whole scene gets copied, so the card asks for portraits.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { balloonRoomHint, defaultBalloonPlaces, layoutBalloon, nearestSpot, shoutOutline, wrapText } from '@shared/manga/balloons'
+import { defaultBalloonPlaces, layoutBalloon, nearestSpot, shoutOutline, wrapText } from '@shared/manga/balloons'
 
 /** Every character is 10 px wide. */
 const measure = (text: string): number => text.length * 10
@@ -42,18 +42,9 @@ describe('balloon placement', () => {
     expect(middle.cx).toBeCloseTo(600)
   })
 
-  it('names spots and tells the engine where the balloons go', () => {
+  it('names spots', () => {
     expect(nearestSpot(0.8, 0.16).value).toBe('tr')
     expect(nearestSpot(0.45, 0.55).label).toBe('中间')
-    expect(
-      balloonRoomHint([
-        { x: 1, y: 0, text: '一' },
-        { x: 0.9, y: 0.1, text: '二' },
-        { x: 0, y: 1, text: '三' },
-        { x: 0.5, y: 0.5, text: ' ' },
-      ]),
-    ).toBe('构图：右上、左下留出空白放对白，人物的脸不要放在这些位置')
-    expect(balloonRoomHint([])).toBe('')
   })
 
   it('keeps a balloon inside its panel', () => {
