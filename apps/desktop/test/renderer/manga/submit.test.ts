@@ -69,7 +69,8 @@ describe('panelRequest', () => {
         { id: 'ink-style', strength: 1 },
         { id: 'aki-lora', strength: 0.8 },
       ],
-      visionReferences: { paths: ['/fixture/projects/project-manga/assets/aki.png'] },
+      // A wide shot: the portrait goes in small, so it does not turn the panel into a close-up.
+      visionReferences: { paths: ['/fixture/projects/project-manga/assets/aki.png'], maxPixels: 25_000 },
       seed: 1073741823,
       mode: 'runner',
     })

@@ -172,7 +172,7 @@ function CharacterEditor({
 
       <Section
         title="参考图"
-        description="第一张会放进描述里交给引擎，让脸、发型和服装每一格都更一致（需要支持人物参考图的引擎）。用只有人物头肩的图效果最好；整张场景图会让画面照搬它的场景。"
+        description="第一张会放进描述里交给引擎，让脸和发型每一格都更一致（需要支持人物参考图的引擎）。最好用正面、纯白背景的头肩像：图里的姿势、天气和背景也会被带进画面，所以不要从剧情画面里截。"
       >
         <div className="flex flex-wrap gap-2">
           {character.references.map((image, index) => (

@@ -83,7 +83,7 @@ export function panelRequest(input: {
       prompt: compiled.prompt,
       negativePrompt: compiled.negative,
       adapters,
-      ...(references.length ? { visionReferences: { paths: references } } : {}),
+      ...(references.length ? { visionReferences: { paths: references, maxPixels: compiled.referencePixels } } : {}),
       width: size.width,
       height: size.height,
       steps,

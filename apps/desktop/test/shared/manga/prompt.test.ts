@@ -22,6 +22,13 @@ describe('compilePanelPrompt', () => {
     expect(compiled.negative).toContain('对白框')
   })
 
+  it('sizes the reference pictures by the shot: small for wide shots, full only for extreme close-ups', () => {
+    const sizes = (['wide', 'full', 'medium', 'close', 'extreme'] as const).map(
+      (shot) => compilePanelPrompt(series, { ...first!, shot }).referencePixels,
+    )
+    expect(sizes).toEqual([25_000, 25_000, 50_000, 50_000, 100_000])
+  })
+
   it('uses the outfit chosen for this panel over the default one', () => {
     const coat = { ...first!, cast: [{ characterId: 'char-aki', outfitId: 'outfit-coat', expression: '', pose: '' }] }
     expect(compilePanelPrompt(series, coat).prompt).toContain('卡其色长风衣')

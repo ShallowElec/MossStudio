@@ -296,6 +296,8 @@ describe('manga', () => {
     await page.getByRole('tab', { name: /人物/ }).click()
     await page.getByRole('button', { name: /莲/ }).click()
     const card = page.getByRole('region', { name: '人物卡：莲' })
+    // The card says which picture works: whatever else a picture shows ends up in every panel.
+    await card.getByText(/正面、纯白背景的头肩像/).waitFor()
     await card.getByRole('button', { name: '添加参考图' }).click()
     await card.getByRole('img', { name: '参考图 1' }).waitFor()
     expect(await app.calls('studio:import-image')).toEqual([{ projectId: 'project-manga', path: '/home/user/ren-front.png' }])

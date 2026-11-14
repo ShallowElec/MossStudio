@@ -1,6 +1,6 @@
 ---
 status: current
-last-verified: 2026-11-12 (ba93dd0)
+last-verified: 2026-11-14 (ae2672c)
 code: apps/desktop/src/shared/manga/, apps/desktop/src/main/services/manga.ts, apps/desktop/src/renderer/src/pages/manga/, apps/desktop/src/main/services/ai.ts
 ---
 
@@ -38,7 +38,7 @@ IPC channels (`shared/channels.ts`): `manga:list`, `manga:get`, `manga:save`, `m
 - a layout whose panel count does not match is replaced, and a page with too many panels is split;
 - unknown characters are dropped, and balloons are placed from the reading side (`defaultBalloonPlaces`).
 
-Each change is reported as a warning (分镜有几处自动调整了) instead of failing.
+Text longer than the document allows is cut, and extra characters or lines are dropped. Each change is reported as a warning (分镜有几处自动调整了) instead of failing. An answer that still would not save is refused, so a storyboard never breaks later saves.
 
 `storyMemory` (`shared/manga/memory.ts`) is the story so far: earlier chapters' summaries in order, then all facts, within `MEMORY_BUDGET` characters. The oldest summaries are dropped first. 写入剧情记忆 sends `memoryRequest` and stores the answer. The chapter gets a new `summary`. `mergeFacts` replaces the facts that chapter set before and keeps the ones the author wrote. The 剧情记忆 tab shows the result and what the next chapter will be given.
 
@@ -62,15 +62,15 @@ A panel's `state` is the queue (`shared/manga/queue.ts`):
 - the description is the 画风, the shot, the scene, one line per character (trigger words, appearance, outfit, expression, pose) and the reviewer's note. It never mentions balloons, not even to leave room for them: such a line made the model draw gibberish balloons of its own ([consistency test](/docs/records/2026-11-13-manga-consistency.md));
 - 文字，对白框，水印 is added to the negative description, so lettering is never drawn into the picture, and 彩色 when the series is `monochrome`;
 - the LoRA list is the style's LoRA plus each character's, without repeats;
-- the first reference picture of each character goes into the prompt as `visionReferences` (MossInfer's `vision_references`: the text encoder's vision tower turns it into prompt tokens). A head-and-shoulders picture carries the character; a whole scene gets copied, so the card asks for portraits.
+- the first reference picture of each character goes into the prompt as `visionReferences` (MossInfer's `vision_references`: the text encoder's vision tower turns it into prompt tokens). Its size (`maxPixels`, MossInfer's `max_pixels`) follows the shot (`REFERENCE_PIXELS`): 25000 for wide and full shots, 50000 for medium and close shots, 100000 for extreme close-ups. A picture carries its pose, weather, background and framing along with the face, and fewer tokens leave more of that to the description. The card asks for a front-facing head-and-shoulders portrait on a plain white background, not a crop from a panel. `weight` is not sent: the engine fades the picture toward gray with it, which barely changes a black and white portrait.
 
 LoRA and pictures the engine does not support (`engine:features`; pictures need `visionReferences`, which MossInfer declares as `vision_references` in `hello`) are left out with a notice. The engine's other `references` belong to an edit adapter and do nothing without one, so 漫画 never sends them. A missing model or LoRA, or an empty scene, fails the panel without a retry. Every attempt draws a new seed.
 
 ## 5. Lettering and export
 
-`pages/manga/render.ts` draws a page on a canvas. It fills white paper, crops each panel's chosen picture to its frame (in grayscale when the series is `monochrome`, since a description alone does not keep the engine from using colour), strokes the frame, and draws the balloons on top. `layoutBalloon` and `wrapText` (`shared/manga/balloons.ts`) size balloons, with text at most 30% of the panel wide, and break their lines. 对白 balloons are ellipses, 心声 dashed ellipses, 喊叫 spiked and 旁白 boxes. A balloon is placed by one of nine spots (`BALLOON_SPOTS` in `shared/manga/balloons.ts`). A balloon's `x` and `y` are anchors: 0 and 1 put it against an edge, with a margin, so a corner balloon stays in its corner. New balloons fill the corners in reading order (`defaultBalloonPlaces`). Nothing detects faces: the description asks the engine to keep them out of the balloons' spots, and a picture already drawn may still need another spot chosen by hand. The page preview and the exported file are the same drawing.
+`pages/manga/render.ts` draws a page on a canvas. It fills white paper, crops each panel's chosen picture to its frame (in grayscale when the series is `monochrome`, since a description alone does not keep the engine from using colour), strokes the frame, and draws the balloons on top. `layoutBalloon` and `wrapText` (`shared/manga/balloons.ts`) size balloons, with text at most 30% of the panel wide, and break their lines. 对白 balloons are ellipses, 心声 dashed ellipses, 喊叫 spiked and 旁白 boxes. A balloon is placed by one of nine spots (`BALLOON_SPOTS` in `shared/manga/balloons.ts`). A balloon's `x` and `y` are anchors: 0 and 1 put it against an edge, with a margin, so a corner balloon stays in its corner. New balloons fill the corners in reading order (`defaultBalloonPlaces`). Nothing detects faces, and the description does not mention balloons (section 4), so a balloon over a face needs another spot chosen by hand. The page preview and the exported file are the same drawing.
 
-导出这一话 is enabled once every panel of the chapter is approved (`exportBlockers`). It renders each page to PNG and sends the pages to `manga:export`. Main asks for a folder and writes `<folder>/<title>/第<N>话-01.png` and onwards (`writeChapterPages`). It refuses anything that is not a PNG.
+导出这一话 is enabled once every panel of the chapter is approved (`exportBlockers`). It renders each page to PNG and sends the pages to `manga:export`. A chosen picture that can no longer be read stops the export with the page and panel named (`missingPictures`), instead of a blank frame. Main asks for a folder and writes `<folder>/<title>/第<N>话-01.png` and onwards (`writeChapterPages`). It refuses anything that is not a PNG.
 
 ## 6. Tests
 

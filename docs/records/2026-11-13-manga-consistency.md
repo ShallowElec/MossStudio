@@ -21,8 +21,21 @@ All 12 panels were drawn in about 15.5 minutes (about 78 s each) with no failure
 | --- | --- | --- | --- |
 | 1 | Most panels drew gibberish balloons, with or without the portrait | Same seed, no portrait, the description line 构图：右上留出空白放对白，人物的脸不要放在这些位置 removed: no balloon in any of three panels | Removed the line (`balloonRoomHint`); the description never mentions balloons. Negative description unchanged (文字，对白框，水印). Test: `test/shared/manga/prompt.test.ts` |
 | 2 | With the portrait, 阿秋 squatted in most panels, and the sunny day and the rooftop became rainy nights | The portrait was cropped from a panel of her squatting in the rain. Same seeds without it: the poses and scenes followed the descriptions. Weight 0.5 changed nothing visible | A portrait carries its pose and scene with the face |
-| 3 | With a clean portrait (front, head and shoulders, plain white background, weight 1.0) there was no squatting and no rain, and the face matched best, but wide and full shots became head-and-shoulders close-ups, with the described figure repeated small in the background | Same three panels and seeds | Open: the portrait also carries its framing. Next to try: a lower weight or no portrait for wide and full shots |
+| 3 | With a clean portrait (front, head and shoulders, plain white background, weight 1.0) there was no squatting and no rain, and the face matched best, but wide and full shots became head-and-shoulders close-ups, with the described figure repeated small in the background | Same three panels and seeds | The portrait also carries its framing. See below |
 | 4 | Up to four panels ran at once, while the reference says two | `nextToSubmit` limited each chapter, and the queue sent for every chapter | The limit counts the whole series. Test: `test/shared/manga/queue.test.ts` |
+
+## Sizing the portrait by shot
+
+Same seeds, the clean portrait, no balloon line. Each picture goes into the prompt as about one token per 32 × 32 pixels.
+
+| Variation | Wide and full shots (harbour, street, rooftop, running) | Medium and close shots (footprints, office, phone, café, crowd) |
+| --- | --- | --- |
+| `weight` 0.3 or 0.6 (100000 px) | No visible change from 1.0: close-ups instead of wide shots. The engine fades the picture toward gray, which does little to a black and white line portrait | not tried |
+| 100000 px (engine default) | Close-ups, the figure repeated small behind | Faces match; the close shot in a crowd lost the crowd to the portrait's white background |
+| 50000 px | not tried | Faces match, poses and scenes follow the description, the crowd is back |
+| 25000 px | Full figures, poses and scenes as described, short hair and glasses kept | Scenes follow, the face drifts more (hair) |
+
+So `REFERENCE_PIXELS` sends 25000 px for wide and full shots, 50000 for medium and close shots and 100000 for extreme close-ups, and the card asks for a front-facing portrait on a plain white background.
 
 ## Not covered
 

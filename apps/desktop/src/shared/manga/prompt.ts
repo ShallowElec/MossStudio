@@ -23,6 +23,21 @@ const SHOT_PROMPT: Record<Shot, string> = {
   extreme: '特写，脸部或细节占满画面',
 }
 
+/**
+ * How large each character picture goes into the prompt (MossInfer `vision_references.max_pixels`, ~1 token per
+ * 32×32 pixels). A picture carries its framing along with the face: at the engine's default (100000) a wide shot
+ * turns into a portrait. Fewer tokens keep the face and leave the framing to the description. The engine's
+ * `weight` only fades the picture toward gray and barely changes a black and white portrait, so it is not used.
+ * Measured in docs/records/2026-11-13-manga-consistency.md.
+ */
+export const REFERENCE_PIXELS: Record<Shot, number> = {
+  wide: 25_000,
+  full: 25_000,
+  medium: 50_000,
+  close: 50_000,
+  extreme: 100_000,
+}
+
 /** Mirrors the engine request: more reference pictures than this are not sent. */
 export const MANGA_MAX_REFERENCES = 4
 const MAX_ADAPTERS = 16
@@ -33,6 +48,8 @@ export interface CompiledPanel {
   adapters: MangaAdapter[]
   /** One reference picture per character, in cast order. */
   references: string[]
+  /** How large each reference goes into the prompt, by the panel's shot (REFERENCE_PIXELS). */
+  referencePixels: number
   /** What stops this panel from being drawn, in plain words. */
   problems: string[]
 }
@@ -101,6 +118,7 @@ export function compilePanelPrompt(series: Pick<MangaSeries, 'style' | 'characte
     ]),
     adapters,
     references,
+    referencePixels: REFERENCE_PIXELS[panel.shot],
     problems,
   }
 }
