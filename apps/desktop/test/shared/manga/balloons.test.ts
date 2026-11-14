@@ -9,6 +9,10 @@ describe('wrapText', () => {
     expect(wrapText('今天的雨下得特别大', 40, measure)).toEqual(['今天的雨', '下得特别', '大'])
     expect(wrapText('hello world ok', 60, measure)).toEqual(['hello', 'world', 'ok'])
     expect(wrapText('第一行\n第二行', 100, measure)).toEqual(['第一行', '第二行'])
+    // Closing punctuation never starts a line, and an opening bracket never ends one (禁则).
+    expect(wrapText('这些脚印是新的。', 70, measure)).toEqual(['这些脚印是新的。'])
+    expect(wrapText('这次你跑不掉了！', 40, measure)).toEqual(['这次你跑', '不掉了！'])
+    expect(wrapText('他说「快跑」', 30, measure)).toEqual(['他说', '「快跑」'])
   })
 
   it('splits a word that is wider than the line', () => {

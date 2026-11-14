@@ -70,6 +70,13 @@ export function defaultBalloonPlaces(count: number, direction: 'rtl' | 'ltr'): A
 
 export type Measure = (text: string) => number
 
+/** Never at the start of a line (禁则): it hangs past the edge of the line before instead. */
+const NO_LINE_START = /^[。，、．！？；：）」』】〉》”’…‥ー～ぁぃぅぇぉっゃゅょ.,!?;:)\]}]/u
+/** The same punctuation at the end of a line, which may pass its edge. */
+const TRAILING_HANG = /[。，、．！？；：）」』】〉》”’…‥ー～ぁぃぅぇぉっゃゅょ.,!?;:)\]}]+$/u
+/** Never at the end of a line: it moves down with the text it opens. */
+const NO_LINE_END = /[（「『【〈《“‘(\[{]$/u
+
 /**
  * Break `text` into lines no wider than `maxWidth`. Chinese and Japanese break
  * between any two characters; a run of Latin letters or digits stays whole
@@ -82,23 +89,26 @@ export function wrapText(text: string, maxWidth: number, measure: Measure): stri
     let line = ''
     for (const token of tokens) {
       const candidate = line + token
-      if (!line || measure(candidate.trimEnd()) <= maxWidth) {
+      if (!line || measure(candidate.trimEnd()) <= maxWidth || NO_LINE_START.test(token)) {
         line = candidate
         continue
       }
-      lines.push(line.trimEnd())
-      line = token.trimStart()
+      const opener = NO_LINE_END.test(line) && line.length > 1 ? line.slice(-1) : ''
+      lines.push(line.slice(0, line.length - opener.length).trimEnd())
+      line = opener + token.trimStart()
     }
     // A single token wider than the line is split by character.
     const pending = [line.trimEnd()]
     while (pending.length) {
       const current = pending.shift()!
-      if (measure(current) <= maxWidth || current.length <= 1) {
+      // Hanging punctuation may pass the edge.
+      if (measure(current.replace(TRAILING_HANG, '')) <= maxWidth || current.length <= 1) {
         lines.push(current)
         continue
       }
       let cut = current.length - 1
       while (cut > 1 && measure(current.slice(0, cut)) > maxWidth) cut -= 1
+      while (cut > 1 && NO_LINE_START.test(current.slice(cut))) cut -= 1
       lines.push(current.slice(0, cut))
       pending.unshift(current.slice(cut))
     }

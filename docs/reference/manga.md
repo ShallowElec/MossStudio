@@ -1,6 +1,6 @@
 ---
 status: current
-last-verified: 2026-11-14 (ae2672c)
+last-verified: 2026-11-14 (1995a7a)
 code: apps/desktop/src/shared/manga/, apps/desktop/src/main/services/manga.ts, apps/desktop/src/renderer/src/pages/manga/, apps/desktop/src/main/services/ai.ts
 ---
 
@@ -68,7 +68,7 @@ LoRA and pictures the engine does not support (`engine:features`; pictures need 
 
 ## 5. Lettering and export
 
-`pages/manga/render.ts` draws a page on a canvas. It fills white paper, crops each panel's chosen picture to its frame (in grayscale when the series is `monochrome`, since a description alone does not keep the engine from using colour), strokes the frame, and draws the balloons on top. `layoutBalloon` and `wrapText` (`shared/manga/balloons.ts`) size balloons, with text at most 30% of the panel wide, and break their lines. 对白 balloons are ellipses, 心声 dashed ellipses, 喊叫 spiked and 旁白 boxes. A balloon is placed by one of nine spots (`BALLOON_SPOTS` in `shared/manga/balloons.ts`). A balloon's `x` and `y` are anchors: 0 and 1 put it against an edge, with a margin, so a corner balloon stays in its corner. New balloons fill the corners in reading order (`defaultBalloonPlaces`). Nothing detects faces, and the description does not mention balloons (section 4), so a balloon over a face needs another spot chosen by hand. The page preview and the exported file are the same drawing.
+`pages/manga/render.ts` draws a page on a canvas. It fills white paper, crops each panel's chosen picture to its frame (in grayscale when the series is `monochrome`, since a description alone does not keep the engine from using colour), strokes the frame, and draws the balloons on top. `layoutBalloon` and `wrapText` (`shared/manga/balloons.ts`) size balloons, with text at most 30% of the panel wide, and break their lines. Closing punctuation never starts a line and hangs past the edge instead, and an opening bracket never ends one (禁则). 对白 balloons are ellipses, 心声 dashed ellipses, 喊叫 spiked and 旁白 boxes. A balloon is placed by one of nine spots (`BALLOON_SPOTS` in `shared/manga/balloons.ts`). A balloon's `x` and `y` are anchors: 0 and 1 put it against an edge, with a margin, so a corner balloon stays in its corner. New balloons fill the corners in reading order (`defaultBalloonPlaces`). Nothing detects faces, and the description does not mention balloons (section 4), so a balloon over a face needs another spot chosen by hand. The page preview and the exported file are the same drawing.
 
 导出这一话 is enabled once every panel of the chapter is approved (`exportBlockers`). It renders each page to PNG and sends the pages to `manga:export`. A chosen picture that can no longer be read stops the export with the page and panel named (`missingPictures`), instead of a blank frame. Main asks for a folder and writes `<folder>/<title>/第<N>话-01.png` and onwards (`writeChapterPages`). It refuses anything that is not a PNG.
 

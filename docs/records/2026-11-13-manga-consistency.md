@@ -37,6 +37,10 @@ Same seeds, the clean portrait, no balloon line. Each picture goes into the prom
 
 So `REFERENCE_PIXELS` sends 25000 px for wide and full shots, 50000 for medium and close shots and 100000 for extreme close-ups, and the card asks for a front-facing portrait on a plain white background.
 
+## Run through the Studio again
+
+With the changes above (`1995a7a`) and the clean portrait, the same 12 panels were drawn through the Studio in about 15.5 minutes, again with no failure, never more than two at a time. Each job carried the size for its shot. No panel drew a balloon. 阿秋's face, hair and glasses matched in all 12, the wide and full shots showed her full figure, and the scenes followed the descriptions (rainy harbour, sunny street, moonlit rooftop). One running panel set at night came out in daylight. The pages showed a 。 alone on a balloon's last line; `wrapText` now keeps closing punctuation on the line before (`test/shared/manga/balloons.test.ts`).
+
 ## Not covered
 
 LoRA, an engine without vision references, other language models, more than one referenced character in a panel.
