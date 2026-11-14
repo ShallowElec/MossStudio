@@ -81,11 +81,18 @@ export function dequeue(series: MangaSeries, chapterId: string): MangaSeries {
 
 const waiting = (panel: MangaPanel, now: number): boolean => Boolean(panel.retryAt && Date.parse(panel.retryAt) > now)
 
-/** The panels to send now, in reading order, keeping at most MAX_ACTIVE running; a retry waits for its time. */
-export function nextToSubmit(chapter: Pick<MangaChapter, 'pages'>, limit = MAX_ACTIVE, now = Date.now()): MangaPanel[] {
-  const panels = chapterPanels(chapter)
-  const running = panels.filter((panel) => panel.state === 'running').length
-  return panels.filter((panel) => panel.state === 'queued' && !waiting(panel, now)).slice(0, Math.max(0, limit - running))
+/**
+ * The panels to send now, in reading order (chapter by chapter), keeping at most MAX_ACTIVE running across the
+ * whole series; a retry waits for its time.
+ */
+export function nextToSubmit(
+  series: Pick<MangaSeries, 'chapters'>,
+  limit = MAX_ACTIVE,
+  now = Date.now(),
+): Array<{ chapter: MangaChapter; panel: MangaPanel }> {
+  const all = series.chapters.flatMap((chapter) => chapterPanels(chapter).map((panel) => ({ chapter, panel })))
+  const running = all.filter(({ panel }) => panel.state === 'running').length
+  return all.filter(({ panel }) => panel.state === 'queued' && !waiting(panel, now)).slice(0, Math.max(0, limit - running))
 }
 
 /** When the next waiting retry of `series` is due (ms since epoch), or null when none waits. */

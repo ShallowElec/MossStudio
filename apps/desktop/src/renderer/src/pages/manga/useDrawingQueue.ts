@@ -43,7 +43,7 @@ export function useDrawingQueue(options: {
   useEffect(() => {
     // Until the model library has loaded every panel would fail with 还没有可用的模型; it reruns when it arrives.
     if (!series || !catalog || sending.current) return
-    const pending = series.chapters.flatMap((chapter) => nextToSubmit(chapter).map((panel) => ({ chapter, panel })))
+    const pending = nextToSubmit(series)
     if (!pending.length) {
       // A retry that is still waiting wakes the queue when it is due.
       const due = nextRetryAt(series)

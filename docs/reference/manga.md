@@ -55,7 +55,7 @@ A panel's `state` is the queue (`shared/manga/queue.ts`):
 | `approved` | 已通过 | 重画 → `queued` (earlier takes are kept) |
 | `failed` | 失败 | 再试一次 → `queued` |
 
-`useDrawingQueue` (`pages/manga/useDrawingQueue.ts`) runs while the page is mounted. It sends nothing until the model library (`catalog`) has loaded, so a queue resumed at start-up is not failed as 还没有可用的模型. `reconcile` folds every job update into its panel. `nextToSubmit` sends at most `MAX_ACTIVE` (2) panels at a time, in reading order, and skips a retry whose `retryAt` has not come; `nextRetryAt` wakes the queue when it does. Because the queue is stored in the panels, a restart resumes it.
+`useDrawingQueue` (`pages/manga/useDrawingQueue.ts`) runs while the page is mounted. It sends nothing until the model library (`catalog`) has loaded, so a queue resumed at start-up is not failed as 还没有可用的模型. `reconcile` folds every job update into its panel. `nextToSubmit` sends at most `MAX_ACTIVE` (2) panels at a time across the whole series, in reading order chapter by chapter, and skips a retry whose `retryAt` has not come; `nextRetryAt` wakes the queue when it does. Because the queue is stored in the panels, a restart resumes it.
 
 `panelRequest` (`pages/manga/submit.ts`) builds the same request the Studio posts to `/api/engine-jobs` (see [project-and-backend.md](/docs/reference/project-and-backend.md)). `projectId` is the series' project and `canvasId` is the panel id. The parts come from `compilePanelPrompt` (`shared/manga/prompt.ts`):
 

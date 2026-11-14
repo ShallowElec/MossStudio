@@ -35,17 +35,39 @@ describe('the drawing queue', () => {
 
   it('sends at most two at a time, in reading order', () => {
     const series = enqueue(mangaSeriesFixture(), 'chapter-1')
-    expect(nextToSubmit(series.chapters[0]!).map((panel) => panel.id)).toEqual(['panel-1', 'panel-2'])
+    expect(nextToSubmit(series).map(({ panel }) => panel.id)).toEqual(['panel-1', 'panel-2'])
     const running = updatePanel(series, 'chapter-1', 'panel-1', (panel) => markSubmitted(panel, 'job-1'))
-    expect(nextToSubmit(running.chapters[0]!).map((panel) => panel.id)).toEqual(['panel-2'])
+    expect(nextToSubmit(running).map(({ panel }) => panel.id)).toEqual(['panel-2'])
+  })
+
+  it('counts the limit across chapters, not per chapter', () => {
+    const base = mangaSeriesFixture()
+    const first = base.chapters[0]!
+    const second = {
+      ...first,
+      id: 'chapter-x',
+      number: first.number + 1,
+      pages: first.pages.map((page) => ({
+        ...page,
+        id: `x-${page.id}`,
+        panels: page.panels.map((panel) => ({ ...panel, id: `x-${panel.id}` })),
+      })),
+    }
+    let series = enqueue(enqueue({ ...base, chapters: [first, second] }, 'chapter-1'), 'chapter-x')
+    series = updatePanel(series, 'chapter-1', 'panel-1', (panel) => markSubmitted(panel, 'job-1'))
+    series = updatePanel(series, 'chapter-x', 'x-panel-1', (panel) => markSubmitted(panel, 'job-2'))
+    // Two run already, one in each chapter: nothing more goes out.
+    expect(nextToSubmit(series)).toEqual([])
+    const done = updatePanel(series, 'chapter-1', 'panel-1', (panel) => ({ ...panel, state: 'review' as const, jobId: undefined }))
+    expect(nextToSubmit(done).map(({ chapter, panel }) => [chapter.id, panel.id])).toEqual([['chapter-1', 'panel-2']])
   })
 
   it('holds a retry back until its time, and says when the next one is due', () => {
     const now = Date.parse('2026-11-12T10:00:00.000Z')
     let series = enqueue(mangaSeriesFixture(), 'chapter-1')
     series = updatePanel(series, 'chapter-1', 'panel-1', (panel) => markSubmitFailed(markSubmitted(panel, 'j'), 'E_OOM', true, now))
-    expect(nextToSubmit(series.chapters[0]!, 2, now).map((panel) => panel.id)).toEqual(['panel-2', 'panel-3'])
-    expect(nextToSubmit(series.chapters[0]!, 3, now + RETRY_BACKOFF_MS).map((panel) => panel.id)).toEqual(['panel-1', 'panel-2', 'panel-3'])
+    expect(nextToSubmit(series, 2, now).map(({ panel }) => panel.id)).toEqual(['panel-2', 'panel-3'])
+    expect(nextToSubmit(series, 3, now + RETRY_BACKOFF_MS).map(({ panel }) => panel.id)).toEqual(['panel-1', 'panel-2', 'panel-3'])
     expect(nextRetryAt(series, now)).toBe(now + RETRY_BACKOFF_MS)
     expect(nextRetryAt(series, now + RETRY_BACKOFF_MS)).toBeNull()
     // Queueing it by hand does not wait.
