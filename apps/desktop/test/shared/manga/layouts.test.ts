@@ -147,6 +147,32 @@ describe('page frames', () => {
     expect((handle.a.y + handle.b.y) / 2).toBeCloseTo(900)
   })
 
+  it('stops a drag where a panel deeper in either side would get too small, though the split there is uneven', () => {
+    const frames = split('y', 0.5, split('y', 0.2, panel(), panel()), panel())
+    expect(framesFit(frames)).toBe(true)
+    const moved = dragGutter(frames, '', { x: 0, y: 200 }, 'ltr')!
+    expect(framesFit(moved)).toBe(true)
+    const first = panelQuads(moved, 'ltr')[0]!
+    expect(boundsOf(first).h).toBeGreaterThanOrEqual(MIN_PANEL_SIDE - 0.5)
+    expect(boundsOf(first).h).toBeLessThan(MIN_PANEL_SIDE + 2)
+  })
+
+  it('moves a gutter inside a slanted panel to the pointer, so dropping it where it is leaves it there', () => {
+    for (const axis of ['x', 'y'] as const) {
+      for (const direction of ['ltr', 'rtl'] as const) {
+        const frames = split(axis, 0.4, panel(), split(axis, 0.5, panel(), panel()), 0.15)
+        const inner = frameHandles(frames, direction).find((handle) => handle.path === '1')!
+        const middle = { x: (inner.a.x + inner.b.x) / 2, y: (inner.a.y + inner.b.y) / 2 }
+        const still = dragGutter(frames, '1', middle, direction) as FrameSplit
+        expect((still.second as FrameSplit).ratio, `${axis} ${direction}`).toBeCloseTo(0.5, 6)
+        const nudged = dragGutter(frames, '1', { x: middle.x + (axis === 'x' ? 40 : 0), y: middle.y + (axis === 'y' ? 40 : 0) }, direction)!
+        const after = frameHandles(nudged, direction).find((handle) => handle.path === '1')!
+        const moved = axis === 'x' ? (after.a.x + after.b.x) / 2 - middle.x : (after.a.y + after.b.y) / 2 - middle.y
+        expect(moved, `${axis} ${direction}`).toBeCloseTo(40, 6)
+      }
+    }
+  })
+
   it('picks a template by panel count, or the smallest one with room', () => {
     expect(templateForCount(4).id).toBe('grid-four')
     expect(templateForCount(1).id).toBe('single')

@@ -58,6 +58,10 @@ describe('manga page logic', () => {
     // A drawn panel is content too, even without a description.
     const drawn = { ...cut, panels: cut.panels.map((panel, index) => (index === 1 ? { ...panel, state: 'review' as const } : panel)) }
     expect(mergePanel(drawn, 1)).toBeUndefined()
+    // So is a description written by hand (自己写描述) with nothing else filled in.
+    const written = { ...cut, panels: cut.panels.map((panel, index) => (index === 1 ? { ...panel, promptOverride: '手写的描述' } : panel)) }
+    expect(mergeBlocker(written, 1)).toBe('两格都有内容，先清空其中一格')
+    expect(applyTemplate(written, 'two-rows')).toBeUndefined()
   })
 
   it('says why a panel cannot be cut instead of offering a cut that does nothing', () => {

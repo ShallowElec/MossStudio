@@ -300,7 +300,9 @@ function ratioRange(q: Quad, node: FrameSplit, gap = PANEL_GUTTER): { lo: number
 
 /**
  * Drag a gutter: `point` is where the pointer is on the page; the gutter's middle moves there along its axis and
- * keeps its slant, clamped so every panel keeps its narrowest side. Undefined when it cannot move at all.
+ * keeps its slant. The position is worked back through the parent's actual edges, so a gutter inside a slanted panel
+ * follows the pointer. It stops where any panel, including those deeper in either side, would get narrower than
+ * `MIN_PANEL_SIDE`. Undefined when it cannot move at all.
  */
 export function dragGutter(frames: FrameNode, path: FramePath, point: Point, direction: ReadingDirection): FrameNode | undefined {
   const node = nodeAt(frames, path)
@@ -308,14 +310,30 @@ export function dragGutter(frames: FrameNode, path: FramePath, point: Point, dir
   if (!node || node.kind !== 'split' || !q) return undefined
   const range = ratioRange(q, node)
   if (!range) return undefined
-  const box = boundsOf(q)
   const down = node.axis === 'x'
-  const usable = (down ? box.w : box.h) - PANEL_GUTTER
-  if (usable <= 0) return undefined
   const along = down ? (direction === 'rtl' ? PAGE_WIDTH - point.x : point.x) : point.y
-  const want = along - (down ? box.x : box.y) - PANEL_GUTTER / 2
-  const ratio = Math.min(range.hi, Math.max(range.lo, want / usable - (node.slant ?? 0) / 2))
-  return replaceAt(frames, path, () => ({ ...node, ratio }))
+  // The cut's centre on the near and far edge is start + (length − gutter) × ratio + gutter / 2 (cutQuad), so the
+  // gutter's middle is linear in the ratio.
+  const pos = (p: Point): number => (down ? p.x : p.y)
+  const [near, nearEnd, far, farEnd] = down ? [q[0], q[1], q[3], q[2]] : [q[0], q[3], q[1], q[2]]
+  const nearUsable = pos(nearEnd) - pos(near) - PANEL_GUTTER
+  const farUsable = pos(farEnd) - pos(far) - PANEL_GUTTER
+  const slope = (nearUsable + farUsable) / 2
+  if (slope <= 0) return undefined
+  const offset = (pos(near) + pos(far) + PANEL_GUTTER + farUsable * (node.slant ?? 0)) / 2
+  const wanted = Math.min(range.hi, Math.max(range.lo, (along - offset) / slope))
+  const at = (ratio: number): FrameNode => replaceAt(frames, path, () => ({ ...node, ratio }))
+  const moved = at(wanted)
+  if (framesFit(moved) || !framesFit(frames)) return moved
+  // Deeper splits keep their ratios, so a side can run out of room before the range above says: stop where it does.
+  let good = node.ratio
+  let bad = wanted
+  for (let step = 0; step < 40; step += 1) {
+    const middle = (good + bad) / 2
+    if (framesFit(at(middle))) good = middle
+    else bad = middle
+  }
+  return at(good)
 }
 
 /** Panel `index` cut in half; the new panel comes right after it in reading order. Undefined when it has no room. */

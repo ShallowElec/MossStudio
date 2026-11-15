@@ -258,7 +258,14 @@ export function emptyPanel(id: string): MangaPanel {
 
 /** Nothing written, cast, lettered or drawn yet: a layout change may drop it. */
 export function isBlankPanel(panel: MangaPanel): boolean {
-  return panel.state === 'draft' && !panel.scene.trim() && !panel.takes.length && !panel.dialogue.length && !panel.cast.length
+  return (
+    panel.state === 'draft' &&
+    !panel.scene.trim() &&
+    !panel.promptOverride?.trim() &&
+    !panel.takes.length &&
+    !panel.dialogue.length &&
+    !panel.cast.length
+  )
 }
 
 export function emptyCharacter(id: string, name: string): MangaCharacter {
