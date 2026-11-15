@@ -2,6 +2,7 @@
  * 漫画 fixtures: a small series with two characters and one storyboarded
  * chapter, shared by the unit tests, the mock backend and the E2E specs.
  */
+import { templateById } from '@shared/manga/layouts'
 import { MANGA_SCHEMA_VERSION, emptyPanel, type MangaCharacter, type MangaPanel, type MangaSeries } from '@shared/manga/model'
 
 const NOW = '2026-11-04T08:00:00.000Z'
@@ -63,7 +64,7 @@ export function mangaSeriesFixture(overrides: Partial<MangaSeries> = {}): MangaS
         pages: [
           {
             id: 'page-1',
-            layoutId: 'wide-then-two',
+            frames: templateById('wide-then-two')!.frames,
             panels: [
               mangaPanelFixture('panel-1', {
                 scene: '雨夜的街道，霓虹灯倒映在积水里',

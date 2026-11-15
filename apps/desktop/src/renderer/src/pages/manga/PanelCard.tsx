@@ -1,8 +1,19 @@
 import { Check, MessageSquarePlus, Play, RotateCcw, Square, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { BALLOON_KIND_LABEL, BALLOON_SPOTS, defaultBalloonPlaces, nearestSpot } from '@shared/manga/balloons'
-import { MAX_DIALOGUE, MAX_CAST, BALLOON_KINDS, SHOTS, newId, panelPicture, type MangaPanel, type MangaSeries } from '@shared/manga/model'
-import { SHOT_LABEL, compilePanelPrompt } from '@shared/manga/prompt'
+import {
+  ANGLES,
+  MAX_DIALOGUE,
+  MAX_CAST,
+  BALLOON_KINDS,
+  SHOTS,
+  newId,
+  panelPicture,
+  type Angle,
+  type MangaPanel,
+  type MangaSeries,
+} from '@shared/manga/model'
+import { ANGLE_LABEL, SHOT_LABEL, compilePanelPrompt } from '@shared/manga/prompt'
 import { approve, reject } from '@shared/manga/queue'
 import { Ipc } from '@shared/channels'
 import { call } from '../../lib/api'
@@ -90,13 +101,22 @@ export function PanelCard({
             <Field label="画面描述" className="flex-1">
               <Textarea rows={5} value={panel.scene} onChange={(event) => set({ scene: event.target.value })} />
             </Field>
-            <Field label="镜头" className="w-24">
-              <Select
-                value={panel.shot}
-                onValueChange={(shot) => set({ shot: shot as MangaPanel['shot'] })}
-                options={SHOTS.map((shot) => ({ value: shot, label: SHOT_LABEL[shot] }))}
-              />
-            </Field>
+            <div className="flex w-24 flex-col gap-2.5">
+              <Field label="镜头">
+                <Select
+                  value={panel.shot}
+                  onValueChange={(shot) => set({ shot: shot as MangaPanel['shot'] })}
+                  options={SHOTS.map((shot) => ({ value: shot, label: SHOT_LABEL[shot] }))}
+                />
+              </Field>
+              <Field label="角度">
+                <Select
+                  value={panel.angle ?? ''}
+                  onValueChange={(angle) => set({ angle: angle ? (angle as Angle) : undefined })}
+                  options={[{ value: '', label: '不指定' }, ...ANGLES.map((angle) => ({ value: angle, label: ANGLE_LABEL[angle] }))]}
+                />
+              </Field>
+            </div>
           </div>
         </div>
       </div>

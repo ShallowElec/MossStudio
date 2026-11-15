@@ -304,6 +304,57 @@ describe('manga', () => {
     expect(await app.calls('manga:export')).toEqual([])
   })
 
+  it('cuts, merges and bleeds panels, drags a gutter, and draws layouts and shots for a page', async () => {
+    const page = await openSeries(() => {
+      window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    const stored = () => page.evaluate(() => window.__mock.state.manga[0]!.chapters[0]!.pages[0]!)
+    const ids = () => panels(page).evaluateAll((items) => items.map((item) => item.getAttribute('data-manga-panel')))
+    const frames = page.getByRole('group', { name: '第 1 页的分格' })
+    await frames.waitFor()
+
+    await frames.getByRole('button', { name: '第 2 格' }).click()
+    const tools = page.getByRole('group', { name: '第 2 格的分格' })
+    expect(await tools.getByRole('button', { name: '合并' }).isDisabled()).toBe(true)
+    await tools.getByRole('button', { name: '上下拆开' }).click()
+    await expect.poll(async () => (await ids()).length).toBe(4)
+    const [, , added] = await ids()
+    expect(await ids()).toEqual(['panel-1', 'panel-2', added, 'panel-3'])
+    await expect.poll(async () => (await stored()).panels.length).toBe(4)
+    await tools.getByRole('button', { name: '合并' }).click()
+    await expect.poll(ids).toEqual(['panel-1', 'panel-2', 'panel-3'])
+
+    // The first panel spans the top of the page, so it can bleed.
+    await frames.getByRole('button', { name: '第 1 格' }).click()
+    await page.getByRole('switch', { name: '第 1 格出血' }).click()
+    await expect.poll(async () => (await stored()).frames).toMatchObject({ first: { kind: 'panel', bleed: true } })
+
+    const before = (await stored()).frames
+    const across = frames.getByRole('slider', { name: '横向格线' })
+    await across.focus()
+    for (let i = 0; i < 4; i += 1) await page.keyboard.press('ArrowDown')
+    await expect.poll(async () => ((await stored()).frames as { ratio: number }).ratio).toBeGreaterThan((before as { ratio: number }).ratio)
+
+    await page.getByRole('button', { name: '抽分格' }).click()
+    const drawn = page.getByRole('group', { name: '抽到的分格' })
+    expect(await drawn.getByRole('button').count()).toBe(8)
+    await drawn.getByRole('button', { name: /^候选 3：3 格$/ }).click()
+    expect(await drawn.getByRole('button', { name: /^候选 3/ }).getAttribute('aria-pressed')).toBe('true')
+    const dragged = (await stored()).frames
+    await page.getByRole('button', { name: '用这张' }).click()
+    await expect.poll(async () => JSON.stringify((await stored()).frames) !== JSON.stringify(dragged)).toBe(true)
+    expect(await ids()).toEqual(['panel-1', 'panel-2', 'panel-3'])
+    expect(await drawn.count()).toBe(0)
+
+    await page.getByRole('button', { name: '抽镜头' }).click()
+    await expect.poll(async () => (await stored()).panels.every((item) => item.angle !== undefined)).toBe(true)
+    const angle = (await stored()).panels[0]!.angle!
+    const labels = { eye: '平视', high: '俯视', low: '仰视', side: '侧面', back: '背影', over: '过肩' }
+    const picker = panel(page, 'panel-1').getByRole('combobox', { name: '角度' })
+    expect(await picker.evaluate((select: HTMLSelectElement) => select.selectedOptions[0]?.textContent)).toBe(labels[angle])
+  })
+
   it('adds reference pictures and outfits to a character card', async () => {
     const page = await openSeries(() => {
       const { mangaSeriesFixture } = window.__mock.fixtures

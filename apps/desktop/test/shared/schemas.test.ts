@@ -77,6 +77,11 @@ const job = { instanceId: 'i1', prompt: 'a cat', width: 512, height: 512, steps:
 
 const { schemaVersion: _version, createdAt: _created, updatedAt: _updated, ...mangaSave } = mangaSeriesFixture()
 const { id: _mangaId, projectId: _mangaProject, ...newManga } = mangaSave
+const fourPanels = ['a', 'b', 'c', 'd'].map((id) => ({ ...newManga.chapters[0]!.pages[0]!.panels[0]!, id }))
+const mangaWithPage = (page: Record<string, unknown>): unknown => ({
+  ...newManga,
+  chapters: [{ ...newManga.chapters[0]!, pages: [{ id: 'p', ...page }] }],
+})
 
 const cases = {
   settingsUpdate: {
@@ -707,9 +712,22 @@ const cases = {
 
   mangaSave: {
     valid: newManga,
-    accepts: { 'an existing series': mangaSave },
+    accepts: {
+      'an existing series': mangaSave,
+      'a page saved with a template id, before pages had their own frames': mangaWithPage({ layoutId: 'grid-four', panels: fourPanels }),
+      'a slanted cut with a bleeding panel': mangaWithPage({
+        frames: { kind: 'split', axis: 'y', ratio: 0.4, slant: 0.1, first: { kind: 'panel', bleed: true }, second: { kind: 'panel' } },
+        panels: fourPanels.slice(0, 2),
+      }),
+    },
     rejects: {
       'no title': { ...newManga, title: '' },
+      'frames for fewer panels than the page has': mangaWithPage({ frames: { kind: 'panel' }, panels: fourPanels.slice(0, 2) }),
+      'a template id with the wrong number of panels': mangaWithPage({ layoutId: 'grid-four', panels: fourPanels.slice(0, 3) }),
+      'a cut that runs off its panel': mangaWithPage({
+        frames: { kind: 'split', axis: 'x', ratio: 0.9, slant: 0.2, first: { kind: 'panel' }, second: { kind: 'panel' } },
+        panels: fourPanels.slice(0, 2),
+      }),
       'unknown panel state': {
         ...newManga,
         chapters: [

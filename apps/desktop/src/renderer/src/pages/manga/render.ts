@@ -1,5 +1,5 @@
 import { layoutBalloon, shoutOutline } from '@shared/manga/balloons'
-import { PAGE_HEIGHT, PAGE_WIDTH, layoutById, orientedRects, panelPixelRect } from '@shared/manga/layouts'
+import { PAGE_HEIGHT, PAGE_WIDTH, boundsOf, innerRect, panelQuads, type Quad } from '@shared/manga/layouts'
 import { panelPicture, type MangaBalloon, type MangaPage, type MangaSeries } from '@shared/manga/model'
 import { cloverUrl } from '../../lib/clover'
 
@@ -81,40 +81,50 @@ function drawBalloon(ctx: CanvasRenderingContext2D, balloon: MangaBalloon, x: nu
   ctx.restore()
 }
 
-/** Draw `page` at full size; the pictures it needs must be in `cache` (missing ones show as a grey frame). */
+function quadPath(ctx: CanvasRenderingContext2D, quad: Quad): void {
+  ctx.beginPath()
+  ctx.moveTo(quad[0].x, quad[0].y)
+  for (const point of quad.slice(1)) ctx.lineTo(point.x, point.y)
+  ctx.closePath()
+}
+
 /** What of the series changes how a page looks. */
 export type PageLook = Pick<MangaSeries, 'readingDirection'> & { style: Pick<MangaSeries['style'], 'monochrome'> }
 
+/**
+ * Draw `page` at full size; the pictures it needs must be in `cache` (missing ones show as a grey frame). A picture
+ * covers its frame's bounding box and is clipped to the frame, so a slanted or bleeding panel shows all of its
+ * shape; balloons stay inside the upright part of the frame.
+ */
 export function drawPage(ctx: CanvasRenderingContext2D, series: PageLook, page: MangaPage, cache: PictureCache): void {
   ctx.fillStyle = PAPER
   ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
-  const layout = layoutById(page.layoutId)
-  if (!layout) return
-  const rects = orientedRects(layout, series.readingDirection)
+  const quads = panelQuads(page.frames, series.readingDirection, { bleed: true })
   page.panels.forEach((panel, index) => {
-    const rect = rects[index]
-    if (!rect) return
-    const { x, y, w, h } = panelPixelRect(rect)
+    const quad = quads[index]
+    if (!quad) return
+    const box = boundsOf(quad)
+    const inner = innerRect(quad)
     const picture = panelPicture(panel)
     const image = picture ? cache.get(picture.path) : null
     ctx.save()
-    ctx.beginPath()
-    ctx.rect(x, y, w, h)
+    quadPath(ctx, quad)
     ctx.clip()
     if (image) {
       // Only the picture: paper, frames and balloons are black and white already.
       if (series.style.monochrome) ctx.filter = 'grayscale(1)'
-      coverImage(ctx, image, x, y, w, h)
+      coverImage(ctx, image, box.x, box.y, box.w, box.h)
       ctx.filter = 'none'
     } else {
       ctx.fillStyle = EMPTY
-      ctx.fillRect(x, y, w, h)
+      ctx.fillRect(box.x, box.y, box.w, box.h)
     }
-    for (const balloon of panel.dialogue) if (balloon.text.trim()) drawBalloon(ctx, balloon, x, y, w, h)
+    for (const balloon of panel.dialogue) if (balloon.text.trim()) drawBalloon(ctx, balloon, inner.x, inner.y, inner.w, inner.h)
     ctx.restore()
     ctx.lineWidth = 5
     ctx.strokeStyle = INK
-    ctx.strokeRect(x, y, w, h)
+    quadPath(ctx, quad)
+    ctx.stroke()
   })
 }
 

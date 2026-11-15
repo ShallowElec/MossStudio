@@ -1,6 +1,6 @@
 import { adapterStatuses } from '@shared/adapters'
 import type { BackendInfo } from '@shared/backend'
-import { layoutById, orientedRects, panelGenerationSize } from '@shared/manga/layouts'
+import { panelGenerationSize, panelQuads } from '@shared/manga/layouts'
 import type { MangaChapter, MangaPage, MangaPanel, MangaSeries } from '@shared/manga/model'
 import { compilePanelPrompt } from '@shared/manga/prompt'
 import type { Catalog, EngineFeatures, JobRecord } from '@shared/types'
@@ -68,10 +68,9 @@ export function panelRequest(input: {
     referenceWeight = 1
   }
 
-  const layout = layoutById(page.layoutId)
   const index = page.panels.findIndex((item) => item.id === panel.id)
-  const rect = layout ? orientedRects(layout, series.readingDirection)[index] : undefined
-  const size = rect ? panelGenerationSize(rect) : { width: 1024, height: 1024 }
+  const quad = panelQuads(page.frames, series.readingDirection, { bleed: true })[index]
+  const size = quad ? panelGenerationSize(quad) : { width: 1024, height: 1024 }
   const pageNumber = chapter.pages.findIndex((item) => item.id === page.id) + 1
   // The series' 质量 decides; a model's own steps and CFG (few-step models) are put into it when the model is chosen.
   const steps = series.style.steps

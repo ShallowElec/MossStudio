@@ -27,7 +27,7 @@ Developer documentation for MossStudio: an Electron + React + TypeScript desktop
 | How the app is put together: processes, windows, routes, services, storage | [reference/architecture.md](reference/architecture.md) |
 | The Studio node board: 画面, 风格, 放大, inputs, wires, regions, runs, recipes | [reference/studio-node-board.md](reference/studio-node-board.md) |
 | The Studio assistant: tools, cards, 自主 and 审批 modes | [reference/studio-assistant.md](reference/studio-assistant.md) |
-| 漫画: series, 人物卡, storyboard by language model, drawing queue and review, lettering, export | [reference/manga.md](reference/manga.md), test report [records/2026-11-12-manga-test-report.md](records/2026-11-12-manga-test-report.md), review fixes [records/2026-11-12-manga-review-fixes.md](records/2026-11-12-manga-review-fixes.md), character consistency [records/2026-11-13-manga-consistency.md](records/2026-11-13-manga-consistency.md) |
+| 漫画: series, 人物卡, storyboard by language model, page frames and 抽卡, drawing queue and review, lettering, export | [reference/manga.md](reference/manga.md), test report [records/2026-11-12-manga-test-report.md](records/2026-11-12-manga-test-report.md), review fixes [records/2026-11-12-manga-review-fixes.md](records/2026-11-12-manga-review-fixes.md), character consistency [records/2026-11-13-manga-consistency.md](records/2026-11-13-manga-consistency.md) |
 | Why the Studio is a node board, and what it refuses to be | [explanation/studio-design.md](explanation/studio-design.md) |
 | Engines and GPUs: CUDA packages, 兼容模式 (Vulkan), AMD 原生 (HIP), tiers, remote hosts | [reference/engines.md](reference/engines.md) |
 | Models: catalog, bundles, component files, directories, LoRA | [reference/models.md](reference/models.md) |

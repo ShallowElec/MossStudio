@@ -1,7 +1,6 @@
 import { BookOpenText, Brain, CheckCheck, Download, FilePlus2, Play, Plus, Sparkles, Square, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Ipc } from '@shared/channels'
-import { PAGE_LAYOUTS } from '@shared/manga/layouts'
 import { memoryRequest, mergeFacts, parseMemory } from '@shared/manga/memory'
 import { newId, type MangaChapter, type MangaSeries } from '@shared/manga/model'
 import { chapterProgress, dequeue, enqueue, updatePanel } from '@shared/manga/queue'
@@ -19,24 +18,13 @@ import {
   ProgressBar,
   Row,
   Section,
-  Select,
   Textarea,
   useToast,
 } from '../../components/ui'
 import { PanelCard } from './PanelCard'
-import {
-  approveAll,
-  changeLayout,
-  chapterLabel,
-  exportBlockers,
-  newChapter,
-  newPage,
-  nextChapterNumber,
-  panelsInUse,
-  updateChapter,
-  updatePage,
-} from './logic'
-import { PagePreview, askModel, useProviders } from './parts'
+import { approveAll, chapterLabel, exportBlockers, newChapter, newPage, nextChapterNumber, updateChapter, updatePage } from './logic'
+import { PageLayout } from './PageLayout'
+import { askModel, useProviders } from './parts'
 import { renderPagePng, type PictureCache } from './render'
 import type { SeriesUpdate } from './useSeries'
 
@@ -266,55 +254,43 @@ function ChapterEditor({
         </Section>
       ) : null}
 
-      {chapter.pages.map((page, pageIndex) => {
-        const inUse = panelsInUse(page)
-        return (
-          <Section
-            key={page.id}
-            title={`第 ${pageIndex + 1} 页`}
-            actions={
-              <>
-                <Select
-                  aria-label={`第 ${pageIndex + 1} 页的分格`}
-                  value={page.layoutId}
-                  onValueChange={(layoutId) =>
-                    update((current) => updatePage(current, chapter.id, page.id, (item) => changeLayout(item, layoutId)))
-                  }
-                  options={PAGE_LAYOUTS.map((layout) => ({
-                    value: layout.id,
-                    label: `${layout.label}（${layout.rects.length} 格）`,
-                    disabled: layout.rects.length < inUse,
-                  }))}
-                />
-                <IconButton
-                  label={`删除第 ${pageIndex + 1} 页`}
-                  onClick={() => setChapter((current) => ({ ...current, pages: current.pages.filter((item) => item.id !== page.id) }))}
-                >
-                  <Trash2 className="size-4" strokeWidth={1.6} />
-                </IconButton>
-              </>
-            }
-          >
-            <div className="flex items-start gap-4">
-              <div className="sticky top-0 w-56 shrink-0">
-                <PagePreview series={series} page={page} label={`第 ${pageIndex + 1} 页预览`} />
-              </div>
-              <div className="flex min-w-0 flex-1 flex-col gap-3">
-                {page.panels.map((panel, panelIndex) => (
-                  <PanelCard
-                    key={panel.id}
-                    series={series}
-                    panel={panel}
-                    label={`第 ${pageIndex + 1} 页第 ${panelIndex + 1} 格`}
-                    onChange={(change) => update((current) => updatePanel(current, chapter.id, panel.id, change))}
-                    onDraw={() => update((current) => enqueue(current, chapter.id, [panel.id]))}
-                  />
-                ))}
-              </div>
+      {chapter.pages.map((page, pageIndex) => (
+        <Section
+          key={page.id}
+          title={`第 ${pageIndex + 1} 页`}
+          actions={
+            <IconButton
+              label={`删除第 ${pageIndex + 1} 页`}
+              onClick={() => setChapter((current) => ({ ...current, pages: current.pages.filter((item) => item.id !== page.id) }))}
+            >
+              <Trash2 className="size-4" strokeWidth={1.6} />
+            </IconButton>
+          }
+        >
+          <div className="flex items-start gap-4">
+            <div className="sticky top-0 w-72 shrink-0">
+              <PageLayout
+                series={series}
+                page={page}
+                label={`第 ${pageIndex + 1} 页`}
+                onChange={(change) => update((current) => updatePage(current, chapter.id, page.id, change))}
+              />
             </div>
-          </Section>
-        )
-      })}
+            <div className="flex min-w-0 flex-1 flex-col gap-3">
+              {page.panels.map((panel, panelIndex) => (
+                <PanelCard
+                  key={panel.id}
+                  series={series}
+                  panel={panel}
+                  label={`第 ${pageIndex + 1} 页第 ${panelIndex + 1} 格`}
+                  onChange={(change) => update((current) => updatePanel(current, chapter.id, panel.id, change))}
+                  onDraw={() => update((current) => enqueue(current, chapter.id, [panel.id]))}
+                />
+              ))}
+            </div>
+          </div>
+        </Section>
+      ))}
 
       <ConfirmDialog
         open={confirm === 'replace'}

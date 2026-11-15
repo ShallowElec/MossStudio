@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import { defaultBalloonPlaces } from './balloons'
-import { MAX_PANELS_PER_PAGE, PAGE_LAYOUTS, layoutById, layoutForCount } from './layouts'
+import { MAX_PANELS_PER_PAGE, PAGE_TEMPLATES, leafCount, templateById, templateForCount } from './layouts'
 import { extractJson, storyMemory, type MemoryRequest } from './memory'
 import {
+  ANGLES,
   BALLOON_KINDS,
   MAX_CAST,
   MAX_DIALOGUE,
@@ -13,6 +14,7 @@ import {
   type MangaPage,
   type MangaPanel,
   type MangaSeries,
+  type Angle,
   type Shot,
 } from './model'
 
@@ -51,15 +53,16 @@ export function storyboardRequest(
   chapter: MangaChapter,
   options: StoryboardOptions,
 ): MemoryRequest {
-  const layouts = PAGE_LAYOUTS.map((layout) => `${layout.id}（${layout.rects.length} 格，${layout.label}）`).join('、')
+  const layouts = PAGE_TEMPLATES.map((template) => `${template.id}（${leafCount(template.frames)} 格，${template.label}）`).join('、')
   const memory = storyMemory(series, chapter.id)
   return {
     system: [
       '你是漫画分镜师。把一话的剧情拆成页和格，每格是一张要画的图。',
       '只输出一个 JSON 对象，不要输出其他文字，格式：',
-      '{"pages": [{"layout": "版式 id", "panels": [{"scene": "画面描述", "shot": "镜头", "cast": [{"name": "人物名", "outfit": "服装名", "expression": "表情", "pose": "动作"}], "dialogue": [{"speaker": "人物名", "kind": "类型", "text": "台词"}]}]}]}',
+      '{"pages": [{"layout": "版式 id", "panels": [{"scene": "画面描述", "shot": "镜头", "angle": "角度", "cast": [{"name": "人物名", "outfit": "服装名", "expression": "表情", "pose": "动作"}], "dialogue": [{"speaker": "人物名", "kind": "类型", "text": "台词"}]}]}]}',
       `版式 id 只能是：${layouts}。每页的格数要和版式一致。`,
       `镜头 shot 只能是：${SHOTS.join('、')}（远景、全景、中景、近景、特写）。`,
+      `角度 angle 只能是：${ANGLES.join('、')}（平视、俯视、仰视、侧面、背影、过肩），平视可以不写。`,
       `对白类型 kind 只能是：${BALLOON_KINDS.join('、')}（对白、心声、喊叫、旁白）；旁白不写 speaker。`,
       'scene 写看得见的东西：地点、光线、人物位置和动作、构图，不写台词，不写人物外貌（外貌由人物卡提供）。',
       'cast 只能用人物卡里的名字，outfit 只能用该人物已有的服装名，没有就不写。',
@@ -89,6 +92,7 @@ const answerSchema = z.object({
             z.object({
               scene: loose,
               shot: loose,
+              angle: loose.optional(),
               cast: z
                 .array(z.object({ name: loose, outfit: loose.optional(), expression: loose.optional(), pose: loose.optional() }))
                 .catch([]),
@@ -134,14 +138,15 @@ export function parseStoryboard(
     for (let start = 0; start < rawPage.panels.length; start += MAX_PANELS_PER_PAGE) {
       const rawPanels = rawPage.panels.slice(start, start + MAX_PANELS_PER_PAGE)
       if (start > 0) warnings.add('有一页的格子太多，已拆成两页')
-      const asked = layoutById(rawPage.layout)
-      const layout = asked && asked.rects.length === rawPanels.length ? asked : layoutForCount(rawPanels.length)
-      if (rawPage.layout && asked && asked.rects.length !== rawPanels.length) warnings.add('有的页格数和版式不一致，已换成合适的版式')
+      const asked = templateById(rawPage.layout)
+      const template = asked && leafCount(asked.frames) === rawPanels.length ? asked : templateForCount(rawPanels.length)
+      if (rawPage.layout && asked && leafCount(asked.frames) !== rawPanels.length) warnings.add('有的页格数和版式不一致，已换成合适的版式')
 
       const panels = rawPanels.map((raw): MangaPanel => {
         const panel = emptyPanel(makeId('panel'))
         panel.scene = clip(raw.scene, LIMITS.scene)
         panel.shot = (SHOTS as readonly string[]).includes(raw.shot) ? (raw.shot as Shot) : 'medium'
+        if ((ANGLES as readonly string[]).includes(raw.angle ?? '') && raw.angle !== 'eye') panel.angle = raw.angle as Angle
         for (const member of raw.cast) {
           const character = byName.get(normalizeName(member.name))
           if (!character) {
@@ -182,8 +187,8 @@ export function parseStoryboard(
         if (!panel.scene) warnings.add('有的格子没有画面描述，请补上')
         return panel
       })
-      while (panels.length < layout.rects.length) panels.push(emptyPanel(makeId('panel')))
-      pages.push({ id: makeId('page'), layoutId: layout.id, panels })
+      while (panels.length < leafCount(template.frames)) panels.push(emptyPanel(makeId('panel')))
+      pages.push({ id: makeId('page'), frames: template.frames, panels })
     }
   }
   if (pages.length > LIMITS.pages) {

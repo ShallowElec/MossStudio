@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyTemplate,
   approveAll,
-  changeLayout,
   exportBlockers,
+  mergeBlocker,
+  mergePanel,
   panelErrorText,
   newPage,
   newSeries,
   nextChapterNumber,
   panelsInUse,
+  splitPanel,
 } from '@renderer/pages/manga/logic'
+import { leafCount } from '@shared/manga/layouts'
 import { toSave } from '@renderer/pages/manga/useSeries'
 import { mangaSeriesSaveSchema } from '@shared/manga/model'
 import { chapterPanels, updatePanel } from '@shared/manga/queue'
@@ -22,15 +26,36 @@ describe('manga page logic', () => {
     expect(nextChapterNumber(mangaSeriesFixture())).toBe(2)
   })
 
-  it('changes a page template without dropping panels that have content', () => {
+  it('applies a template without dropping panels that have content, blank ones going from the end first', () => {
     const page = newPage('grid-four')
     expect(page.panels).toHaveLength(4)
     const filled = { ...page, panels: page.panels.map((panel, index) => (index === 1 ? { ...panel, scene: '有内容' } : panel)) }
-    expect(panelsInUse(filled)).toBe(2)
-    expect(changeLayout(filled, 'two-rows').panels.map((panel) => panel.scene)).toEqual(['', '有内容'])
-    expect(changeLayout(filled, 'single')).toBe(filled)
-    expect(changeLayout(filled, 'six-grid').panels).toHaveLength(6)
-    expect(changeLayout(filled, 'nope')).toBe(filled)
+    expect(panelsInUse(filled)).toBe(1)
+    const two = applyTemplate(filled, 'two-rows')!
+    expect(two.panels.map((panel) => panel.scene)).toEqual(['', '有内容'])
+    expect(leafCount(two.frames)).toBe(2)
+    expect(applyTemplate(filled, 'single')!.panels.map((panel) => panel.scene)).toEqual(['有内容'])
+    const full = { ...filled, panels: filled.panels.map((panel) => ({ ...panel, scene: '有内容' })) }
+    expect(applyTemplate(full, 'two-rows')).toBeUndefined()
+    expect(applyTemplate(filled, 'six-grid')!.panels).toHaveLength(6)
+    expect(applyTemplate(filled, 'nope')).toBeUndefined()
+  })
+
+  it('cuts a panel in two with the new one right after it, and merges back keeping the one with content', () => {
+    const page = newPage('two-rows')
+    const named = { ...page, panels: page.panels.map((panel, index) => ({ ...panel, scene: `格${index + 1}` })) }
+    const cut = splitPanel(named, 0, 'x')!
+    expect(cut.panels.map((panel) => panel.scene)).toEqual(['格1', '', '格2'])
+    expect(leafCount(cut.frames)).toBe(3)
+    expect(mergeBlocker(cut, 2)).toBe('旁边没有和它一刀切开的格')
+    expect(mergeBlocker(named, 0)).toBe('两格都有内容，先清空其中一格')
+    expect(mergeBlocker(cut, 1)).toBeUndefined()
+    const merged = mergePanel(cut, 1)!
+    expect(merged.panels.map((panel) => panel.scene)).toEqual(['格1', '格2'])
+    expect(merged.frames).toEqual(named.frames)
+    // A drawn panel is content too, even without a description.
+    const drawn = { ...cut, panels: cut.panels.map((panel, index) => (index === 1 ? { ...panel, state: 'review' as const } : panel)) }
+    expect(mergePanel(drawn, 1)).toBeUndefined()
   })
 
   it('approves every panel in review with its newest take, and exports only when all are approved', () => {

@@ -1,4 +1,4 @@
-import type { MangaAdapter, MangaCharacter, MangaPanel, MangaSeries, Shot } from './model'
+import type { Angle, MangaAdapter, MangaCharacter, MangaPanel, MangaSeries, Shot } from './model'
 
 /**
  * How one panel becomes a description, LoRA list and reference pictures for
@@ -21,6 +21,24 @@ const SHOT_PROMPT: Record<Shot, string> = {
   medium: '中景，人物膝盖以上',
   close: '近景，人物胸部以上',
   extreme: '特写，脸部或细节占满画面',
+}
+
+export const ANGLE_LABEL: Record<Angle, string> = {
+  eye: '平视',
+  high: '俯视',
+  low: '仰视',
+  side: '侧面',
+  back: '背影',
+  over: '过肩',
+}
+
+const ANGLE_PROMPT: Record<Angle, string> = {
+  eye: '平视镜头',
+  high: '俯视镜头，从上往下拍',
+  low: '仰视镜头，从下往上拍',
+  side: '侧面视角',
+  back: '从背后拍，人物背影',
+  over: '过肩镜头，前景是一个人物的肩膀',
 }
 
 /**
@@ -103,7 +121,7 @@ export function compilePanelPrompt(series: Pick<MangaSeries, 'style' | 'characte
     : joinParts(
         [
           series.style.prompt,
-          SHOT_PROMPT[panel.shot],
+          joinParts([SHOT_PROMPT[panel.shot], panel.angle ? ANGLE_PROMPT[panel.angle] : undefined]),
           panel.scene,
           ...cast.map(({ character, item }) => castLine(character, item)),
           panel.note ? `修改要求：${panel.note}` : undefined,

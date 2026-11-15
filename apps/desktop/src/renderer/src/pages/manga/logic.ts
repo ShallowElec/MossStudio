@@ -1,6 +1,8 @@
-import { PAGE_LAYOUTS, layoutById } from '@shared/manga/layouts'
+import { applyFrames } from '@shared/manga/gacha'
+import { leafCount, mergeFrame, mergeableWith, splitFrame, templateById, type FrameAxis } from '@shared/manga/layouts'
 import {
   emptyPanel,
+  isBlankPanel,
   newId,
   type MangaChapter,
   type MangaPage,
@@ -75,27 +77,49 @@ export function updatePage(series: MangaSeries, chapterId: string, pageId: strin
   }))
 }
 
-export function newPage(layoutId = 'wide-then-two'): MangaPage {
-  const layout = layoutById(layoutId) ?? PAGE_LAYOUTS[0]!
-  return { id: newId('page'), layoutId: layout.id, panels: layout.rects.map(() => emptyPanel(newId('panel'))) }
+export function newPage(templateId = 'wide-then-two'): MangaPage {
+  const frames = (templateById(templateId) ?? templateById('single')!).frames
+  return { id: newId('page'), frames, panels: Array.from({ length: leafCount(frames) }, () => emptyPanel(newId('panel'))) }
 }
 
-const isBlank = (panel: MangaPage['panels'][number]): boolean =>
-  !panel.scene.trim() && !panel.takes.length && !panel.dialogue.length && !panel.cast.length
-
-/** Panels a page must keep when its template changes: up to the last one with anything in it. */
+/** Panels of `page` with anything in them: a new layout must have room for at least these. */
 export function panelsInUse(page: MangaPage): number {
-  for (let index = page.panels.length - 1; index >= 0; index -= 1) if (!isBlank(page.panels[index]!)) return index + 1
-  return 0
+  return page.panels.filter((panel) => !isBlankPanel(panel)).length
 }
 
-/** A new template: empty panels are added or dropped at the end; panels with content are never dropped. */
-export function changeLayout(page: MangaPage, layoutId: string): MangaPage {
-  const layout = layoutById(layoutId)
-  if (!layout || layout.rects.length < panelsInUse(page)) return page
-  const panels = page.panels.slice(0, layout.rects.length)
-  while (panels.length < layout.rects.length) panels.push(emptyPanel(newId('panel')))
-  return { ...page, layoutId: layout.id, panels }
+/** A template's frames: panels keep their reading order, blank ones are added or dropped; undefined when it has no room. */
+export function applyTemplate(page: MangaPage, templateId: string): MangaPage | undefined {
+  const template = templateById(templateId)
+  return template ? applyFrames(page, template.frames, newId) : undefined
+}
+
+/** 拆开: panel `index` cut in two, the new blank panel right after it. */
+export function splitPanel(page: MangaPage, index: number, axis: FrameAxis): MangaPage | undefined {
+  const frames = splitFrame(page.frames, index, axis)
+  if (!frames) return undefined
+  const panels = [...page.panels]
+  panels.splice(index + 1, 0, emptyPanel(newId('panel')))
+  return { ...page, frames, panels }
+}
+
+/** Why panel `index` cannot be merged with its neighbour, or undefined when it can. */
+export function mergeBlocker(page: MangaPage, index: number): string | undefined {
+  const other = mergeableWith(page.frames, index)
+  if (other === undefined) return '旁边没有和它一刀切开的格'
+  if (!isBlankPanel(page.panels[index]!) && !isBlankPanel(page.panels[other]!)) return '两格都有内容，先清空其中一格'
+  return undefined
+}
+
+/** 合并: panel `index` and its neighbour become one, keeping whichever has content. */
+export function mergePanel(page: MangaPage, index: number): MangaPage | undefined {
+  const other = mergeableWith(page.frames, index)
+  const frames = mergeFrame(page.frames, index)
+  if (other === undefined || !frames || mergeBlocker(page, index)) return undefined
+  const keep = isBlankPanel(page.panels[index]!) ? page.panels[other]! : page.panels[index]!
+  const first = Math.min(index, other)
+  const panels = page.panels.filter((_, at) => at !== index && at !== other)
+  panels.splice(first, 0, keep)
+  return { ...page, frames, panels }
 }
 
 /** 全部通过: every panel waiting for review takes its newest picture. */

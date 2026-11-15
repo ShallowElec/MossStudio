@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { templateById } from '@shared/manga/layouts'
 import { mangaPageSchema } from '@shared/manga/model'
 import { parseStoryboard, storyboardRequest } from '@shared/manga/storyboard'
 import { mangaSeriesFixture } from '../../mocks/backend/manga'
@@ -39,7 +40,7 @@ describe('parseStoryboard', () => {
     const { pages, warnings } = parseStoryboard(answer, series, counter())
     expect(warnings).toEqual([])
     expect(pages).toHaveLength(1)
-    expect(pages[0]!.layoutId).toBe('two-rows')
+    expect(pages[0]!.frames).toEqual(templateById('two-rows')!.frames)
     const [port, face] = pages[0]!.panels
     expect(port).toMatchObject({ scene: '港口全景', shot: 'wide', state: 'draft' })
     expect(port!.cast).toEqual([{ characterId: 'char-aki', outfitId: 'outfit-coat', expression: '警惕', pose: '' }])
@@ -78,10 +79,10 @@ describe('parseStoryboard', () => {
       '有的格子没有画面描述，请补上',
       '有一页的格子太多，已拆成两页',
     ])
-    expect(pages.map((page) => [page.layoutId, page.panels.length])).toEqual([
-      ['two-rows', 2],
-      ['six-grid', 6],
-      ['two-rows', 2],
+    expect(pages.map((page) => [page.frames, page.panels.length])).toEqual([
+      [templateById('two-rows')!.frames, 2],
+      [templateById('six-grid')!.frames, 6],
+      [templateById('two-rows')!.frames, 2],
     ])
     const first = pages[0]!.panels[0]!
     expect(first.shot).toBe('medium')

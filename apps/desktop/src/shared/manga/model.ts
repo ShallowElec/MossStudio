@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { frameNodeSchema, leafCount, templateById } from './layouts'
 
 /**
  * The 漫画 workflow's document: one series with its characters (人物卡),
@@ -63,6 +64,9 @@ export const mangaBalloonSchema = z.object({
 
 export const SHOTS = ['wide', 'full', 'medium', 'close', 'extreme'] as const
 export type Shot = (typeof SHOTS)[number]
+/** 角度: eye level, from above, from below, from the side, from behind, over the shoulder. */
+export const ANGLES = ['eye', 'high', 'low', 'side', 'back', 'over'] as const
+export type Angle = (typeof ANGLES)[number]
 
 export const mangaCastSchema = z.object({
   characterId: id,
@@ -97,6 +101,7 @@ export const mangaPanelSchema = z.object({
   /** What happens in the picture (画面描述). */
   scene: z.string().max(4000),
   shot: z.enum(SHOTS),
+  angle: z.enum(ANGLES).optional(),
   cast: z.array(mangaCastSchema).max(MAX_CAST),
   dialogue: z.array(mangaBalloonSchema).max(MAX_DIALOGUE),
   /** Replaces the compiled description when set (精修). */
@@ -115,11 +120,28 @@ export const mangaPanelSchema = z.object({
   note: z.string().max(1000).optional(),
 })
 
-export const mangaPageSchema = z.object({
-  id,
-  layoutId: z.string().min(1).max(40),
-  panels: z.array(mangaPanelSchema).max(12),
-})
+/**
+ * A page written before pages had their own frames named a template (`layoutId`); it reads as that template's
+ * frames, so its panels keep their places.
+ */
+function framesFromTemplate(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || 'frames' in raw || !('layoutId' in raw)) return raw
+  const { layoutId, ...rest } = raw as { layoutId: unknown }
+  const template = typeof layoutId === 'string' ? templateById(layoutId) : undefined
+  return template ? { ...rest, frames: template.frames } : raw
+}
+
+export const mangaPageSchema = z.preprocess(
+  framesFromTemplate,
+  z
+    .object({
+      id,
+      /** 分格, in reading order: the n-th panel of the tree is `panels[n]` (shared/manga/layouts.ts). */
+      frames: frameNodeSchema,
+      panels: z.array(mangaPanelSchema).max(12),
+    })
+    .refine((page) => leafCount(page.frames) === page.panels.length, 'frames and panels do not match'),
+)
 
 export const mangaChapterSchema = z.object({
   id,
@@ -232,6 +254,11 @@ export function newId(prefix: string, random: () => number = Math.random): strin
 
 export function emptyPanel(id: string): MangaPanel {
   return { id, scene: '', shot: 'medium', cast: [], dialogue: [], state: 'draft', attempts: 0, takes: [] }
+}
+
+/** Nothing written, cast, lettered or drawn yet: a layout change may drop it. */
+export function isBlankPanel(panel: MangaPanel): boolean {
+  return panel.state === 'draft' && !panel.scene.trim() && !panel.takes.length && !panel.dialogue.length && !panel.cast.length
 }
 
 export function emptyCharacter(id: string, name: string): MangaCharacter {
