@@ -138,6 +138,7 @@ describe('resolveToolset', () => {
     expect(elsewhere.map((item) => item.name)).toEqual([
       'studio_read_context',
       'studio_select_canvas',
+      'studio_read_canvas',
       'studio_ask_user',
       'studio_ask_approval',
     ])

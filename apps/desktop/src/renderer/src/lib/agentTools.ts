@@ -32,10 +32,20 @@ export function applyStudioDescription(text: string): boolean {
 /** Context block appended to the assistant's system prompt on every turn. */
 export function formatStudioContext(snapshot: StudioSnapshot | null): string | undefined {
   if (!snapshot) return undefined
-  const lines = [
-    `The user is working on the Studio canvas "${snapshot.title}" (${snapshot.width}×${snapshot.height}).`,
-    snapshot.description.trim() ? `Its description currently reads:\n${snapshot.description.trim()}` : 'Its description is empty.',
-  ]
+  const lines: string[] = []
+  if (snapshot.project) {
+    const { canvases } = snapshot.project
+    lines.push(`The project "${snapshot.project.name}" has ${canvases.length} canvas${canvases.length === 1 ? '' : 'es'}:`)
+    for (const canvas of canvases.slice(0, 20)) {
+      const mark = canvas.id === snapshot.project.selectedId ? ' (selected)' : ''
+      lines.push(`- ${canvas.id} · ${canvas.title} · ${canvas.kind} · ${canvas.width}×${canvas.height} · ${canvas.jobState}${mark}`)
+    }
+    if (canvases.length > 20) lines.push(`…and ${canvases.length - 20} more; call studio_read_context to list them.`)
+    lines.push(`The user is working on "${snapshot.title}" (${snapshot.width}×${snapshot.height}).`)
+  } else {
+    lines.push(`The user is working on the Studio canvas "${snapshot.title}" (${snapshot.width}×${snapshot.height}).`)
+  }
+  lines.push(snapshot.description.trim() ? `Its description currently reads:\n${snapshot.description.trim()}` : 'Its description is empty.')
   if (snapshot.regions.length) {
     lines.push('Its regions, in order:')
     snapshot.regions.forEach((region, index) => {

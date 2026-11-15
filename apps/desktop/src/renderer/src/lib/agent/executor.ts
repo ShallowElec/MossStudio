@@ -41,6 +41,8 @@ const HANDLERS: { [N in ToolName]: Handler<N> } = {
 
   studio_select_canvas: ({ id }, api) => api.selectCanvas(id),
 
+  studio_read_canvas: ({ id }, api) => api.readCanvas(id),
+
   // Asking is a card in the chat, not a blocked tool call: the main process
   // attaches it to this turn, and the answer arrives as the next user message.
   studio_ask_user: ({ question, why, multiple, allowFreeText, options }) => ({

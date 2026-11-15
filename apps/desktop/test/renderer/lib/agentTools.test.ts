@@ -36,6 +36,7 @@ function api(patch: Partial<StudioToolApi> = {}): StudioToolApi {
       created: scenes.map((scene, index) => ({ id: `canvas-${index}`, title: scene.title })),
     })),
     selectCanvas: vi.fn((id: string) => ({ selected: id, title: 'Canvas' })),
+    readCanvas: vi.fn((id: string) => ({ id, title: 'Canvas', selected: false })),
     generate: vi.fn(async () => ({ queued: true, jobId: 'j' })),
     problems: vi.fn(() => []),
     ...patch,
@@ -200,6 +201,29 @@ describe('lib/agentTools executeStudioTool', () => {
     ])
     await run('studio_select_canvas', { id: 'canvas-1' })
     expect(tools.selectCanvas).toHaveBeenCalledWith('canvas-1')
+  })
+
+  it('reads another canvas without selecting it', async () => {
+    const tools = api()
+    registerStudioTools(tools)
+    const result = await run('studio_read_canvas', { id: 'canvas-7' })
+    expect(result.ok).toBe(true)
+    expect(tools.readCanvas).toHaveBeenCalledWith('canvas-7')
+    expect(tools.selectCanvas).not.toHaveBeenCalled()
+    expect(parse(result.content)).toMatchObject({ id: 'canvas-7' })
+  })
+
+  it('fails a read of a canvas that is not in the project', async () => {
+    registerStudioTools(
+      api({
+        readCanvas: vi.fn(() => {
+          throw new Error('没有这个画面：nope')
+        }),
+      }),
+    )
+    const result = await run('studio_read_canvas', { id: 'nope' })
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('没有这个画面')
   })
 
   it('updates and removes regions by their 1-based index', async () => {
@@ -439,6 +463,28 @@ describe('lib/agentTools snapshot helpers', () => {
       '1. text: title [text: MEOW]',
       '2. object: (no caption) (hidden)',
       '3. text: empty text',
+    ])
+  })
+
+  it('formatStudioContext lists the project so a set stays in view', () => {
+    const text = formatStudioContext(
+      snapshot({
+        project: {
+          name: '春季海报',
+          selectedId: 'c2',
+          canvases: [
+            { id: 'c1', title: '封面', kind: 'layout', width: 864, height: 1152, jobState: 'succeeded' },
+            { id: 'c2', title: '内页', kind: 'layout', width: 864, height: 1152, jobState: 'running' },
+          ],
+        },
+      }),
+    )!
+    expect(text.split('\n').slice(0, 5)).toEqual([
+      'The project "春季海报" has 2 canvases:',
+      '- c1 · 封面 · layout · 864×1152 · succeeded',
+      '- c2 · 内页 · layout · 864×1152 · running (selected)',
+      'The user is working on "Poster" (1024×768).',
+      'Its description currently reads:',
     ])
   })
 })

@@ -22,6 +22,10 @@ const box = z
 export const TOOL_SCHEMAS = {
   studio_read_context: z.strictObject({}),
 
+  studio_read_canvas: z.strictObject({
+    id: z.string().trim().min(1).max(80).describe('Canvas id, as listed by studio_read_context. The selection does not change.'),
+  }),
+
   studio_select_canvas: z.strictObject({
     id: z.string().trim().min(1).max(80).describe('Canvas id, as listed by studio_read_context.'),
   }),

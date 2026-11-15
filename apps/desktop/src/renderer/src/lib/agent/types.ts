@@ -1,4 +1,4 @@
-import type { ProjectLayerKind } from '@shared/types'
+import type { ProjectCanvas, ProjectLayerKind } from '@shared/types'
 
 /** What the assistant sees of the canvas the user is working on. */
 export interface StudioSnapshot {
@@ -7,6 +7,15 @@ export interface StudioSnapshot {
   width: number
   height: number
   regions: Array<{ kind: ProjectLayerKind; caption: string; text?: string; visible: boolean }>
+  /**
+   * The whole project, so a set of pictures stays in view even when the
+   * conversation moves away from the canvas that is selected.
+   */
+  project?: {
+    name: string
+    selectedId: string
+    canvases: Array<{ id: string; title: string; kind: ProjectCanvas['kind']; width: number; height: number; jobState: string }>
+  }
 }
 
 /** A region box in 0-1 canvas coordinates, as the tools take it. */
@@ -66,6 +75,8 @@ export interface StudioToolApi {
   createScenes(scenes: SceneDraft[]): { created: Array<{ id: string; title: string }> }
   /** Make another canvas the selected one (the tools edit whatever is selected). */
   selectCanvas(id: string): { selected: string; title: string }
+  /** Read one canvas by id without selecting it; throws when there is no such canvas. */
+  readCanvas(id: string): unknown
   generate(prompt?: string): Promise<unknown> | unknown
   /** What still blocks generation on the selected canvas; empty when it can run. */
   problems(): string[]

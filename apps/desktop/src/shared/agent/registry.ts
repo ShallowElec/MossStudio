@@ -67,6 +67,16 @@ export const AGENT_TOOLS: AgentTool[] = [
     summarize: (args) => `切到 ${short(text(args.id), 16)}`,
   },
   {
+    name: 'studio_read_canvas',
+    title: '读取画面',
+    pack: 'canvas.read',
+    risk: 'read',
+    requires: [],
+    description:
+      'Read one Canvas by id without selecting it: the same detail studio_read_context gives for the selected one, plus whether it is the one selected. Use it to compare the pictures of a set, or to look at one you are not on.',
+    summarize: (args) => `读 ${short(text(args.id), 16)}`,
+  },
+  {
     name: 'studio_ask_user',
     title: '问你一句',
     pack: 'ask',
@@ -233,6 +243,7 @@ export const TOOL_RULES = `How to work:
 - studio_ask_approval is a yes/no card. If the answer is a choice between options ("只跑镜 6，还是 6 镜一起"), that is studio_ask_user with those options, not a confirm card.
 - A go-ahead is a card, not a sentence: when the only thing missing is permission, call studio_ask_approval instead of writing the question. Once the user approves, or answers 需要 / 好 / 可以, do the step — never ask for the same permission twice.
 - A set of pictures (a series, a storyboard, "一套图") goes through studio_create_scenes: plan every scene, then build them in one call. Use studio_select_canvas to move between the new canvases and refine the ones that need it.
+- To look at another picture of a set without leaving the canvas you are on, read it with studio_read_canvas by id; the project summary on every turn lists the ids.
 - Every write result ends with problems: what still blocks generation. Clear them before calling studio_generate.
 - studio_generate returns immediately with a job id; call it once per request and do not wait for the picture.
 - Report the sampler values that were actually used, never values you made up.`

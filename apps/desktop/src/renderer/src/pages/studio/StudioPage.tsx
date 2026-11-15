@@ -557,6 +557,27 @@ export function StudioPage(): React.JSX.Element {
       live.current.project.updateCanvas(canvas.id, () => next)
       return { added: region.id, bbox: region.bbox, index: canvas.layers.length + 1 }
     }
+    /** One canvas in the shape the tools read, whichever canvas it is. */
+    const viewOf = (canvas: ProjectCanvas) => ({
+      id: canvas.id,
+      kind: canvas.kind,
+      title: canvas.title,
+      width: canvas.width,
+      height: canvas.height,
+      steps: canvas.steps,
+      cfg: canvas.cfg,
+      seed: isSeedLocked(canvas) ? canvas.seed : 'random',
+      prompt: canvasDescription(canvas),
+      negative: canvas.negative,
+      layers: canvas.layers.map((layer, index) => ({
+        index: index + 1,
+        label: layer.kind,
+        caption: layer.caption,
+        text: layer.text,
+        bbox: layer.bbox.map((value) => Math.round(value)),
+        visible: layer.visible !== false,
+      })),
+    })
     const api: StudioToolApi = {
       state: () => {
         const canvas = current()
@@ -576,35 +597,21 @@ export function StudioPage(): React.JSX.Element {
             jobState: item.jobState ?? 'idle',
             outputs: item.outputs?.length ?? 0,
           })),
-          selected: canvas
-            ? {
-                id: canvas.id,
-                kind: canvas.kind,
-                title: canvas.title,
-                width: canvas.width,
-                height: canvas.height,
-                steps: canvas.steps,
-                cfg: canvas.cfg,
-                seed: isSeedLocked(canvas) ? canvas.seed : 'random',
-                prompt: canvasDescription(canvas),
-                negative: canvas.negative,
-                layers: canvas.layers.map((layer, index) => ({
-                  index: index + 1,
-                  label: layer.kind,
-                  caption: layer.caption,
-                  text: layer.text,
-                  bbox: layer.bbox.map((value) => Math.round(value)),
-                  visible: layer.visible !== false,
-                })),
-              }
-            : null,
+          selected: canvas ? viewOf(canvas) : null,
           notes:
             'prompt is the overall description; the final prompt is compiled from it plus the visible regions. bbox is [x1,y1,x2,y2] in canvas pixels; the tools take normalised 0-1 x/y/w/h. steps snap to 8 (fast), 20 (standard) or 50 (fine). A text region needs both strings: caption is the lettering style, text is exactly what is rendered.',
         }
       },
+      readCanvas: (id) => {
+        const { project: p } = live.current
+        const canvas = p.canvasesRef.current.find((item) => item.id === id)
+        if (!canvas) throw new Error(`没有这个画面：${id}`)
+        return { ...viewOf(canvas), selected: p.selectedRef.current === id }
+      },
       snapshot: () => {
         const canvas = current()
         if (!canvas) return null
+        const { project: p } = live.current
         return {
           title: canvas.title,
           description: canvasDescription(canvas),
@@ -616,6 +623,18 @@ export function StudioPage(): React.JSX.Element {
             text: layer.text,
             visible: layer.visible !== false,
           })),
+          project: {
+            name: p.projectName,
+            selectedId: canvas.id,
+            canvases: p.canvasesRef.current.map((item) => ({
+              id: item.id,
+              title: item.title,
+              kind: item.kind,
+              width: item.width,
+              height: item.height,
+              jobState: item.jobState ?? 'idle',
+            })),
+          },
         }
       },
       setPrompt: (value) => {
