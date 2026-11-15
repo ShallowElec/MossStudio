@@ -75,7 +75,7 @@ const NO_LINE_START = /^[。，、．！？；：）」』】〉》”’…‥�
 /** The same punctuation at the end of a line, which may pass its edge. */
 const TRAILING_HANG = /[。，、．！？；：）」』】〉》”’…‥ー～ぁぃぅぇぉっゃゅょ.,!?;:)\]}]+$/u
 /** Never at the end of a line: it moves down with the text it opens. */
-const NO_LINE_END = /[（「『【〈《“‘(\[{]$/u
+const NO_LINE_END = /[（「『【〈《“‘([{]$/u
 
 /**
  * Break `text` into lines no wider than `maxWidth`. Chinese and Japanese break
