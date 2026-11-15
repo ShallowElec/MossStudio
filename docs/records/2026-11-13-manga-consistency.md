@@ -41,6 +41,19 @@ So `REFERENCE_PIXELS` sends 25000 px for wide and full shots, 50000 for medium a
 
 With the changes above (`1995a7a`) and the clean portrait, the same 12 panels were drawn through the Studio in about 15.5 minutes, again with no failure, never more than two at a time. Each job carried the size for its shot. No panel drew a balloon. 阿秋's face, hair and glasses matched in all 12, the wide and full shots showed her full figure, and the scenes followed the descriptions (rainy harbour, sunny street, moonlit rooftop). One running panel set at night came out in daylight. The pages showed a 。 alone on a balloon's last line; `wrapText` now keeps closing punctuation on the line before (`test/shared/manga/balloons.test.ts`).
 
+## A weight that works
+
+MossInfer's `weight` faded the picture toward gray, which a black and white line portrait hardly notices. The engine fork (`fb80399` on `feat/vision-references`) makes it blend the predictions with and without the pictures, and adds a step window. Same seeds, clean portrait at 100000 px:
+
+| Variation | Wide and full shots | Close shots | Time per panel |
+| --- | --- | --- | --- |
+| weight 1 | Close-ups (bit for bit the earlier engine) | Faces match | 70 s |
+| weight 0.7 | Mostly as described; the rooftop wide shot still became a close-up | Faces match | 107 s |
+| weight 0.5 | All as described, short hair and glasses kept | Faces match, the crowd stays | 107 s |
+| window from 0.3 or 0.5 | Like no portrait at all | Faces drift as without one | 70 s |
+
+The face is set in the early steps, so a late window does not help. Sizing by shot (25000 px for wide and full shots) looks as good as weight 0.5 and costs nothing extra, so it stays the default; 参考强度 on the card lowers the weight for a character whose picture still pulls too hard.
+
 ## Not covered
 
 LoRA, an engine without vision references, other language models, more than one referenced character in a panel.

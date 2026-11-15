@@ -61,6 +61,12 @@ export function panelRequest(input: {
     notes.push('当前引擎还不支持人物参考图，这一格只用了文字描述和 LoRA')
     references = []
   }
+  // 参考强度 below 1 needs an engine whose weight guides the sampling; an older one faded the picture instead.
+  let referenceWeight = compiled.referenceWeight
+  if (references.length && referenceWeight < 1 && !features?.visionGuidance) {
+    notes.push('当前引擎不支持调低参考强度，这一格按 100% 画')
+    referenceWeight = 1
+  }
 
   const layout = layoutById(page.layoutId)
   const index = page.panels.findIndex((item) => item.id === panel.id)
@@ -83,7 +89,15 @@ export function panelRequest(input: {
       prompt: compiled.prompt,
       negativePrompt: compiled.negative,
       adapters,
-      ...(references.length ? { visionReferences: { paths: references, maxPixels: compiled.referencePixels } } : {}),
+      ...(references.length
+        ? {
+            visionReferences: {
+              paths: references,
+              maxPixels: compiled.referencePixels,
+              ...(referenceWeight < 1 ? { weight: referenceWeight } : {}),
+            },
+          }
+        : {}),
       width: size.width,
       height: size.height,
       steps,

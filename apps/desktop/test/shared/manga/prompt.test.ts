@@ -29,6 +29,18 @@ describe('compilePanelPrompt', () => {
     expect(sizes).toEqual([25_000, 25_000, 50_000, 50_000, 100_000])
   })
 
+  it('takes the lowest 参考强度 of the characters that send a picture', () => {
+    const both = { ...first!, cast: [...first!.cast, ...second!.cast] }
+    expect(compilePanelPrompt(series, both).referenceWeight).toBe(1)
+    const set = (id: string, referenceStrength: number) => ({
+      ...series,
+      characters: series.characters.map((character) => (character.id === id ? { ...character, referenceStrength } : character)),
+    })
+    expect(compilePanelPrompt(set('char-aki', 0.6), both).referenceWeight).toBe(0.6)
+    // 莲 sends no picture, so his strength does not count.
+    expect(compilePanelPrompt(set('char-ren', 0.3), both).referenceWeight).toBe(1)
+  })
+
   it('uses the outfit chosen for this panel over the default one', () => {
     const coat = { ...first!, cast: [{ characterId: 'char-aki', outfitId: 'outfit-coat', expression: '', pose: '' }] }
     expect(compilePanelPrompt(series, coat).prompt).toContain('卡其色长风衣')

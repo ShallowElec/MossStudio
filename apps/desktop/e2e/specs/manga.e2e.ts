@@ -301,6 +301,15 @@ describe('manga', () => {
     await card.getByRole('button', { name: '添加参考图' }).click()
     await card.getByRole('img', { name: '参考图 1' }).waitFor()
     expect(await app.calls('studio:import-image')).toEqual([{ projectId: 'project-manga', path: '/home/user/ren-front.png' }])
+    // With a picture comes its strength: lowered, it is saved on the card and later sent as the engine's weight.
+    await card.getByRole('slider', { name: '参考强度' }).fill('0.5')
+    await expect
+      .poll(() =>
+        app
+          .calls<{ characters: Array<{ id: string; referenceStrength?: number }> }>('manga:save')
+          .then((calls) => calls.at(-1)?.characters.find((item) => item.id === 'char-ren')?.referenceStrength),
+      )
+      .toBe(0.5)
 
     await card.getByRole('button', { name: '添加服装' }).click()
     await card.getByLabel('样子').fill('白大褂')

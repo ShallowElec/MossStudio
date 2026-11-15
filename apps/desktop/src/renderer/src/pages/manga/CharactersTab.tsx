@@ -18,6 +18,8 @@ import {
   Textarea,
   useToast,
 } from '../../components/ui'
+import { strength } from '../../lib/format'
+import { SliderField } from '../studio/InputControls'
 import { AdapterEditor } from './parts'
 import type { SeriesUpdate } from './useSeries'
 
@@ -194,6 +196,23 @@ function CharacterEditor({
             </Button>
           ) : null}
         </div>
+        {character.references.length ? (
+          <div className="flex flex-col gap-1">
+            <SliderField
+              label="参考强度"
+              className="max-w-sm"
+              value={character.referenceStrength ?? 1}
+              min={0.1}
+              max={1}
+              step={0.1}
+              format={(value) => strength(value, 'share')}
+              onChange={(value) => set({ referenceStrength: value >= 1 ? undefined : Math.round(value * 10) / 10 })}
+            />
+            <p className="text-caption text-ink-2">
+              参考图把画面带偏（动作、远景变成大头）时调低。调低后动作和场景更听描述，脸会没那么像，每格多花约一半时间。
+            </p>
+          </div>
+        ) : null}
       </Section>
 
       <Section title="服装" description="同一个人物在不同章节可以换装。每一格可以单独选，不选就用默认的。">

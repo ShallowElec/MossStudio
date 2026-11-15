@@ -83,6 +83,32 @@ describe('panelRequest', () => {
     expect(Number(narrow.body['height'])).toBeGreaterThan(Number(narrow.body['width']))
   })
 
+  it('sends a lowered 参考强度 as the weight only to an engine whose weight guides the sampling', () => {
+    const softer = {
+      ...series,
+      characters: series.characters.map((character) =>
+        character.id === 'char-aki' ? { ...character, referenceStrength: 0.5 } : character,
+      ),
+    }
+    const guided = request({ series: softer, features: features({ visionGuidance: true }) })
+    if (!guided.ok) throw new Error(guided.message)
+    expect(guided.body['visionReferences']).toEqual({
+      paths: ['/fixture/projects/project-manga/assets/aki.png'],
+      maxPixels: 25_000,
+      weight: 0.5,
+    })
+    expect(guided.notes).toEqual([])
+    // An engine whose weight fades the picture toward gray gets none, and the panel says it ran at full strength.
+    const older = request({ series: softer, features: features({ visionGuidance: false }) })
+    if (!older.ok) throw new Error(older.message)
+    expect(older.body['visionReferences']).not.toHaveProperty('weight')
+    expect(older.notes).toEqual(['当前引擎不支持调低参考强度，这一格按 100% 画'])
+    // Full strength sends no weight at all.
+    const full = request({ features: features({ visionGuidance: true }) })
+    if (!full.ok) throw new Error(full.message)
+    expect(full.body['visionReferences']).not.toHaveProperty('weight')
+  })
+
   it('leaves out what the engine cannot do, and says so', () => {
     const result = request({ features: features({ lora: false, visionReferences: false }) })
     if (!result.ok) throw new Error(result.message)

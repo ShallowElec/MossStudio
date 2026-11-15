@@ -50,6 +50,11 @@ export interface CompiledPanel {
   references: string[]
   /** How large each reference goes into the prompt, by the panel's shot (REFERENCE_PIXELS). */
   referencePixels: number
+  /**
+   * How much the references guide the panel: the lowest 参考强度 of the characters that send one (the engine takes one
+   * weight per request), 1 when none is set.
+   */
+  referenceWeight: number
   /** What stops this panel from being drawn, in plain words. */
   problems: string[]
 }
@@ -87,10 +92,9 @@ export function compilePanelPrompt(series: Pick<MangaSeries, 'style' | 'characte
     adapters.push(adapter)
   }
 
-  const references = cast
-    .map(({ character }) => character.references[0]?.path)
-    .filter((path): path is string => Boolean(path))
-    .slice(0, MANGA_MAX_REFERENCES)
+  const referenced = cast.filter(({ character }) => Boolean(character.references[0]?.path)).slice(0, MANGA_MAX_REFERENCES)
+  const references = referenced.map(({ character }) => character.references[0]!.path)
+  const referenceWeight = Math.min(1, ...referenced.map(({ character }) => character.referenceStrength ?? 1))
 
   const override = panel.promptOverride?.trim()
   if (!override && !panel.scene.trim()) problems.push('这一格还没有画面描述')
@@ -119,6 +123,7 @@ export function compilePanelPrompt(series: Pick<MangaSeries, 'style' | 'characte
     adapters,
     references,
     referencePixels: REFERENCE_PIXELS[panel.shot],
+    referenceWeight,
     problems,
   }
 }

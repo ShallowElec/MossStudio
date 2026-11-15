@@ -40,6 +40,8 @@ export const mangaCharacterSchema = z.object({
   /** Words a character LoRA was trained on; added before the appearance. */
   triggerWords: z.string().max(500),
   references: z.array(mangaImageSchema).max(8),
+  /** 参考强度, how much the first reference picture guides each panel (engine `vision_references.weight`); absent = 1. */
+  referenceStrength: z.number().min(0.1).max(1).optional(),
   outfits: z.array(mangaOutfitSchema).max(20),
   defaultOutfitId: id.optional(),
   adapters: z.array(mangaAdapterSchema).max(8),
