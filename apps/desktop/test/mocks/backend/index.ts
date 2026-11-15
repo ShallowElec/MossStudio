@@ -108,6 +108,7 @@ export interface MockBackend {
   readonly unhandled: string[]
   callsTo(channel: string): unknown[]
   handle(channel: string, handler: Handler): void
+  /** Make `channel` fail, `times` times (all calls by default); `times: 0` clears it. */
   fail(channel: string, error?: Partial<IpcError>, options?: { times?: number }): void
   hold(channel: string): HeldCall
   emit(event: string, data: unknown): void
@@ -996,6 +997,7 @@ export function createMockBackend(initial: ScenarioName | MockBackendState = 're
       overrides.set(channel, handler)
     },
     fail(channel, error = {}, { times = Number.POSITIVE_INFINITY } = {}) {
+      if (times <= 0) return void failures.delete(channel)
       failures.set(channel, { error: { code: error.code ?? 'E_MOCK_FAIL', message: error.message ?? `${channel} failed` }, times })
     },
     hold(channel) {

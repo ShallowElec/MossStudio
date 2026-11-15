@@ -118,8 +118,11 @@ function SeriesWorkspace({ id, onClose }: { id: string; onClose: () => void }): 
     return () => window.removeEventListener('beforeunload', flush)
   }, [saveNow])
 
+  // A failed save keeps the workspace open: its edits exist nowhere else, and the notice says so.
   const close = (): void => {
-    void saveNow().then(onClose)
+    void saveNow().then((saved) => {
+      if (saved) onClose()
+    })
   }
 
   const remove = async (): Promise<void> => {

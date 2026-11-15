@@ -255,6 +255,24 @@ describe('manga', () => {
       .toBe(true)
   })
 
+  it('stays in the series when its last edits could not be saved', async () => {
+    const page = await openSeries(() => {
+      window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    await page.getByRole('tab', { name: '设定' }).click()
+    await page.evaluate(() => window.__mock.fail(window.__mock.Ipc.mangaSave, { code: 'E_WRITE', message: '磁盘已满' }))
+    await page.getByRole('switch', { name: '成品为纯黑白' }).click()
+    await page.getByRole('button', { name: '返回漫画列表' }).click()
+    await page.getByText('没有保存成功：磁盘已满').waitFor()
+    await expect.poll(() => page.getByRole('switch', { name: '成品为纯黑白' }).getAttribute('aria-checked')).toBe('true')
+
+    await page.evaluate(() => window.__mock.fail(window.__mock.Ipc.mangaSave, {}, { times: 0 }))
+    await page.getByRole('button', { name: '返回漫画列表' }).click()
+    await page.getByRole('button', { name: '新建漫画' }).waitFor()
+    expect(await page.evaluate(() => window.__mock.state.manga[0]?.style.monochrome)).toBe(true)
+  })
+
   it('stops adding lines and characters at the limits, and refuses to export a page whose picture is gone', async () => {
     const page = await openSeries(() => {
       const { mangaSeriesFixture } = window.__mock.fixtures

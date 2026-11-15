@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import {
   MANGA_SCHEMA_VERSION,
   mangaSeriesSchema,
@@ -114,9 +114,11 @@ export function writeChapterPages(folder: string, input: { title: string; chapte
   for (const page of input.pages) {
     if (!PNG_SIGNATURE.every((byte, index) => page[index] === byte)) throw codedError('E_INPUT', '页面图片无效，请重新导出')
   }
-  // The title names a folder: no separators or characters Windows refuses.
-  const safeTitle = input.title.replace(/[\\/:*?"<>|]/g, '_').trim() || '漫画'
+  // The title names a folder: no separators, characters Windows refuses, or `.` / `..`, which would leave the chosen folder.
+  const cleaned = input.title.replace(/[\\/:*?"<>|]/g, '_').trim()
+  const safeTitle = cleaned && !/^\.+$/.test(cleaned) ? cleaned : '漫画'
   const target = join(folder, safeTitle)
+  if (dirname(resolve(target)) !== resolve(folder)) throw codedError('E_INPUT', '导出文件夹无效')
   mkdirSync(target, { recursive: true })
   const names = exportFileNames(input.chapterNumber, input.pages.length)
   input.pages.forEach((page, index) => writeFileSync(join(target, names[index]!), page))

@@ -26,6 +26,7 @@ export function useDrawingQueue(options: {
   notify: (message: string, tone: 'info' | 'error') => void
 }): void {
   const jobs = useApp((state) => state.jobs)
+  const jobsLoaded = useApp((state) => state.ready)
   const catalog = useApp((state) => state.catalog)
   const sending = useRef(false)
   // Bumped when a round ends, so panels queued meanwhile are sent without waiting for another edit.
@@ -35,9 +36,16 @@ export function useDrawingQueue(options: {
   latest.current = options
 
   // Job events: finished pictures go up for review, failures go back in the queue.
+  // The job list keeps only the newest jobs, so once it has loaded, a panel left
+  // running whose job is gone is retried; done once per opening, because a job
+  // sent later can reach the list after its panel is marked running.
+  const recovered = useRef<string | null>(null)
+  const seriesId = options.series?.id ?? null
   useEffect(() => {
-    latest.current.update((series) => reconcile(series, jobs))
-  }, [jobs, options.series?.id])
+    const complete = jobsLoaded && seriesId !== null && recovered.current !== seriesId
+    if (complete) recovered.current = seriesId
+    latest.current.update((series) => reconcile(series, jobs, complete))
+  }, [jobs, jobsLoaded, seriesId])
 
   const { series } = options
   useEffect(() => {

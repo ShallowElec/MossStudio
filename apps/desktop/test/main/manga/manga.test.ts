@@ -75,6 +75,14 @@ describe('chapter export', () => {
     expect([...readFileSync(join(target, '第2话-01.png'))]).toEqual([...png()])
   })
 
+  it('keeps a title made of dots inside the chosen folder', () => {
+    const folder = join(dataRoot(), 'export', 'chosen')
+    for (const title of ['..', '.', ' ... ']) {
+      expect(writeChapterPages(folder, { title, chapterNumber: 1, pages: [png()] })).toBe(join(folder, '漫画'))
+    }
+    expect(readdirSync(join(dataRoot(), 'export')).sort()).toEqual(['chosen'])
+  })
+
   it('refuses anything that is not a PNG', () => {
     const folder = join(dataRoot(), 'export')
     expect(() => writeChapterPages(folder, { title: 't', chapterNumber: 1, pages: [new Uint8Array([1, 2, 3])] })).toThrow('页面图片无效')
