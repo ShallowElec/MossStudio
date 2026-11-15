@@ -1,5 +1,5 @@
 import { applyFrames } from '@shared/manga/gacha'
-import { leafCount, mergeFrame, mergeableWith, splitFrame, templateById, type FrameAxis } from '@shared/manga/layouts'
+import { MAX_FRAME_PANELS, leafCount, mergeFrame, mergeableWith, splitFrame, templateById, type FrameAxis } from '@shared/manga/layouts'
 import {
   emptyPanel,
   isBlankPanel,
@@ -100,6 +100,19 @@ export function splitPanel(page: MangaPage, index: number, axis: FrameAxis): Man
   const panels = [...page.panels]
   panels.splice(index + 1, 0, emptyPanel(newId('panel')))
   return { ...page, frames, panels }
+}
+
+/** Why panel `index` cannot be cut along `axis`, or undefined when it can. */
+export function splitBlocker(page: MangaPage, index: number, axis: FrameAxis): string | undefined {
+  if (page.panels.length >= MAX_FRAME_PANELS) return `一页最多 ${MAX_FRAME_PANELS} 格`
+  if (!splitFrame(page.frames, index, axis)) return axis === 'x' ? '这一格太窄，拆不开了' : '这一格太矮，拆不开了'
+  return undefined
+}
+
+/** The first drawn layout with room for the page's panels that have content; null when none has. */
+export function firstUsable(found: ReadonlyArray<{ panels: number }>, inUse: number): number | null {
+  const index = found.findIndex((item) => item.panels >= inUse)
+  return index < 0 ? null : index
 }
 
 /** Why panel `index` cannot be merged with its neighbour, or undefined when it can. */

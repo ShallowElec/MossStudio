@@ -33,7 +33,7 @@ import { newId, type MangaPage, type MangaSeries } from '@shared/manga/model'
 import { Notice } from '../../components/common/Notice'
 import { Switch } from '../../components/form'
 import { Button, FieldLabel, Segmented, Select, cn } from '../../components/ui'
-import { applyTemplate, mergeBlocker, mergePanel, panelsInUse, splitPanel } from './logic'
+import { applyTemplate, firstUsable, mergeBlocker, mergePanel, panelsInUse, splitBlocker, splitPanel } from './logic'
 import { PagePreview } from './parts'
 
 /**
@@ -218,7 +218,9 @@ export function PageLayout({
   const [draw, setDraw] = useState<(LayoutDraw & { seed: string }) | null>(null)
   const [picked, setPicked] = useState<number | null>(null)
   const inUse = panelsInUse(page)
-  const candidate = picked !== null ? draw?.found[picked] : undefined
+  const pickedItem = picked !== null ? draw?.found[picked] : undefined
+  // A layout with fewer panels than have content can be looked at in the tray, never previewed or applied.
+  const candidate = pickedItem && pickedItem.panels >= inUse ? pickedItem : undefined
   // The page as it would look with the picked layout, shown until 用这张 or 收起.
   const shown = useMemo(() => (candidate ? (applyFrames(page, candidate.frames, newId) ?? page) : page), [candidate, page])
   const index = selected !== null && selected < page.panels.length ? selected : null
@@ -232,7 +234,7 @@ export function PageLayout({
     const panels = count === 'keep' ? page.panels.length : count === 'any' ? undefined : Number(count)
     const result = drawLayouts({ seed, scope: page.id, style: LAYOUT_STYLES[styleId], panels })
     setDraw({ ...result, seed })
-    setPicked(result.found.length ? 0 : null)
+    setPicked(firstUsable(result.found, panelsInUse(page)))
   }
 
   return (
@@ -259,14 +261,16 @@ export function PageLayout({
             <div className="flex flex-wrap gap-1.5">
               <Button
                 size="xs"
-                disabled={page.panels.length >= MAX_FRAME_PANELS}
+                disabled={Boolean(splitBlocker(page, index, 'y'))}
+                title={splitBlocker(page, index, 'y')}
                 onClick={() => edit((current) => splitPanel(current, index, 'y'))}
               >
                 <Rows2 className="size-3.5" strokeWidth={1.6} /> 上下拆开
               </Button>
               <Button
                 size="xs"
-                disabled={page.panels.length >= MAX_FRAME_PANELS}
+                disabled={Boolean(splitBlocker(page, index, 'x'))}
+                title={splitBlocker(page, index, 'x')}
                 onClick={() => edit((current) => splitPanel(current, index, 'x'))}
               >
                 <Columns2 className="size-3.5" strokeWidth={1.6} /> 左右拆开

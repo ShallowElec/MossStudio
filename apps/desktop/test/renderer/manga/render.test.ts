@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { drawPage, missingPictures, type PictureCache } from '@renderer/pages/manga/render'
-import { BLEED_OVERRUN, panel, split } from '@shared/manga/layouts'
+import { BLEED_OVERRUN, PAGE_HEIGHT, PAGE_MARGIN, PAGE_WIDTH, panel, split } from '@shared/manga/layouts'
 import { mangaSeriesFixture } from '../../mocks/backend/manga'
 
 describe('missingPictures', () => {
@@ -43,5 +43,33 @@ describe('drawPage', () => {
     // The slanted gutter: the first panel's two bottom corners are at different heights.
     const first = calls.slice(0, 4).map(([, , y]) => y)
     expect(new Set(first.slice(2)).size).toBe(2)
+  })
+})
+
+describe('drawPage lettering', () => {
+  it('keeps a bleeding panel’s balloons on the paper', () => {
+    const page = mangaSeriesFixture().chapters[0]!.pages[0]!
+    page.frames = split('y', 0.4, panel(true), split('x', 0.5, panel(), panel(true)))
+    page.panels[0]!.dialogue = [{ id: 'a', kind: 'speech', text: '我来看看。', x: 1, y: 0 }]
+    page.panels[1]!.dialogue = []
+    page.panels[2]!.dialogue = [{ id: 'b', kind: 'speech', text: '灯塔有人！', x: 0, y: 1 }]
+    const ellipses: number[][] = []
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_, key: string) =>
+        key === 'measureText'
+          ? (text: string) => ({ width: text.length * 40 })
+          : key === 'ellipse'
+            ? (...args: number[]) => ellipses.push(args)
+            : () => undefined,
+      set: () => true,
+    })
+    drawPage(ctx, { readingDirection: 'rtl', style: {} }, page, new Map())
+    expect(ellipses).toHaveLength(2)
+    for (const [cx, cy, rx, ry] of ellipses) {
+      expect(cx! - rx!).toBeGreaterThanOrEqual(PAGE_MARGIN)
+      expect(cy! - ry!).toBeGreaterThanOrEqual(PAGE_MARGIN)
+      expect(cx! + rx!).toBeLessThanOrEqual(PAGE_WIDTH - PAGE_MARGIN)
+      expect(cy! + ry!).toBeLessThanOrEqual(PAGE_HEIGHT - PAGE_MARGIN)
+    }
   })
 })

@@ -52,8 +52,8 @@ The geometry, styles, scoring and shot rules follow the 漫画分镜工作台 of
 `pages/manga/PageLayout.tsx` is the page's 分格 beside its panels:
 
 - the preview with the frames on top. Click a panel to pick it, and drag a gutter or focus it and use the arrow keys;
-- 上下拆开, 左右拆开, 合并 (refused when both panels have content) and 出血 for the picked panel;
-- 抽分格: a style, a panel count (the current one by default), and eight candidates. One is previewed until 用这张;
+- 上下拆开 and 左右拆开 (disabled, with the reason, at 12 panels or when the panel is too small to cut), 合并 (refused when both panels have content) and 出血 for the picked panel;
+- 抽分格: a style, a panel count (the current one by default), and eight candidates. The first one with room for the panels that have content is previewed until 用这张; one without room cannot be picked;
 - 套用版式 and 抽镜头.
 
 ## 3. Storyboard and memory
@@ -95,7 +95,7 @@ LoRA and pictures the engine does not support (`engine:features`; pictures need 
 
 ## 5. Lettering and export
 
-`pages/manga/render.ts` draws a page on a canvas. It fills white paper, covers each frame's bounding box with the panel's chosen picture and clips it to the frame (in grayscale when the series is `monochrome`, since a description alone does not keep the engine from using colour), strokes the frame, and draws the balloons on top, inside the largest upright rectangle of the frame (`innerRect`). `layoutBalloon` and `wrapText` (`shared/manga/balloons.ts`) size balloons, with text at most 30% of the panel wide, and break their lines. Closing punctuation never starts a line and hangs past the edge instead, and an opening bracket never ends one (禁则). 对白 balloons are ellipses, 心声 dashed ellipses, 喊叫 spiked and 旁白 boxes. A balloon is placed by one of nine spots (`BALLOON_SPOTS` in `shared/manga/balloons.ts`). A balloon's `x` and `y` are anchors: 0 and 1 put it against an edge, with a margin, so a corner balloon stays in its corner. New balloons fill the corners in reading order (`defaultBalloonPlaces`). Nothing detects faces, and the description does not mention balloons (section 4), so a balloon over a face needs another spot chosen by hand. The page preview and the exported file are the same drawing.
+`pages/manga/render.ts` draws a page on a canvas. It fills white paper, covers each frame's bounding box with the panel's chosen picture and clips it to the frame (in grayscale when the series is `monochrome`, since a description alone does not keep the engine from using colour), strokes the frame, and draws the balloons on top, inside the largest upright rectangle of the frame within the margins (`innerRect`), so a bleeding panel's balloons stay on the paper. `layoutBalloon` and `wrapText` (`shared/manga/balloons.ts`) size balloons, with text at most 30% of the panel wide, and break their lines. Closing punctuation never starts a line and hangs past the edge instead, and an opening bracket never ends one (禁则). 对白 balloons are ellipses, 心声 dashed ellipses, 喊叫 spiked and 旁白 boxes. A balloon is placed by one of nine spots (`BALLOON_SPOTS` in `shared/manga/balloons.ts`). A balloon's `x` and `y` are anchors: 0 and 1 put it against an edge, with a margin, so a corner balloon stays in its corner. New balloons fill the corners in reading order (`defaultBalloonPlaces`). Nothing detects faces, and the description does not mention balloons (section 4), so a balloon over a face needs another spot chosen by hand. The page preview and the exported file are the same drawing.
 
 导出这一话 is enabled once every panel of the chapter is approved (`exportBlockers`). It renders each page to PNG and sends the pages to `manga:export`. A chosen picture that can no longer be read stops the export with the page and panel named (`missingPictures`), instead of a blank frame. Main asks for a folder and writes `<folder>/<title>/第<N>话-01.png` and onwards (`writeChapterPages`). It refuses anything that is not a PNG.
 

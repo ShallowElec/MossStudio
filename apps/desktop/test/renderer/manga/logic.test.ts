@@ -10,9 +10,11 @@ import {
   newSeries,
   nextChapterNumber,
   panelsInUse,
+  firstUsable,
+  splitBlocker,
   splitPanel,
 } from '@renderer/pages/manga/logic'
-import { leafCount } from '@shared/manga/layouts'
+import { dragGutter, frameHandles, leafCount } from '@shared/manga/layouts'
 import { toSave } from '@renderer/pages/manga/useSeries'
 import { mangaSeriesSaveSchema } from '@shared/manga/model'
 import { chapterPanels, updatePanel } from '@shared/manga/queue'
@@ -56,6 +58,27 @@ describe('manga page logic', () => {
     // A drawn panel is content too, even without a description.
     const drawn = { ...cut, panels: cut.panels.map((panel, index) => (index === 1 ? { ...panel, state: 'review' as const } : panel)) }
     expect(mergePanel(drawn, 1)).toBeUndefined()
+  })
+
+  it('says why a panel cannot be cut instead of offering a cut that does nothing', () => {
+    const page = newPage('wide-then-two')
+    expect(splitBlocker(page, 1, 'x')).toBeUndefined()
+    // Squeeze the second panel of the lower row to the narrowest a panel may be.
+    const down = frameHandles(page.frames, 'rtl').find((handle) => handle.axis === 'x')!
+    const squeezed = { ...page, frames: dragGutter(page.frames, down.path, { x: 0, y: 1500 }, 'rtl')! }
+    expect(splitBlocker(squeezed, 2, 'x')).toBe('这一格太窄，拆不开了')
+    expect(splitPanel(squeezed, 2, 'x')).toBeUndefined()
+    expect(splitBlocker(squeezed, 2, 'y')).toBeUndefined()
+    let full = newPage('six-grid')
+    while (full.panels.length < 12)
+      full = splitPanel(full, full.panels.length - 1, full.panels.length % 2 ? 'y' : 'x') ?? splitPanel(full, 0, 'y')!
+    expect(splitBlocker(full, 0, 'y')).toBe('一页最多 12 格')
+  })
+
+  it('picks the first drawn layout that has room for the panels with content', () => {
+    expect(firstUsable([{ panels: 1 }, { panels: 2 }, { panels: 3 }, { panels: 4 }], 3)).toBe(2)
+    expect(firstUsable([{ panels: 1 }, { panels: 2 }], 3)).toBeNull()
+    expect(firstUsable([{ panels: 1 }], 0)).toBe(0)
   })
 
   it('approves every panel in review with its newest take, and exports only when all are approved', () => {

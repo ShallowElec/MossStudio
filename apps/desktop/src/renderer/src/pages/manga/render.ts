@@ -94,17 +94,21 @@ export type PageLook = Pick<MangaSeries, 'readingDirection'> & { style: Pick<Man
 /**
  * Draw `page` at full size; the pictures it needs must be in `cache` (missing ones show as a grey frame). A picture
  * covers its frame's bounding box and is clipped to the frame, so a slanted or bleeding panel shows all of its
- * shape; balloons stay inside the upright part of the frame.
+ * shape; balloons stay inside the upright part of the frame within the margins.
  */
 export function drawPage(ctx: CanvasRenderingContext2D, series: PageLook, page: MangaPage, cache: PictureCache): void {
   ctx.fillStyle = PAPER
   ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
   const quads = panelQuads(page.frames, series.readingDirection, { bleed: true })
+  // Lettering goes inside the frame as it sits within the margins: a bleeding panel's picture runs off the paper,
+  // its balloons must not.
+  const lettering = panelQuads(page.frames, series.readingDirection)
   page.panels.forEach((panel, index) => {
     const quad = quads[index]
-    if (!quad) return
+    const frame = lettering[index]
+    if (!quad || !frame) return
     const box = boundsOf(quad)
-    const inner = innerRect(quad)
+    const inner = innerRect(frame)
     const picture = panelPicture(panel)
     const image = picture ? cache.get(picture.path) : null
     ctx.save()

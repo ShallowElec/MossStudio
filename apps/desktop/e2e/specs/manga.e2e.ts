@@ -355,6 +355,24 @@ describe('manga', () => {
     expect(await picker.evaluate((select: HTMLSelectElement) => select.selectedOptions[0]?.textContent)).toBe(labels[angle])
   })
 
+  it('does not offer to cut a panel that is already as narrow as a panel may be', async () => {
+    const page = await openSeries(() => {
+      window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    const frames = page.getByRole('group', { name: '第 1 页的分格' })
+    await frames.waitFor()
+    // Right to left: the second panel is the right one of the lower row; move the gutter right until it stops.
+    await frames.getByRole('slider', { name: '竖向格线' }).focus()
+    for (let i = 0; i < 45; i += 1) await page.keyboard.press('ArrowRight')
+    await frames.getByRole('button', { name: '第 2 格' }).click()
+    const tools = page.getByRole('group', { name: '第 2 格的分格' })
+    const across = tools.getByRole('button', { name: '左右拆开' })
+    expect(await across.isDisabled()).toBe(true)
+    expect(await across.getAttribute('title')).toBe('这一格太窄，拆不开了')
+    expect(await tools.getByRole('button', { name: '上下拆开' }).isDisabled()).toBe(false)
+  })
+
   it('adds reference pictures and outfits to a character card', async () => {
     const page = await openSeries(() => {
       const { mangaSeriesFixture } = window.__mock.fixtures
