@@ -20,7 +20,7 @@ The 助手 button in the title bar opens the right sidebar; the panel stays moun
 
 ## 3. What the model sees
 
-Every message carries the selected canvas as it is at send time: `lib/agentTools.ts` `formatStudioContext(readStudioSnapshot())` gives title, size, description and the regions in order. The system prompt (`main/services/ai.ts` `SYSTEM_PROMPT`) adds `TOOL_RULES` and the `MODE_RULES` of the conversation's mode from `shared/agent/registry.ts`. A turn runs at most `MAX_TOOL_ROUNDS` (4) rounds of tool calls and streams `AiStreamEvent`s to the panel.
+Every message carries the project as it is at send time: `lib/agentTools.ts` `formatStudioContext(readStudioSnapshot())` lists every canvas (id, title, kind, size, job state, which one is selected) and then the selected canvas's description and regions in order. The system prompt (`main/services/ai.ts` `SYSTEM_PROMPT`) adds `TOOL_RULES` and the `MODE_RULES` of the conversation's mode from `shared/agent/registry.ts`. A turn runs at most `MAX_TOOL_ROUNDS` (4) rounds of tool calls and streams `AiStreamEvent`s to the panel. An ask card ends the turn as soon as it is attached.
 
 ## 4. The tool rack
 
@@ -30,7 +30,7 @@ Every message carries the selected canvas as it is at send time: `lib/agentTools
 | Registry | `shared/agent/registry.ts` (`AGENT_TOOLS`) | Per tool: `title` (Chinese, for the chat line), `pack`, `risk` (`read`, `write`, `run`, `ask`), `requires` (`editable`), `description` for the model, `summarize(args)` |
 | Provider list | `toolDefinitions(resolveToolset({ page: 'studio' }))` in `main/ipc.ts` | JSON Schema from `z.toJSONSchema`, without `$schema` |
 | Handlers | `renderer/src/lib/agent/executor.ts` (`HANDLERS`) | One per `ToolName`; the table is exhaustive, so a tool without a handler fails to compile |
-| Studio API | `renderer/src/lib/agent/types.ts` (`StudioToolApi`), implemented in `StudioPage.tsx` | `state`, `readContext`, `setPrompt`, `setSampler`, `addLayer`, `addTextLayer`, `updateLayer`, `removeLayer`, `createScenes`, `selectCanvas`, `generate`, `problems` |
+| Studio API | `renderer/src/lib/agent/types.ts` (`StudioToolApi`), implemented in `StudioPage.tsx` | `state`, `readContext`, `readCanvas`, `setPrompt`, `setSampler`, `addLayer`, `addTextLayer`, `updateLayer`, `removeLayer`, `createScenes`, `selectCanvas`, `generate`, `problems` |
 | Bridge | `lib/agentTools.ts` (`installStudioToolBridge`) | `Events.aiToolCall` from main runs `executeStudioTool`; the result goes back through `Ipc.aiToolResult` |
 
 `resolveToolset` mounts `canvas.read` and `ask` everywhere, `canvas.write` and `storyboard` on the Studio only, and nothing when the provider cannot call tools. The `library` pack exists as a name only (section 9).
@@ -39,6 +39,7 @@ Every message carries the selected canvas as it is at send time: `lib/agentTools
 | --- | --- | --- | --- | --- |
 | `studio_read_context` | 查看画面 | `canvas.read`, read | Project name, every canvas (kind, title, size, job state), the selected canvas with its regions by 1-based index | never |
 | `studio_select_canvas` | 切换画面 | `canvas.read`, read | Makes another canvas the selected one | unknown id (没有这个画面) |
+| `studio_read_canvas` | 读取画面 | `canvas.read`, read | One canvas by id without changing the selection: the same detail `studio_read_context` gives for the selected one, plus whether it is selected | unknown id (没有这个画面) |
 | `studio_ask_user` | 问你一句 | `ask`, ask | Shows a choice card with 2 to 5 options | fewer than 2 options |
 | `studio_ask_approval` | 等你确认 | `ask`, ask | Shows a confirm card (approve, reject, change it) | never |
 | `studio_set_prompt` | 改写描述 | `canvas.write`, write | Writes the description of the selected 画面 or 风格 | see precheck |
