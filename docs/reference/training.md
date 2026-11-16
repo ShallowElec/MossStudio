@@ -1,6 +1,6 @@
 ---
 status: current
-last-verified: 2026-11-16 (34fddd9)
+last-verified: 2026-11-16 (cfbc64e)
 code: apps/desktop/src/shared/training.ts, apps/desktop/src/shared/channels.ts, apps/desktop/src/main/services/training/, apps/desktop/src/main/ipc.ts, apps/desktop/src/main/lib/paths.ts, apps/desktop/src/renderer/src/pages/training/, apps/desktop/src/renderer/src/pages/settings/TrainingSection.tsx, apps/desktop/src/renderer/src/lib/studioTry.ts
 ---
 
