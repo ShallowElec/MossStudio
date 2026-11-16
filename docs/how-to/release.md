@@ -95,5 +95,4 @@ To run the whole install → update → rollback → uninstall path locally befo
 ## Not yet in place
 
 - The binaries are not code-signed (Windows Authenticode, macOS notarization). Users see the system's first-run warning.
-- `PRODUCTION_UPDATE_KEYS` is empty until the one-time setup above is done.
 - `NIGHTLY_UPDATE_KEYS` is empty until the nightly key is set up; nightlies are download-only until then.

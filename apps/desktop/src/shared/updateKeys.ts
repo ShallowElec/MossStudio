@@ -16,7 +16,9 @@ export interface UpdatePublicKey {
  * Production keys trusted by every build. Empty until the first signing key is generated: with no
  * key, every feed is rejected and the app reports the update check as failed (never as trusted).
  */
-export const PRODUCTION_UPDATE_KEYS: readonly UpdatePublicKey[] = []
+export const PRODUCTION_UPDATE_KEYS: readonly UpdatePublicKey[] = [
+  { id: 'ed25519-ac3badb5fd49a0c3', publicKey: '0CbFpK8mNjHUtkedjqD0Mx5oJX8KudhGHo+/combds8=' },
+]
 
 /**
  * Keys trusted for update-nightly.json ONLY (see the nightly section of docs/how-to/release.md).
