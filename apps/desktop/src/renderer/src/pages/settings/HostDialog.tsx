@@ -204,6 +204,14 @@ export function HostDialog({
                   />
                   <FieldError message={errors.trainerRoot} />
                 </Field>
+                <Field label="底模文件夹">
+                  <Input
+                    className="font-mono text-caption"
+                    value={form.weightsPath}
+                    placeholder="训练时用的 MOSS-Image Base"
+                    onChange={(event) => set('weightsPath', event.target.value)}
+                  />
+                </Field>
               </div>
               <Field label="下载代理" hint="从远程主机访问的代理地址。留空时使用远程主机自己的网络设置。">
                 <Input

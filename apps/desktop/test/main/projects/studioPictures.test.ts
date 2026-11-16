@@ -47,14 +47,24 @@ describe('studioPicturePath (what clover:// serves beyond the gallery)', () => {
     expect(await allowed(put(join(outside(), 'a.png')))).toBe(false)
   })
 
-  it('does not follow a link out of an assets folder or the previews folder', async () => {
+  it("serves a training's pictures and sample pictures, but not its other files", async () => {
+    expect(await allowed(put(join(dataRoot(), 'training', 'tp-abcd-12', 'images', 'a.png')))).toBe(true)
+    expect(await allowed(put(join(dataRoot(), 'training', 'tp-abcd-12', 'runs', 'r', 'samples', 'step_00000250', '000.png')))).toBe(true)
+    expect(await allowed(put(join(dataRoot(), 'training', 'tp-abcd-12', 'images', 'a.txt')))).toBe(false)
+    expect(await allowed(put(join(dataRoot(), 'training', 'tp-abcd-12', 'project.json')))).toBe(false)
+  })
+
+  it('does not follow a link out of an assets folder, the previews folder or a training', async () => {
     put(join(outside(), 'secret', 'secret.png'))
     mkdirSync(join(dataRoot(), 'projects', 'project-1', 'assets'), { recursive: true })
     mkdirSync(join(dataRoot(), 'cache', 'previews'), { recursive: true })
+    mkdirSync(join(dataRoot(), 'training', 'tp-abcd-12', 'images'), { recursive: true })
     symlinkSync(join(outside(), 'secret'), join(dataRoot(), 'projects', 'project-1', 'assets', 'linked'), 'junction')
     symlinkSync(join(outside(), 'secret'), join(dataRoot(), 'cache', 'previews', 'linked'), 'junction')
+    symlinkSync(join(outside(), 'secret'), join(dataRoot(), 'training', 'tp-abcd-12', 'images', 'linked'), 'junction')
     expect(await allowed(join(dataRoot(), 'projects', 'project-1', 'assets', 'linked', 'secret.png'))).toBe(false)
     expect(await allowed(join(dataRoot(), 'cache', 'previews', 'linked', 'secret.png'))).toBe(false)
+    expect(await allowed(join(dataRoot(), 'training', 'tp-abcd-12', 'images', 'linked', 'secret.png'))).toBe(false)
   })
 })
 

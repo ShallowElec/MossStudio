@@ -1,7 +1,6 @@
 /**
- * Where training runs: 'local' or the id of an SSH host. Shared by the Training
- * page and the trainer window (a separate OS window), so it lives in localStorage
- * and other windows hear about changes through the `storage` event.
+ * Where training runs: 'local' or the id of an SSH host. Remembered per person
+ * in localStorage; views that show it hear about changes through TRAINING_HOST_EVENT.
  */
 const KEY = 'mossstudio:training-host'
 

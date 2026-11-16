@@ -24,6 +24,7 @@ import {
   purgeLegacySimulationJobs,
   startEngineJob,
   startTrainingJob,
+  stopTrainingJobs,
 } from './services/supervisor'
 import { resolveServerPath, runMossInferJob, shutdownMossInfer } from './services/mossInfer'
 import { shutdownCliEngines } from './services/cliEngine'
@@ -31,7 +32,7 @@ import { probeEngine } from './lib/probeEngine'
 import { recoverEngineInstall } from './lib/engineStore'
 import { protocolCompatible } from '@shared/engineProtocol'
 import { closeAllSshTerminals } from './services/sshSessions'
-import { createTrainerVersion, listTrainerVersions, startTrainerRun } from './services/trainers'
+import { createTrainerVersion, listTrainerVersions } from './services/trainers'
 import { listLaunchRows, removeLaunchRow, upsertLaunchRow } from './services/launchQueue'
 import { deleteProject, getProject, listProjects, saveProject } from './services/projects'
 import { listTrainerBranches, listTrainerCommits } from './services/trainerGit'
@@ -42,7 +43,6 @@ import {
   saveTrainingHost,
   testManagedHost,
   testTrainingHost,
-  updateTrainingHostVersions,
 } from './services/trainingHosts'
 import {
   remoteBranches,
@@ -62,7 +62,7 @@ import { applyAppUserModelId } from './install/identity'
 import { acquireAppLock } from './install/singleInstance'
 import { scanEnvironment } from './services/env'
 import { getSettings, updateSettings } from './services/settings'
-import { collectTrainerArtifact } from './services/trainerArtifacts'
+import { onTrainingJobEnded } from './services/training/run'
 import { armUpdateHealth, installPendingAtStart, startUpdater, stopUpdater, updaterSummary } from './update'
 import { downloadCustomModel, getCatalog, listDownloads } from './services/models'
 import { startRequestedEngineJob } from './services/engineJobStart'
@@ -169,7 +169,10 @@ app
       console.error('[migration] simulation jobs', error)
     }
     onJobCompleted((job) => {
-      if (job.kind === 'training' && job.state === 'succeeded') void collectTrainerArtifact(job)
+      if (job.kind !== 'training') return
+      onTrainingJobEnded(job).catch((error: unknown) =>
+        console.warn('[training]', 'run end:', error instanceof Error ? error.message : error),
+      )
     })
     registerGalleryProtocol()
     registerIpc()
@@ -1752,200 +1755,6 @@ exit 0
       return
     }
 
-    if (scenario === 'trainer-remote-artifact') {
-      try {
-        const root = join(app.getPath('userData'), 'remote-trainer-artifact')
-        rmSync(root, { recursive: true, force: true })
-        mkdirSync(join(root, 'git'), { recursive: true })
-        const fakeBin = join(app.getPath('userData'), 'fake-bin')
-        mkdirSync(fakeBin, { recursive: true })
-        writeFileSync(join(fakeBin, 'nvidia-smi'), '#!/bin/bash\necho "Fake GPU, 24576 MiB"\n', 'utf8')
-        chmodSync(join(fakeBin, 'nvidia-smi'), 0o755)
-        const localMirror = join(app.getPath('userData'), 'trainer', 'git', 'kohaku-trainer.git')
-        cpSync(localMirror, join(root, 'git', 'kohaku-trainer.git'), { recursive: true })
-        await run('git', ['-C', join(root, 'git', 'kohaku-trainer.git'), 'remote', 'set-url', 'origin', localMirror])
-        const fakeSsh = join(app.getPath('userData'), 'fake-ssh-artifact.sh')
-        writeFileSync(fakeSsh, `#!/bin/bash\nexport PATH="${fakeBin}:$PATH"\nfor last; do :; done\nexec bash -lc "$last"\n`, 'utf8')
-        chmodSync(fakeSsh, 0o755)
-        const fakeScp = join(app.getPath('userData'), 'fake-scp-artifact.sh')
-        writeFileSync(
-          fakeScp,
-          '#!/bin/bash\nfor last; do :; done\nsrc="${@: -2:1}"\ndst="$last"\nsrc="${src#*:}"\ncp "$src" "$dst"\n',
-          'utf8',
-        )
-        chmodSync(fakeScp, 0o755)
-        process.env['CLOVER_SSH_BIN'] = fakeSsh
-        process.env['CLOVER_SCP_BIN'] = fakeScp
-        const host = saveTrainingHost({ name: 'Fake GPU', host: 'fake.local', user: 'tester', port: 22, trainerRoot: root })
-        const branches = await remoteBranches(getSettings(), host.id)
-        const branch = branches.find((item) => item.isDefault)?.name ?? 'main'
-        const commits = await remoteCommits(getSettings(), host.id, branch, 3)
-        if (!commits[0]) throw new Error('no commit')
-        const version = await remoteCreateVersion(getSettings(), host.id, { branch, commit: commits[0].sha })
-        const bin = join(root, 'runtimes', 'fake-runtime', 'bin')
-        mkdirSync(bin, { recursive: true })
-        writeFileSync(join(bin, 'kogine'), '#!/bin/bash\necho "step 5 loss=0.1"\n', 'utf8')
-        chmodSync(join(bin, 'kogine'), 0o755)
-        writeFileSync(join(bin, 'kohakumoss-config'), '#!/bin/bash\nexit 0\n', 'utf8')
-        chmodSync(join(bin, 'kohakumoss-config'), 0o755)
-        const withRuntime = { ...version, runtimeId: 'fake-runtime', runtimeState: 'ready' as const }
-        updateTrainingHostVersions(getSettings(), host.id, [withRuntime])
-        mkdirSync(join(version.path, 'exports'), { recursive: true })
-        writeFileSync(join(version.path, 'exports', 'artifact-test.safetensors'), 'fake-adapter', 'utf8')
-        mkdirSync(join(version.path, 'runs', 'moss', 'artifact-test', 'checkpoints', 'step_00000005'), { recursive: true })
-        writeFileSync(
-          join(version.path, 'runs', 'moss', 'artifact-test', 'checkpoints', 'step_00000005', 'trainable.safetensors'),
-          'fake',
-          'utf8',
-        )
-        const job = await startTrainerRun(getSettings(), {
-          versionId: version.id,
-          action: 'export',
-          runName: 'artifact-test',
-          weights: '/remote/weights',
-          dataset: '/remote/data',
-          algo: 'lora',
-          steps: 5,
-          lr: '1e-4',
-          dim: '32',
-          alpha: '32',
-          batch: '1',
-          resolution: 1024,
-          overrides: '',
-        })
-        let current = job
-        const deadline = Date.now() + 20_000
-        while (Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 200))
-          current = (await getJob(job.id)) ?? current
-          if (current.state !== 'running' && current.state !== 'starting') break
-        }
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-        const catalog = await getCatalog(getSettings(), true)
-        const registered = catalog.adapters.find((item) => item.id === 'trained-artifact-test')
-        console.log(
-          JSON.stringify(
-            {
-              scenario: 'trainer-remote-artifact',
-              state: current.state,
-              error: current.error,
-              logs: (await getJobLogs(job.id)).slice(-12),
-              registered: Boolean(registered),
-              provider: registered?.provider,
-              installed: registered?.installed,
-            },
-            null,
-            2,
-          ),
-        )
-        await remoteRemoveVersion(getSettings(), withRuntime)
-        removeTrainingHost(host.id)
-        const adapterDir = join(getSettings().modelsRoot ?? join(app.getPath('userData'), 'models'), 'adapters')
-        rmSync(join(adapterDir, 'trained-artifact-test'), { recursive: true, force: true })
-        try {
-          const index = JSON.parse(readFileSync(join(adapterDir, 'index.json'), 'utf8')) as { adapters: Array<{ id: string }> }
-          index.adapters = index.adapters.filter((item) => item.id !== 'trained-artifact-test')
-          writeFileSync(join(adapterDir, 'index.json'), JSON.stringify(index, null, 2), 'utf8')
-        } catch {
-          // no local index
-        }
-        app.exit(current.state === 'succeeded' && registered ? 0 : 1)
-      } catch (error) {
-        console.error(error)
-        app.exit(1)
-      }
-      return
-    }
-
-    if (scenario === 'trainer-remote-job') {
-      try {
-        const root = join(app.getPath('userData'), 'remote-trainer-job')
-        rmSync(root, { recursive: true, force: true })
-        mkdirSync(join(root, 'git'), { recursive: true })
-        const fakeBin = join(app.getPath('userData'), 'fake-bin')
-        mkdirSync(fakeBin, { recursive: true })
-        const nvidia = join(fakeBin, 'nvidia-smi')
-        writeFileSync(nvidia, '#!/bin/bash\necho "Fake GPU, 24576 MiB"\n', 'utf8')
-        chmodSync(nvidia, 0o755)
-        const localMirror = join(app.getPath('userData'), 'trainer', 'git', 'kohaku-trainer.git')
-        const remoteMirror = join(root, 'git', 'kohaku-trainer.git')
-        cpSync(localMirror, remoteMirror, { recursive: true })
-        await run('git', ['-C', remoteMirror, 'remote', 'set-url', 'origin', localMirror])
-        const fake = join(app.getPath('userData'), 'fake-ssh-job.sh')
-        writeFileSync(
-          fake,
-          `#!/bin/bash\nexport PATH="${fakeBin}:$PATH"\nfor last; do :; done\nlast="$(printf '%s' "$last" | sed 's/^bash -lc /bash -c /')"\nexec bash -c "$last"\n`,
-          'utf8',
-        )
-        chmodSync(fake, 0o755)
-        process.env['CLOVER_SSH_BIN'] = fake
-        const host = saveTrainingHost({
-          name: 'Fake GPU',
-          host: 'fake.local',
-          user: 'tester',
-          port: 22,
-          trainerRoot: root,
-        })
-        const branches = await remoteBranches(getSettings(), host.id)
-        const branch = branches.find((item) => item.isDefault)?.name ?? 'main'
-        const commits = await remoteCommits(getSettings(), host.id, branch, 3)
-        if (!commits[0]) throw new Error('远端没有提交')
-        const version = await remoteCreateVersion(getSettings(), host.id, { branch, commit: commits[0].sha })
-        const bin = join(root, 'runtimes', 'fake-runtime', 'bin')
-        mkdirSync(bin, { recursive: true })
-        const config = join(bin, 'kohakumoss-config')
-        writeFileSync(config, '#!/bin/bash\nexit 0\n', 'utf8')
-        chmodSync(config, 0o755)
-        const kogine = join(bin, 'kogine')
-        writeFileSync(kogine, '#!/bin/bash\nfor i in 1 2 3 4 5; do echo "step $i loss=0.$((6-i)) lr=1e-4"; sleep 0.1; done\n', 'utf8')
-        chmodSync(kogine, 0o755)
-        const withRuntime = { ...version, runtimeId: 'fake-runtime', runtimeState: 'ready' as const }
-        updateTrainingHostVersions(getSettings(), host.id, [withRuntime])
-        const job = await startTrainerRun(getSettings(), {
-          versionId: version.id,
-          action: 'train',
-          runName: 'remote-test',
-          weights: '/remote/weights',
-          dataset: '/remote/data',
-          algo: 'lora',
-          steps: 5,
-          lr: '1e-4',
-          dim: '32',
-          alpha: '32',
-          batch: '1',
-          resolution: 1024,
-          overrides: '',
-        })
-        const deadline = Date.now() + 20_000
-        let current = job
-        while (Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 200))
-          current = (await getJob(job.id)) ?? current
-          if (current.state !== 'running' && current.state !== 'starting') break
-        }
-        console.log(
-          JSON.stringify(
-            {
-              scenario: 'trainer-remote-job',
-              state: current.state,
-              hostId: current.hostId,
-              metrics: current.metrics,
-              progress: current.progress,
-            },
-            null,
-            2,
-          ),
-        )
-        await remoteRemoveVersion(getSettings(), withRuntime)
-        removeTrainingHost(host.id)
-        app.exit(current.state === 'succeeded' ? 0 : 1)
-      } catch (error) {
-        console.error(error)
-        app.exit(1)
-      }
-      return
-    }
-
     if (scenario === 'trainer-remote-local') {
       try {
         const root = join(app.getPath('userData'), 'remote-trainer-test')
@@ -2104,11 +1913,12 @@ exit 0
       const studio = createAppWindow('studio', false)
       await new Promise<void>((resolve) => studio.webContents.once('did-finish-load', () => resolve()))
       await new Promise((resolve) => setTimeout(resolve, 1200))
+      // The old trainer window is gone: asking for it opens 训练 in the main window.
       await studio.webContents.executeJavaScript("window.clover.invoke('window:open', { kind: 'trainer' })")
       await new Promise((resolve) => setTimeout(resolve, 1500))
-      const trainer = Boolean(getWindow('trainer'))
-      console.log(JSON.stringify({ scenario: 'windows', studio: Boolean(getWindow('studio')), trainer }, null, 2))
-      app.exit(Boolean(getWindow('studio')) && trainer ? 0 : 1)
+      const route = String(await studio.webContents.executeJavaScript('location.hash'))
+      console.log(JSON.stringify({ scenario: 'windows', studio: Boolean(getWindow('studio')), route }, null, 2))
+      app.exit(Boolean(getWindow('studio')) && route === '#/training' ? 0 : 1)
       return
     }
 
@@ -2134,12 +1944,6 @@ exit 0
         const image = await studio.webContents.capturePage()
         writeFileSync(join(app.getPath('userData'), `screenshot-${name}.png`), image.toPNG())
       }
-
-      const trainer = createAppWindow('trainer', false)
-      await new Promise<void>((resolve) => trainer.webContents.once('did-finish-load', () => resolve()))
-      await new Promise((resolve) => setTimeout(resolve, 2200))
-      const trainerShot = await trainer.webContents.capturePage()
-      writeFileSync(join(app.getPath('userData'), 'screenshot-trainer.png'), trainerShot.toPNG())
 
       console.log('screenshots written to', app.getPath('userData'))
       app.exit(0)
@@ -2167,6 +1971,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  stopTrainingJobs()
   stopGbcProcesses()
   closeAllSshTerminals()
   stopUpdater()

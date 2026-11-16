@@ -8,8 +8,9 @@ import { FeaturesSection } from './FeaturesSection'
 import { GeneralSection } from './GeneralSection'
 import { NetworkSection } from './NetworkSection'
 import { StorageSection } from './StorageSection'
+import { TrainingSection } from './TrainingSection'
 import { UpdatesSection } from './UpdatesSection'
-import { SETTINGS_SECTIONS, isCanonicalSectionPath, sectionFromPath, sectionLabel, sectionPath, type SettingsSectionId } from './sections'
+import { isCanonicalSectionPath, sectionFromPath, sectionLabel, sectionPath, visibleSections, type SettingsSectionId } from './sections'
 
 const SECTION_COMPONENTS: Record<SettingsSectionId, () => React.JSX.Element> = {
   general: GeneralSection,
@@ -17,6 +18,7 @@ const SECTION_COMPONENTS: Record<SettingsSectionId, () => React.JSX.Element> = {
   storage: StorageSection,
   network: NetworkSection,
   features: FeaturesSection,
+  training: TrainingSection,
   updates: UpdatesSection,
   about: AboutSection,
 }
@@ -37,12 +39,15 @@ export function SettingsPage(): React.JSX.Element {
   const onSettings = location.pathname === '/settings' || location.pathname.startsWith('/settings/')
   const bare = location.pathname.replace(/\/+$/, '') === '/settings'
   if (onSettings && !bare) last.current = sectionFromPath(location.pathname)
-  const section = last.current
+  const sections = visibleSections(settings)
+  // A feature's section stays away while the feature is off (an old link lands on 功能).
+  const hidden = settings !== null && !sections.some((item) => item.id === last.current)
+  const section = hidden ? 'features' : last.current
 
   // Bare `/settings` and old section names settle on one canonical address.
   useEffect(() => {
-    if (onSettings && (bare || !isCanonicalSectionPath(location.pathname))) void navigate(sectionPath(section), { replace: true })
-  }, [onSettings, bare, location.pathname, section, navigate])
+    if (onSettings && (bare || hidden || !isCanonicalSectionPath(location.pathname))) void navigate(sectionPath(section), { replace: true })
+  }, [onSettings, bare, hidden, location.pathname, section, navigate])
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: 0 })
@@ -55,7 +60,7 @@ export function SettingsPage(): React.JSX.Element {
       <nav aria-label="设置分区" className="flex w-60 shrink-0 flex-col gap-0.5 overflow-y-auto bg-panel px-3 py-6">
         {/* The panel's own name, like 活动: one step below the section title it sits beside. */}
         <div className="px-3 pb-3 text-section font-semibold text-ink">设置</div>
-        {SETTINGS_SECTIONS.map((item) => {
+        {sections.map((item) => {
           const current = item.id === section
           return (
             <button

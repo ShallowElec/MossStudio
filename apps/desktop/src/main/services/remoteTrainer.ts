@@ -4,7 +4,8 @@ import { posixQuote, sshExec } from './ssh'
 import { getTrainingHost, listTrainingHosts, updateTrainingHostVersions } from './trainingHosts'
 import { TRAINER_SOURCE } from './trainerGit'
 
-function rootExpression(root: string): string {
+/** A shell expression for a host path that may start with `~`, which stays unexpanded inside quotes. */
+export function rootExpression(root: string): string {
   if (root === '~') return '"$HOME"'
   if (root.startsWith('~/')) return `"$HOME/${root.slice(2).replace(/"/g, '\\"')}"`
   return posixQuote(root)

@@ -7,7 +7,6 @@ import { useShell } from './lib/shell'
 import type { WindowIntent } from './lib/windows'
 import { useApp } from './store'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { MotionPanel } from './components/motion'
 import { ToastProvider, cn, useToast } from './components/ui'
 import { ActivityPanel } from './components/shell/ActivityPanel'
 import { Rail } from './components/shell/Rail'
@@ -20,7 +19,6 @@ import { SetupPage } from './pages/Setup'
 import { InstallPage } from './pages/install/InstallPage'
 import { UninstallPage } from './pages/install/UninstallPage'
 import { StudioPage } from './pages/Studio'
-import { TrainerWindow } from './pages/TrainerWindow'
 import { TrainingPage } from './pages/Training'
 
 const PAGE_COMPONENTS: Record<string, React.ComponentType> = {
@@ -138,17 +136,6 @@ function StudioShell(): React.JSX.Element {
   )
 }
 
-function TrainerShell(): React.JSX.Element {
-  return (
-    <div className="flex h-full flex-col bg-frame text-ink">
-      <Titlebar appName="MossStudio 训练" />
-      <MotionPanel transitionKey="trainer" className="min-h-0 flex-1 overflow-y-auto rounded-tl-xl bg-surface">
-        <TrainerWindow />
-      </MotionPanel>
-    </div>
-  )
-}
-
 /**
  * The setup and uninstall windows run outside the installed app (from the
  * installer's temporary folder, or while removing it), so they get their own
@@ -165,13 +152,14 @@ function standaloneRoute(): (() => React.JSX.Element) | undefined {
 
 function MainApp(): React.JSX.Element {
   const init = useApp((state) => state.init)
-  const kind = window.clover.windowKind
   useEffect(() => {
     void init()
   }, [init])
   return (
     <ToastProvider>
-      <HashRouter>{kind === 'trainer' ? <TrainerShell /> : <StudioShell />}</HashRouter>
+      <HashRouter>
+        <StudioShell />
+      </HashRouter>
     </ToastProvider>
   )
 }

@@ -310,6 +310,7 @@ const hostSaveSchema = z.object({
   trainerRoot: z.string().min(1).max(4096),
   instanceRoot: z.string().max(4096).optional(),
   modelsRoot: z.string().max(4096).optional(),
+  weightsPath: z.string().max(4096).optional(),
   downloadProxy: downloadProxy.optional(),
   hfEndpoint: hfEndpoint.optional(),
   downloadConcurrency: z.number().int().min(1).max(16).nullable().optional(),
@@ -616,22 +617,6 @@ export const schemas = {
   trainerRemoteVersion: z.object({
     hostId: z.string().min(1).max(80),
     versionId: z.string().min(1).max(160),
-  }),
-
-  trainerRun: z.object({
-    versionId: z.string().min(1).max(120),
-    action: z.enum(['train', 'inspect_data', 'cache_text', 'cache_latents', 'export', 'sample']),
-    runName: z.string().min(1).max(120),
-    weights: z.string().min(1).max(4096),
-    dataset: z.string().min(1).max(4096),
-    algo: z.string().min(1).max(80),
-    steps: z.number().int().min(1).max(1_000_000),
-    lr: z.string().max(40),
-    dim: z.string().max(20),
-    alpha: z.string().max(20),
-    batch: z.string().max(20),
-    resolution: z.number().int().min(64).max(4096),
-    overrides: z.string().max(8000),
   }),
 
   trainerCreate: z.object({

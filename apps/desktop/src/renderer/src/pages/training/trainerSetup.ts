@@ -78,22 +78,29 @@ export interface PrepareResult {
   installed: boolean
 }
 
+/** 更新到: the trainer's stable release, or the newest commit of its default branch. */
+export type UpdateTrack = 'stable' | 'latest'
+
 /**
  * Bring a location's trainer up to date in one action: fetch the repository,
- * take the newest commit of the default branch, and install its environment
- * unless that exact version is already ready. Running it again is harmless.
+ * take the stable release (`stable`, when the trainer has one) or the newest
+ * commit of the default branch, and install its environment unless that exact
+ * version is already ready. Running it again is harmless.
  */
 export async function prepareTrainer(
   api: TrainerApi,
   current: TrainerVersion | undefined,
   onStep: (step: PrepareStep) => void = () => undefined,
+  track: UpdateTrack = 'latest',
 ): Promise<PrepareResult> {
   onStep('fetch')
-  const branch = defaultBranch(await api.branches())
-  const [latest] = await api.commits(branch)
-  if (!latest) throw new Error(`训练器的 ${branch} 分支没有可用的提交`)
+  const branches = await api.branches()
+  const stable = track === 'stable' ? branches.find((item) => item.isStable && item.sha) : undefined
+  const branch = stable?.name ?? defaultBranch(branches)
+  const sha = stable?.sha ?? (await api.commits(branch))[0]?.sha
+  if (!sha) throw new Error(`训练器的 ${branch} 分支没有可用的提交`)
   onStep('create')
-  const version = await api.create(branch, latest.sha)
+  const version = await api.create(branch, sha)
   const updated = !current || current.commit !== version.commit
   if (version.runtimeState === 'ready') return { version, updated, installed: false }
   onStep('install')

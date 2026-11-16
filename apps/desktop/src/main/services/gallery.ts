@@ -436,8 +436,8 @@ export async function revealInFolder(file: string): Promise<void> {
 const STUDIO_PICTURE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp'])
 
 /**
- * The symlink-resolved path of a live preview (cache/previews) or a picture in
- * a project's assets folder, or null when `file` is neither. The check runs on
+ * The symlink-resolved path of a live preview (cache/previews), a picture in
+ * a project's assets folder or in a training's folder, or null when `file` is none. The check runs on
  * the resolved path, and callers read that path, so a link placed in either
  * folder (or swapped in after the check) cannot hand out a file from elsewhere.
  */
@@ -451,6 +451,9 @@ export async function studioPicturePath(file: string): Promise<string | null> {
   if (!STUDIO_PICTURE_EXT.has(extname(real).toLowerCase())) return null
   const previews = await realpath(previewsDir()).catch(() => null)
   if (previews && isInside(previews, real) && real !== previews) return real
+  // A training's pictures and its sample pictures (a remote run's are copied into the same folder).
+  const training = await realpath(paths.training()).catch(() => null)
+  if (training && isInside(training, real) && real !== training) return real
   const projects = await realpath(projectsRootDir()).catch(() => null)
   if (!projects || !isInside(projects, real)) return null
   // Re-anchor on the lexical root so the id/assets shape is checked on the resolved path.

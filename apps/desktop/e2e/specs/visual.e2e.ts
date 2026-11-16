@@ -90,6 +90,40 @@ async function seedJobs(page: Page): Promise<void> {
   })
 }
 
+/** First use while preparing: the base model half downloaded, the trainer still to come. */
+async function seedPreparing(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const { downloadFixture } = window.__mock.fixtures
+    const training = window.__mock.state.training
+    training.readiness = { ...training.readiness, prepare: { running: true, step: 'model', error: null } }
+    window.__mock.state.downloads = [
+      downloadFixture({
+        targetId: 'moss-base-dit',
+        label: 'MOSS-Image Base',
+        state: 'running',
+        bytes: 4_400_000_000,
+        speedBps: 38 * 1024 ** 2,
+      }),
+    ]
+  })
+}
+
+async function seedRemote(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.__mock.state.hosts = [window.__mock.fixtures.sshHostFixture()]
+  })
+}
+
+/** 高级 in the training editor is remembered; put it in the state the stop shows. */
+async function setAdvanced(page: Page, open: boolean): Promise<void> {
+  const advanced = page.getByRole('button', { name: /^高级/ })
+  if ((await advanced.getAttribute('aria-expanded')) !== String(open)) await advanced.click()
+  if (!open) {
+    const list = page.getByRole('group', { name: '图片显示方式' }).getByRole('button', { name: '网格' })
+    if ((await list.getAttribute('aria-pressed')) !== 'true') await list.click()
+  }
+}
+
 const openActivity =
   (tab: string) =>
   async (page: Page): Promise<void> => {
@@ -177,7 +211,34 @@ const STOPS: Stop[] = [
     },
   },
   { page: 'models', state: 'remote', open: { scenario: 'remoteHost', route: '/models', settings: { remoteHostsEnabled: true } } },
-  { page: 'training', state: 'enabled', open: { scenario: 'ready', route: '/training', settings: { trainingEnabled: true } } },
+  { page: 'training', state: 'first-use', open: { scenario: 'trainingNotPrepared', route: '/training' } },
+  { page: 'training', state: 'preparing', open: { scenario: 'trainingNotPrepared', route: '/training' }, seed: seedPreparing },
+  {
+    page: 'training',
+    state: 'blocked',
+    open: { scenario: 'trainingBlocked', route: '/training', settings: ALL_FEATURES },
+    seed: seedRemote,
+  },
+  { page: 'training', state: 'start', open: { scenario: 'ready', route: '/training', settings: { trainingEnabled: true } } },
+  { page: 'training', state: 'home', open: { scenario: 'trainings', route: '/training' } },
+  {
+    page: 'training',
+    state: 'editor',
+    open: { scenario: 'trainings', route: '/training/tp-aming' },
+    prepare: async (page) => setAdvanced(page, false),
+  },
+  {
+    page: 'training',
+    state: 'editor-advanced',
+    open: { scenario: 'trainings', route: '/training/tp-aming' },
+    prepare: async (page) => {
+      await setAdvanced(page, true)
+      await page.getByRole('group', { name: '图片显示方式' }).getByRole('button', { name: '列表' }).click()
+    },
+  },
+  { page: 'training', state: 'running', open: { scenario: 'trainings', route: '/training/tp-juzi' } },
+  { page: 'training', state: 'done', open: { scenario: 'trainings', route: '/training/tp-watercolor' } },
+  { page: 'training', state: 'failed', open: { scenario: 'trainings', route: '/training/tp-film' } },
   { page: 'settings', state: 'general', open: { scenario: 'ready', route: '/settings/general' } },
   { page: 'settings', state: 'devices', open: { scenario: 'ready', route: '/settings/devices' } },
   {
@@ -194,6 +255,7 @@ const STOPS: Stop[] = [
   { page: 'settings', state: 'features', open: { scenario: 'ready', route: '/settings/features', settings: ALL_FEATURES } },
   { page: 'settings', state: 'updates', open: { scenario: 'updateAvailable', route: '/settings/updates' } },
   { page: 'settings', state: 'about', open: { scenario: 'ready', route: '/settings/about' } },
+  { page: 'settings', state: 'training', open: { scenario: 'remoteHost', route: '/settings/training', settings: ALL_FEATURES } },
   {
     page: 'activity',
     state: 'jobs',

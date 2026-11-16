@@ -95,6 +95,9 @@ export const paths = {
   trainerVersion: (id: string) => join(root(), 'trainer', 'versions', id),
   trainerRuntimes: () => join(root(), 'trainer', 'runtimes'),
   trainerRuntime: (id: string) => join(root(), 'trainer', 'runtimes', id),
+  /** 训练 projects: `<id>/project.json`, `<id>/images/`, `<id>/runs/<run>/`, `<id>/cache/`. */
+  training: () => join(root(), 'training'),
+  trainingProject: (id: string) => join(root(), 'training', id),
 }
 
 export function ensureDirs(customModelsRoot?: string | null, modelDirectories?: Partial<ModelDirectories>): void {

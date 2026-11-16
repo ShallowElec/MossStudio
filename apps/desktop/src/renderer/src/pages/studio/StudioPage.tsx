@@ -53,6 +53,7 @@ import {
   seriesFromStyle,
   STYLE_CARD,
   styleLoraNote,
+  tryLoraOnBoard,
   upscaleFromPicture,
   upscaleProblem,
   withUpscaleSize,
@@ -132,6 +133,7 @@ export function StudioPage(): React.JSX.Element {
   const studioBackground = useApp((state) => state.studioBackground)
   const setStudioBackground = useApp((state) => state.setStudioBackground)
   const reuseRequest = useApp((state) => state.studioReuseRequest)
+  const tryRequest = useApp((state) => state.studioTryRequest)
 
   const root = useRef<HTMLDivElement>(null)
   const board = useRef<BoardHandle>(null)
@@ -336,6 +338,20 @@ export function StudioPage(): React.JSX.Element {
     }
     if (missingAdapters.length) toast.push(`模型库里没有这些 LoRA：${missingAdapters.join('、')}`, 'info')
   }, [loaded, reuseRequest, canvasesRef, selectedRef, setCanvases, select, catalog, preferredBundleId, toast, inputImport, updateCanvas])
+
+  // 训练 › 在创作中试用: a 风格 with the trained LoRA and a 画面 wired to it.
+  useEffect(() => {
+    if (!loaded || !tryRequest) return
+    const request = useApp.getState().takeStudioTryRequest()
+    if (!request) return
+    const list = canvasesRef.current
+    // Like a new 画面: the settings of the newest 画面 or result (a 风格 has none of its own).
+    const latest = [...list].reverse().find((canvas) => canvas.kind === 'layout' || canvas.kind === 'result')
+    const made = tryLoraOnBoard(list, settingsFrom(latest), request)
+    setCanvases(made.canvases)
+    select(made.layout.id)
+    requestAnimationFrame(() => board.current?.fit())
+  }, [loaded, tryRequest, canvasesRef, setCanvases, select])
 
   const changeSelected = (update: (canvas: ProjectCanvas) => ProjectCanvas): void => {
     if (selected) project.updateCanvas(selected.id, update)

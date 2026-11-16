@@ -340,6 +340,7 @@ describe('readiness in 创作', () => {
       '/settings/storage',
       '/settings/network',
       '/settings/features',
+      '/settings/training',
       '/settings/updates',
       '/settings/about',
       '/training',

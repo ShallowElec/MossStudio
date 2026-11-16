@@ -45,6 +45,13 @@ export function percent(current: number, total: number): number {
   return Math.max(0, Math.min(100, (current / total) * 100))
 }
 
+const grouped = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
+
+/** A count people read at a glance, grouped by thousands: "1,250", "3,000". */
+export function thousands(value: number): string {
+  return grouped.format(Number.isFinite(value) ? value : 0)
+}
+
 /** Picture size: "1024 × 1024", always with spaces around ×. */
 export function dimensions(width: number, height: number): string {
   return `${width} × ${height}`

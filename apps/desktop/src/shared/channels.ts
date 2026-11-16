@@ -42,7 +42,6 @@ export const Ipc = {
   trainerRemove: 'trainer:remove',
   trainerInstall: 'trainer:install',
   trainerDoctor: 'trainer:doctor',
-  trainerRun: 'trainer:run',
   trainerHosts: 'trainer:hosts',
   trainerHostSave: 'trainer:host-save',
   trainerHostRemove: 'trainer:host-remove',
@@ -54,6 +53,44 @@ export const Ipc = {
   trainerRemoteInstall: 'trainer:remote-install',
   trainerRemoteDoctor: 'trainer:remote-doctor',
   trainerRemoteRemove: 'trainer:remote-remove',
+  /** 训练 (shared/training.ts). `{ hostId }` → TrainingReadiness. */
+  trainingReadiness: 'training:readiness',
+  /** `{ hostId }`: downloads the base model and prepares the trainer and its environment in the background. */
+  trainingPrepare: 'training:prepare',
+  /** → TrainingProject[], newest first. */
+  trainingList: 'training:list',
+  /** `{ kind, hostId? }` → TrainingProject (a draft). */
+  trainingCreate: 'training:create',
+  /** `{ id }` → TrainingProject. */
+  trainingGet: 'training:get',
+  /** `{ id, patch }` → TrainingProject. Only a draft accepts a patch. */
+  trainingUpdate: 'training:update',
+  /** `{ id }`: deletes the training, its pictures and its run; a saved LoRA stays in 模型. */
+  trainingRemove: 'training:remove',
+  /** `{ id }` → TrainingProject: a new draft with the same pictures, descriptions and settings. */
+  trainingDuplicate: 'training:duplicate',
+  /** `{ id }` → TrainingDataset. */
+  trainingDataset: 'training:dataset',
+  /** `{ id, paths }` (files or folders; sidecar .txt come along) → TrainingDataset. */
+  trainingDatasetAdd: 'training:dataset-add',
+  /** `{ id, names }` → TrainingDataset. */
+  trainingDatasetRemove: 'training:dataset-remove',
+  /** `{ id, name, caption }` → DatasetImage. */
+  trainingCaptionSet: 'training:caption-set',
+  /** `{ id, names? }` → TrainingCaptionResult; uses the connected 语言模型 that can read pictures. */
+  trainingCaptionAuto: 'training:caption-auto',
+  /** `{ id }` → string: the commands the trainer will run, for copying. */
+  trainingCommand: 'training:command',
+  /** `{ id }` → TrainingProject (running). */
+  trainingStart: 'training:start',
+  /** `{ id }`: stops the run; checkpoints so far stay choosable. */
+  trainingStop: 'training:stop',
+  /** `{ id }` → TrainingSamples. */
+  trainingSamples: 'training:samples',
+  /** `{ id, step }` → TrainingProject: saves that step's checkpoint as the LoRA. */
+  trainingChooseStep: 'training:choose-step',
+  /** `{ id }`: shows the saved LoRA (or the run folder) in the file manager. */
+  trainingReveal: 'training:reveal',
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
   envScan: 'env:scan',
@@ -218,6 +255,10 @@ export type IpcChannel = (typeof Ipc)[keyof typeof Ipc]
 
 export const Events = {
   envProgress: 'event:env-progress',
+  /** A TrainingProject changed on its own (run finished, LoRA saved, save failed). */
+  trainingChanged: 'event:training-changed',
+  /** TrainingReadiness whenever preparing moves on. */
+  trainingReadinessChanged: 'event:training-readiness',
   pythonInstall: 'event:python-install',
   gitProgress: 'event:git-progress',
   runtimeLog: 'event:runtime-log',

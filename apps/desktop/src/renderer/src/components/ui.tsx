@@ -165,6 +165,8 @@ export function Advanced({
   summary,
   children,
   defaultOpen = false,
+  open: openProp,
+  onOpenChange,
   className,
   dense = false,
 }: {
@@ -172,10 +174,18 @@ export function Advanced({
   summary?: ReactNode
   children: ReactNode
   defaultOpen?: boolean
+  /** Controlled open state, for a disclosure whose state is remembered elsewhere. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   className?: string
   dense?: boolean
 }): React.JSX.Element {
-  const [open, setOpen] = useState(defaultOpen)
+  const [ownOpen, setOwnOpen] = useState(defaultOpen)
+  const open = openProp ?? ownOpen
+  const setOpen = (next: boolean): void => {
+    setOwnOpen(next)
+    onOpenChange?.(next)
+  }
   const panelId = useId()
   return (
     <div className={cn('flex flex-col', className)}>
@@ -183,7 +193,7 @@ export function Advanced({
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setOpen(!open)}
         className={cn(
           'flex items-center rounded-lg px-3.5 text-left transition-colors hover:bg-well',
           dense ? 'min-h-9 gap-2' : 'min-h-11 gap-3',

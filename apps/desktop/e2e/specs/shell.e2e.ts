@@ -263,46 +263,15 @@ describe('title bar', () => {
 describe('training', () => {
   const app = useApp()
 
-  it('appears only when turned on, and lists runs from training jobs', async () => {
+  it('appears only when turned on, and lists the trainings', async () => {
     let page = await app.open({ scenario: 'ready', route: '/training' })
     expect(await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '训练' }).count()).toBe(0)
     await expect.poll(() => page.locator('[data-page="/training"]').count()).toBe(0)
 
-    page = await app.open({ scenario: 'ready', route: '/training', theme: 'light', settings: { trainingEnabled: true }, defer: true })
-    await page.evaluate(() => {
-      const { jobFixture } = window.__mock.fixtures
-      window.__mock.state.jobs = [
-        jobFixture({
-          id: 'train-1',
-          kind: 'training',
-          trainerRunName: '猫咪 LoRA',
-          trainerAlgo: 'lora',
-          state: 'running',
-          stage: 'denoise',
-          progress: { stage: 'denoise', current: 1200, total: 2000, percent: 60 },
-          metrics: { step: 1200, loss: 0.0812 },
-          startedAt: '2026-11-01T02:00:00.000Z',
-        }),
-        jobFixture({
-          id: 'train-0',
-          kind: 'training',
-          trainerRunName: '风格 LoRA',
-          trainerAlgo: 'lora',
-          state: 'succeeded',
-          stage: 'ready',
-          progress: { stage: 'ready', current: 1000, total: 1000, percent: 100 },
-          startedAt: '2026-11-01T01:00:00.000Z',
-          endedAt: '2026-11-01T01:30:00.000Z',
-        }),
-        jobFixture({ id: 'gen-1', state: 'succeeded' }),
-      ]
-    })
-    await app.start()
+    page = await app.open({ scenario: 'trainings', route: '/training', theme: 'light' })
     await expect.poll(() => page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '训练' }).isVisible()).toBe(true)
-    await expect.poll(() => page.getByText('猫咪 LoRA').isVisible()).toBe(true)
-    await expect.poll(() => page.getByText('风格 LoRA').isVisible()).toBe(true)
-    await expect.poll(() => page.getByText('1,200 / 2,000').isVisible()).toBe(true)
-    await expect.poll(() => page.getByText(/loss 0\.081/).isVisible()).toBe(true)
-    await app.screenshot('training-runs-light')
+    await expect.poll(() => page.locator('[data-training-card="tp-juzi"]').isVisible()).toBe(true)
+    expect(await page.locator('[data-training-card="tp-watercolor"]').textContent()).toContain('水彩小镇')
+    await app.screenshot('training-home-light')
   })
 })

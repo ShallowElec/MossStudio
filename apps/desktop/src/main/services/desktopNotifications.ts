@@ -6,7 +6,7 @@ export interface LocalNotificationInput {
   title: string
   body: string
   /** Window to focus when the notification is clicked. */
-  windowKind?: 'studio' | 'trainer'
+  windowKind?: 'studio'
   route?: string
 }
 

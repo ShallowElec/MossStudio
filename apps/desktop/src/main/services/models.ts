@@ -147,6 +147,11 @@ export async function registerTrainedAdapter(
   const destDir = join(paths.adapters(settings.modelsRoot, settings.modelDirectories), id)
   await mkdir(destDir, { recursive: true })
   const file = basename(input.sourcePath)
+  // Registering an id again replaces its weights (a training whose chosen step changed); a file left
+  // from before under another name would be the one resolveAdapterFile finds first.
+  for (const name of await readdir(destDir)) {
+    if (name !== file && name.toLowerCase().endsWith('.safetensors')) await rm(join(destDir, name), { force: true })
+  }
   await copyFile(input.sourcePath, join(destDir, file))
   const info = await stat(join(destDir, file))
   const origin = input.origin ?? 'trained'
@@ -1080,6 +1085,13 @@ export async function downloadCustomModel(repo: string, settings: Settings): Pro
     settings,
   )
 }
+/** The task once its download ends (done, error, paused or canceled); undefined when it is not known. */
+export async function waitForDownload(id: string): Promise<DownloadTask | undefined> {
+  await completions.get(id)?.catch(() => undefined)
+  const task = tasks.get(id)
+  return task ? { ...task } : undefined
+}
+
 export async function cancelDownload(id: string): Promise<void> {
   const task = tasks.get(id)
   if (!task) return

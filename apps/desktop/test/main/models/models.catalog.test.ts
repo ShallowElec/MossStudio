@@ -505,6 +505,17 @@ describe('adapters', () => {
     expect(index.adapters).toHaveLength(1)
   })
 
+  it('registerTrainedAdapter with a file of another name drops the old weights, so the new file is the one used', async () => {
+    const first = join(dataRoot(), 'run-a-comfy.safetensors')
+    const second = join(dataRoot(), 'run-b-comfy.safetensors')
+    writeFileSync(first, 'old')
+    writeFileSync(second, 'new')
+    await models.registerTrainedAdapter(settings, { id: 'trained-tp-1', name: 'T', sourcePath: first })
+    await models.registerTrainedAdapter(settings, { id: 'trained-tp-1', name: 'T', sourcePath: second })
+    expect(readdirSync(join(adaptersRoot(), 'trained-tp-1'))).toEqual(['run-b-comfy.safetensors'])
+    expect(await models.resolveAdapterFile(settings, 'trained-tp-1')).toBe(join(adaptersRoot(), 'trained-tp-1', 'run-b-comfy.safetensors'))
+  })
+
   it('findAdapterName prefers the warm cache, then the local index, then the packaged catalog', async () => {
     expect(await models.findAdapterName(settings, 'lora-turbo-mfd')).not.toBe('lora-turbo-mfd')
     expect(await models.findAdapterName(settings, 'unknown-id')).toBe('unknown-id')

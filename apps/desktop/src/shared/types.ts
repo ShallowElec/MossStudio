@@ -638,6 +638,8 @@ export interface TrainingHost {
   instanceRoot?: string
   /** Remote HF-compatible model cache; never auto-uploaded from the local cache. */
   modelsRoot?: string
+  /** Folder on this host with the MOSS-Image Base weights for training: a ComfyUI models folder or an HF folder. */
+  weightsPath?: string
   downloadProxy?: string
   hfEndpoint?: string
   downloadConcurrency?: number
@@ -691,22 +693,6 @@ export interface TrainerVersion {
   lastUsedAt?: string | null
   dirty: boolean
   status: 'ok' | 'missing'
-}
-
-export interface TrainerRunInput {
-  versionId: string
-  action: 'train' | 'inspect_data' | 'cache_text' | 'cache_latents' | 'export' | 'sample'
-  runName: string
-  weights: string
-  dataset: string
-  algo: string
-  steps: number
-  lr: string
-  dim: string
-  alpha: string
-  batch: string
-  resolution: number
-  overrides: string
 }
 
 export interface TrainerRuntimeInfo {

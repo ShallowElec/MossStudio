@@ -8,7 +8,7 @@ declare global {
       platform: string
       version: string
       acrylic: boolean
-      windowKind: 'launcher' | 'creator' | 'terminal' | 'trainer' | 'devices'
+      windowKind: 'launcher' | 'creator' | 'terminal' | 'devices'
       channel: string
       /** Disk path of a dropped or pasted File (Electron's webUtils); '' when it has none. */
       pathForFile?: (file: File) => string

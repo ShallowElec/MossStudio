@@ -128,16 +128,42 @@ export function scpCommand(): string {
   return getSshTools().scp
 }
 
-export function scpArgs(host: TrainingHost, remotePath: string, localPath: string): string[] {
+function scpBaseArgs(host: TrainingHost, recursive: boolean): string[] {
   if (host.kind !== 'ssh' || !host.host || !host.user) throw new Error('不是有效的 SSH 训练主机')
   const args = ['-S', sshCommand(), ...authArgs(host), ...hostKeyArgs(), '-o', 'ConnectTimeout=12']
   if (host.port) args.push('-P', String(host.port))
-  args.push(`${targetOf(host)}:${remotePath}`, sshLocalPath(localPath))
+  if (recursive) args.push('-r')
   return args
 }
 
-export async function scpFrom(host: TrainingHost, remotePath: string, localPath: string, timeoutMs = 180_000): Promise<RunResult> {
-  return run(scpCommand(), scpArgs(host, remotePath, localPath), { timeoutMs, env: sshEnv(host) })
+/** Download arguments: `remotePath` on the host to `localPath`; `recursive` copies a folder. */
+export function scpArgs(host: TrainingHost, remotePath: string, localPath: string, recursive = false): string[] {
+  return [...scpBaseArgs(host, recursive), `${targetOf(host)}:${remotePath}`, sshLocalPath(localPath)]
+}
+
+/** Upload arguments: `localPath` to `remotePath` on the host; `recursive` copies a folder. */
+export function scpToArgs(host: TrainingHost, localPath: string, remotePath: string, recursive = false): string[] {
+  return [...scpBaseArgs(host, recursive), sshLocalPath(localPath), `${targetOf(host)}:${remotePath}`]
+}
+
+export async function scpFrom(
+  host: TrainingHost,
+  remotePath: string,
+  localPath: string,
+  timeoutMs = 180_000,
+  recursive = false,
+): Promise<RunResult> {
+  return run(scpCommand(), scpArgs(host, remotePath, localPath, recursive), { timeoutMs, env: sshEnv(host) })
+}
+
+export async function scpTo(
+  host: TrainingHost,
+  localPath: string,
+  remotePath: string,
+  timeoutMs = 600_000,
+  recursive = false,
+): Promise<RunResult> {
+  return run(scpCommand(), scpToArgs(host, localPath, remotePath, recursive), { timeoutMs, env: sshEnv(host) })
 }
 
 export async function remoteAbsolute(host: TrainingHost, path: string): Promise<string> {

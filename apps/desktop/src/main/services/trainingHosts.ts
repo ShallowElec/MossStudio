@@ -64,6 +64,7 @@ export interface SaveTrainingHostInput {
   modelPath?: string
   instanceRoot?: string
   modelsRoot?: string
+  weightsPath?: string
   downloadProxy?: string
   hfEndpoint?: string
   downloadConcurrency?: number | null
@@ -100,6 +101,7 @@ export function saveTrainingHost(input: SaveTrainingHostInput): TrainingHost {
     modelPath: input.modelPath?.trim() || existing?.modelPath,
     instanceRoot: input.instanceRoot?.trim() || existing?.instanceRoot,
     modelsRoot: input.modelsRoot?.trim() || undefined,
+    weightsPath: input.weightsPath === undefined ? existing?.weightsPath : input.weightsPath.trim() || undefined,
     downloadProxy: input.downloadProxy === undefined ? existing?.downloadProxy : input.downloadProxy.trim() || undefined,
     hfEndpoint: input.hfEndpoint === undefined ? existing?.hfEndpoint : input.hfEndpoint.trim() || undefined,
     downloadConcurrency: input.downloadConcurrency === undefined ? existing?.downloadConcurrency : (input.downloadConcurrency ?? undefined),

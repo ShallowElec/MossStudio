@@ -23,6 +23,7 @@ import type {
 import type { UpdateChannel } from '@shared/install'
 import { failedUpdateText, requiredUpdateMessage, type UpdateBusyReason, type UpdateRestartResult, type UpdaterState } from '@shared/update'
 import { isStudioReuseRequest, type StudioReuseRequest } from './lib/studioReuse'
+import { isStudioTryRequest, type StudioTryRequest } from './lib/studioTry'
 import { call, onEvent } from './lib/api'
 import { dimensions } from './lib/format'
 
@@ -79,6 +80,8 @@ interface AppStore {
    * `takeStudioReuseRequest`. See lib/studioReuse.ts for the shape.
    */
   studioReuseRequest: StudioReuseRequest | null
+  /** 训练 → Studio handoff for 在创作中试用 (lib/studioTry.ts), consumed once by Studio. */
+  studioTryRequest: StudioTryRequest | null
   scanning: boolean
   scanSection: string | null
   gitMessage: string | null
@@ -119,6 +122,10 @@ interface AppStore {
   requestStudioReuse: (request: StudioReuseRequest) => void
   /** Returns the pending reuse request once and clears it; null when there is none or it is malformed. */
   takeStudioReuseRequest: () => StudioReuseRequest | null
+  /** Ask Studio to add a 风格 with a trained LoRA and a 画面 that uses it. */
+  requestStudioTry: (request: StudioTryRequest) => void
+  /** Returns the pending 在创作中试用 request once and clears it. */
+  takeStudioTryRequest: () => StudioTryRequest | null
   dismissAnnouncement: (id: string) => Promise<void>
   downloadModel: (modelId: string) => Promise<void>
   downloadAdapter: (adapterId: string) => Promise<void>
@@ -455,6 +462,7 @@ export const useApp = create<AppStore>((set, get) => {
     notificationsOpen: false,
     studioBackground: null,
     studioReuseRequest: null,
+    studioTryRequest: null,
     scanning: false,
     scanSection: null,
     gitMessage: null,
@@ -672,6 +680,17 @@ export const useApp = create<AppStore>((set, get) => {
       if (request === null) return null
       set({ studioReuseRequest: null })
       return isStudioReuseRequest(request) ? request : null
+    },
+
+    requestStudioTry(request) {
+      set({ studioTryRequest: request })
+    },
+
+    takeStudioTryRequest() {
+      const request = get().studioTryRequest
+      if (request === null) return null
+      set({ studioTryRequest: null })
+      return isStudioTryRequest(request) ? request : null
     },
 
     async dismissAnnouncement(id) {

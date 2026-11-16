@@ -44,22 +44,6 @@ const canvas = {
 
 const host = { host: 'gpu.example.com', user: 'root', trainerRoot: '/opt/trainer' }
 
-const trainerRun = {
-  versionId: 'v1',
-  action: 'train',
-  runName: 'run',
-  weights: '/w',
-  dataset: '/d',
-  algo: 'lora',
-  steps: 1000,
-  lr: '1e-4',
-  dim: '16',
-  alpha: '16',
-  batch: '1',
-  resolution: 1024,
-  overrides: '',
-}
-
 const launchRow = {
   id: 'r1',
   caseName: 'case',
@@ -512,21 +496,6 @@ const cases = {
   trainerRemoteVersion: {
     valid: { hostId: 'h1', versionId: 'v1' },
     rejects: { 'empty version': { hostId: 'h1', versionId: '' } },
-  },
-
-  trainerRun: {
-    valid: trainerRun,
-    accepts: { 'max steps': { ...trainerRun, steps: 1_000_000, resolution: 4096, action: 'sample' } },
-    rejects: {
-      'unknown action': { ...trainerRun, action: 'deploy' },
-      'steps 0': { ...trainerRun, steps: 0 },
-      'too many steps': { ...trainerRun, steps: 1_000_001 },
-      'resolution 63': { ...trainerRun, resolution: 63 },
-      'resolution 4097': { ...trainerRun, resolution: 4097 },
-      'numeric lr': { ...trainerRun, lr: 0.0001 },
-      'empty dataset': { ...trainerRun, dataset: '' },
-      'overlong overrides': { ...trainerRun, overrides: long(8001) },
-    },
   },
 
   trainerCreate: {

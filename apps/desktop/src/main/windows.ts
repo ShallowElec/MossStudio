@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { Events } from '@shared/channels'
 import { applyAppDetails } from './install/identity'
 
-export type WindowKind = 'studio' | 'trainer'
+export type WindowKind = 'studio'
 
 const windows = new Map<WindowKind, BrowserWindow>()
 const isDev = !app.isPackaged
@@ -14,7 +14,6 @@ const config: Record<WindowKind, { width: number; height: number; minWidth: numb
   // Tiling window managers (Hyprland, Sway) may give a window less than its minimum, and the page is then
   // laid out at the minimum and cut off on the right. Keep the minimum at a size every screen layout can hold.
   studio: { width: 1600, height: 1000, minWidth: 1024, minHeight: 640, route: '/studio', title: 'MossStudio' },
-  trainer: { width: 1280, height: 840, minWidth: 960, minHeight: 600, route: '/trainer', title: 'Kohaku Trainer' },
 }
 
 const TITLEBAR_HEIGHT = 40

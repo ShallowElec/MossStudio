@@ -24,11 +24,11 @@ describe('desktop notifications', () => {
       created.push(this)
       Notification.shown.push(this.options)
     })
-    expect(pushLocalNotification({ title: 'T', body: 'B', windowKind: 'trainer', route: '/jobs' })).toBe(true)
+    expect(pushLocalNotification({ title: 'T', body: 'B', windowKind: 'studio', route: '/training' })).toBe(true)
     expect(show).toHaveBeenCalledOnce()
     expect(Notification.shown).toEqual([{ title: 'T', body: 'B', silent: false }])
     created[0]!.emit('click')
-    expect(openWindow).toHaveBeenCalledWith('trainer', '/jobs')
+    expect(openWindow).toHaveBeenCalledWith('studio', '/training')
     const win = openWindow.mock.results[0]!.value
     expect(win.show).toHaveBeenCalled()
     expect(win.focus).toHaveBeenCalled()

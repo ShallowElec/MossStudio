@@ -1,4 +1,4 @@
-import { FolderOpen, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Ipc } from '@shared/channels'
 import type { BranchInfo, CommitInfo, Settings, TrainerVersion } from '@shared/types'
@@ -7,7 +7,7 @@ import { dateTime } from '../../lib/format'
 import { useApp } from '../../store'
 import { Button, ConfirmDialog, FieldLabel, IconButton, Pill, Row, Select, Spinner, useToast } from '../../components/ui'
 import { TextSetting } from './TextSetting'
-import { RUNTIME_LABEL, defaultBranch, optionalUrlError, versionsAt } from './trainerSetup'
+import { RUNTIME_LABEL, defaultBranch, versionsAt } from './trainerSetup'
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -19,7 +19,7 @@ const TORCH_OPTIONS: Array<{ value: Settings['torchBackend']; label: string }> =
   { value: 'cpu', label: 'CPU' },
 ]
 
-/** Everything about the trainer that the app normally decides on its own. */
+/** What 设置 › 训练 keeps under 高级: the Python and PyTorch to use, and every version on this computer. */
 export function TrainerAdvanced({
   hostId,
   versions,
@@ -51,11 +51,6 @@ export function TrainerAdvanced({
       toast.push(`保存失败：${errorText(error)}`, 'error')
       throw error
     }
-  }
-
-  async function pickTrainerRoot(): Promise<void> {
-    const path = await call<string | null>(Ipc.pickDialog, { kind: 'folder', title: '选择训练器目录' }).catch(() => null)
-    if (path) await save({ trainerRoot: path }).catch(() => undefined)
   }
 
   async function loadCommits(name: string): Promise<void> {
@@ -139,40 +134,8 @@ export function TrainerAdvanced({
           onValueChange={(value) => void save({ torchBackend: value as Settings['torchBackend'] }).catch(() => undefined)}
         />
       </Row>
-      <Row title="PyTorch 源" description="留空时按上面的选择自动决定">
-        <TextSetting
-          label="PyTorch 源"
-          className="w-[280px]"
-          value={settings?.torchIndex ?? null}
-          placeholder="https://download.pytorch.org/whl/cu128"
-          validate={optionalUrlError}
-          onSave={(torchIndex) => save({ torchIndex })}
-        />
-      </Row>
-      <Row title="pip 源" description="安装训练环境时下载 Python 包的地址">
-        <TextSetting
-          label="pip 源"
-          className="w-[280px]"
-          value={settings?.pipIndex ?? null}
-          placeholder="https://pypi.org/simple"
-          validate={optionalUrlError}
-          onSave={(pipIndex) => save({ pipIndex })}
-        />
-      </Row>
-      <Row title="训练器目录" description={settings?.trainerRoot ?? '默认放在应用数据目录的 trainer 文件夹'}>
-        {settings?.trainerRoot ? (
-          <Button tone="ghost" onClick={() => void save({ trainerRoot: null }).catch(() => undefined)}>
-            恢复默认
-          </Button>
-        ) : null}
-        <Button onClick={() => void pickTrainerRoot()}>
-          <FolderOpen className="size-4" strokeWidth={1.6} aria-hidden="true" />
-          选择
-        </Button>
-      </Row>
-
       <FieldLabel as="h3" className="px-3.5 pb-1 pt-3">
-        {local ? '本机的版本' : '这台主机上的版本'}
+        {local ? '本机的训练器版本' : '这台电脑上的训练器版本'}
       </FieldLabel>
       {here.length === 0 ? (
         <p className="px-3.5 pb-2 text-caption text-ink-2">还没有版本。</p>

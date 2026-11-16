@@ -98,6 +98,25 @@ describe('prepareTrainer', () => {
     expect(result).toMatchObject({ updated: true, installed: true, version: { id: 'v-new', runtimeState: 'ready' } })
   })
 
+  it('takes the stable release when asked, without reading the default branch', async () => {
+    const created = version({ id: 'v-stable', commit: 'cccccccc', runtimeState: 'ready' })
+    const api = fakeApi(created)
+    api.branches = async () => [
+      { name: 'main', sha: 'bbbbbbbb', isDefault: true, isStable: false },
+      { name: 'release', sha: 'cccccccc', isDefault: false, isStable: true },
+    ]
+    await prepareTrainer(api, undefined, undefined, 'stable')
+    expect(api.calls).toEqual(['create:release:cccccccc'])
+  })
+
+  it('falls back to the default branch head when there is no stable release', async () => {
+    const created = version({ id: 'v-new', commit: 'dddddddd', runtimeState: 'ready' })
+    const api = fakeApi(created)
+    api.branches = async () => [{ name: 'main', sha: 'bbbbbbbb', isDefault: true, isStable: false }]
+    await prepareTrainer(api, undefined, undefined, 'stable')
+    expect(api.calls).toEqual(['commits:main', 'create:main:dddddddd'])
+  })
+
   it('reports "already up to date" without reinstalling', async () => {
     const current = version()
     const api = fakeApi(current)

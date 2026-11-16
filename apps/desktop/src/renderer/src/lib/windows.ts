@@ -1,8 +1,5 @@
-import { Ipc } from '@shared/channels'
-import { call } from './api'
-
-/** Legacy names are UI intents now; only Studio and Trainer are real OS windows. */
-export type WindowKind = 'studio' | 'trainer' | 'launcher' | 'creator' | 'terminal' | 'devices'
+/** Legacy names are UI intents now; the main window is the only OS window. */
+export type WindowKind = 'studio' | 'launcher' | 'creator' | 'terminal' | 'devices'
 
 export interface WindowIntent {
   target: 'studio' | 'management' | 'terminal'
@@ -10,14 +7,6 @@ export interface WindowIntent {
 }
 
 export function openWindow(kind: WindowKind, route?: string): void {
-  if (kind === 'trainer') {
-    void call(Ipc.windowOpen, { kind: 'trainer', route })
-    return
-  }
-  if (window.clover.windowKind === 'trainer') {
-    void call(Ipc.windowOpen, { kind: 'studio', route: route ?? '/studio' })
-    return
-  }
   const intent: WindowIntent =
     kind === 'terminal'
       ? { target: 'terminal' }

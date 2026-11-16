@@ -208,12 +208,12 @@ function update(job: JobRecord, patch: Partial<JobRecord>): void {
   const previousState = job.state
   Object.assign(job, patch)
   emit(Events.job, snapshot(job))
-  if (previousState !== job.state && job.mode !== 'simulate' && (job.state === 'succeeded' || job.state === 'failed')) {
-    const training = job.kind === 'training' || job.mode === 'training'
-    const label = training ? '训练' : '生成'
-    const target = training ? (job.trainerRunName ?? job.instanceName) : (job.caseName ?? job.instanceName)
+  // A training tells the person itself, in its own words, once its LoRA is saved or its failure read.
+  const training = job.kind === 'training' || job.mode === 'training'
+  if (previousState !== job.state && job.mode !== 'simulate' && !training && (job.state === 'succeeded' || job.state === 'failed')) {
+    const target = job.caseName ?? job.instanceName
     pushLocalNotification({
-      title: job.state === 'succeeded' ? `${label}完成` : `${label}失败`,
+      title: job.state === 'succeeded' ? '生成完成' : '生成失败',
       body: job.state === 'succeeded' ? `${target} · 点击查看终端` : `${target} · ${job.error?.message ?? '查看诊断了解原因'}`,
       windowKind: 'studio',
       route: job.state === 'succeeded' ? undefined : '/diagnostics',
@@ -315,6 +315,7 @@ function finish(job: JobRecord, runningJob: RunningJob, code: number | null): vo
 
   if (job.error) {
     update(job, { state: 'failed', endedAt: new Date().toISOString(), exitCode })
+    notifyCompleted(job)
     return
   }
 
@@ -1509,6 +1510,30 @@ export async function cancelJob(id: string): Promise<JobRecord | null> {
     if (runningJob.child) killTree(runningJob.child)
   }, 5000)
   return snapshot(job)
+}
+
+/**
+ * App quit: ends every running training (a local trainer's process tree, a remote one through its
+ * stop command), so none keeps the GPU busy with nothing left to follow it. The next start marks
+ * the jobs interrupted.
+ */
+export function stopTrainingJobs(): void {
+  for (const [id, runningJob] of running) {
+    if (jobs.get(id)?.kind !== 'training') continue
+    if (runningJob.cancelCommand) {
+      try {
+        spawn(runningJob.cancelCommand.command, runningJob.cancelCommand.args, {
+          env: { ...process.env, ...runningJob.cancelCommand.env },
+          windowsHide: true,
+          stdio: 'ignore',
+          detached: process.platform !== 'win32',
+        }).unref()
+      } catch {
+        // best effort: the local side below still ends
+      }
+    }
+    if (runningJob.child) killTree(runningJob.child)
+  }
 }
 
 export function onJobCompleted(listener: (job: JobRecord) => void): void {

@@ -18,6 +18,7 @@ import type {
 import { agentCardSchema, makeCard, planStepSchema, type AgentCard, type AgentCardAnswer, type PlanStep } from '@shared/agent/cards'
 import { MODE_RULES, TOOL_RULES } from '@shared/agent/registry'
 import { paths } from '../lib/paths'
+import { codedError } from '../lib/codedError'
 
 interface StoredProvider extends AiProviderInfo {
   apiKey: string
@@ -651,3 +652,146 @@ export async function chat(
 }
 
 export const AI_PROVIDER_KINDS: AiProviderKind[] = ['openai', 'anthropic', 'gemini', 'ollama']
+
+/**
+ * The provider the 助手 uses now: the one of the most recent conversation, else the newest saved
+ * (the panel lists providers newest first and starts on the first).
+ */
+export function currentProviderId(): string | null {
+  const store = load()
+  const recent = [...store.conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+  if (recent && store.providers.some((item) => item.id === recent.providerId)) return recent.providerId
+  return store.providers[0]?.id ?? null
+}
+
+export interface ImageQuestion {
+  system: string
+  prompt: string
+  image: { data: Uint8Array; mime: string }
+}
+
+/** The error code when the provider answered that it cannot read pictures, so the caller can stop asking. */
+export const E_NO_IMAGE_INPUT = 'E_NO_IMAGE_INPUT'
+
+/** Provider answers that mean "this model takes no picture" rather than a passing failure. */
+const NO_IMAGE_INPUT = /image|vision|multimodal|multi-modal|does not support|not supported|unsupported content/i
+
+function imageRequest(provider: StoredProvider, question: ImageQuestion): { url: string; headers: Record<string, string>; body: unknown } {
+  const base64 = Buffer.from(question.image.data).toString('base64')
+  const { mime } = question.image
+  if (provider.kind === 'anthropic') {
+    return {
+      url: `${provider.baseUrl}/v1/messages`,
+      headers: { 'content-type': 'application/json', 'x-api-key': provider.apiKey, 'anthropic-version': '2023-06-01' },
+      body: {
+        model: provider.model,
+        max_tokens: 400,
+        system: question.system,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: mime, data: base64 } },
+              { type: 'text', text: question.prompt },
+            ],
+          },
+        ],
+      },
+    }
+  }
+  if (provider.kind === 'gemini') {
+    return {
+      url: `${provider.baseUrl}/models/${encodeURIComponent(provider.model)}:generateContent?key=${encodeURIComponent(provider.apiKey)}`,
+      headers: { 'content-type': 'application/json' },
+      body: {
+        systemInstruction: { parts: [{ text: question.system }] },
+        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mime, data: base64 } }, { text: question.prompt }] }],
+        generationConfig: { maxOutputTokens: 400 },
+      },
+    }
+  }
+  if (provider.kind === 'ollama') {
+    return {
+      url: `${provider.baseUrl}/api/chat`,
+      headers: { 'content-type': 'application/json' },
+      body: {
+        model: provider.model,
+        stream: false,
+        messages: [
+          { role: 'system', content: question.system },
+          { role: 'user', content: question.prompt, images: [base64] },
+        ],
+      },
+    }
+  }
+  return {
+    url: `${provider.baseUrl}/chat/completions`,
+    headers: { 'content-type': 'application/json', ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}) },
+    body: {
+      model: provider.model,
+      max_tokens: 400,
+      messages: [
+        { role: 'system', content: question.system },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: question.prompt },
+            { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}` } },
+          ],
+        },
+      ],
+    },
+  }
+}
+
+function imageAnswer(kind: AiProviderKind, body: unknown): string {
+  const value = body as {
+    content?: Array<{ type?: string; text?: string }>
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+    message?: { content?: string }
+    choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>
+  }
+  if (kind === 'anthropic') return (value.content ?? []).map((block) => (block.type === 'text' ? (block.text ?? '') : '')).join('')
+  if (kind === 'gemini') return (value.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? '').join('')
+  if (kind === 'ollama') return value.message?.content ?? ''
+  const content = value.choices?.[0]?.message?.content
+  return typeof content === 'string' ? content : (content ?? []).map((part) => part.text ?? '').join('')
+}
+
+function errorText(body: unknown, status: number): string {
+  const value = body as { error?: { message?: string } | string; message?: string } | null
+  if (typeof value?.error === 'string') return value.error
+  return value?.error?.message ?? value?.message ?? `HTTP ${status}`
+}
+
+/** One picture and one question to the provider, answered as plain text (no tools, no streaming). */
+export async function askAboutImage(providerId: string, question: ImageQuestion, timeoutMs = 60_000): Promise<string> {
+  const provider = load().providers.find((item) => item.id === providerId)
+  if (!provider) throw new Error('请先添加 AI Provider')
+  const request = imageRequest(provider, question)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(request.url, {
+      method: 'POST',
+      headers: request.headers,
+      body: JSON.stringify(request.body),
+      signal: controller.signal,
+    })
+    const text = await response.text()
+    let body: unknown = null
+    try {
+      body = JSON.parse(text)
+    } catch {
+      // Not JSON (a proxy's error page): the status says what happened.
+    }
+    if (!response.ok) {
+      const message = errorText(body, response.status)
+      if (response.status >= 400 && response.status < 500 && NO_IMAGE_INPUT.test(message)) throw codedError(E_NO_IMAGE_INPUT, message)
+      throw new Error(message)
+    }
+    return imageAnswer(provider.kind, body).trim()
+  } finally {
+    clearTimeout(timer)
+  }
+}

@@ -1,23 +1,38 @@
 import { describe, expect, it } from 'vitest'
-import { SETTINGS_SECTIONS, isCanonicalSectionPath, sectionFromPath, sectionLabel, sectionPath } from '@renderer/pages/settings/sections'
+import {
+  SETTINGS_SECTIONS,
+  isCanonicalSectionPath,
+  sectionFromPath,
+  sectionLabel,
+  sectionPath,
+  visibleSections,
+} from '@renderer/pages/settings/sections'
 
 describe('settings sections', () => {
-  it('lists the seven sections in order', () => {
+  it('lists the eight sections in order, 训练 after 功能', () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
       'general',
       'devices',
       'storage',
       'network',
       'features',
+      'training',
       'updates',
       'about',
     ])
+  })
+
+  it('lists 训练 only while training is turned on', () => {
+    expect(visibleSections({ trainingEnabled: false }).map((section) => section.id)).not.toContain('training')
+    expect(visibleSections(null).map((section) => section.id)).not.toContain('training')
+    expect(visibleSections({ trainingEnabled: true }).map((section) => section.id)).toContain('training')
   })
 
   it('reads the section from the URL', () => {
     expect(sectionFromPath('/settings/network')).toBe('network')
     expect(sectionFromPath('/settings/Devices')).toBe('devices')
     expect(sectionFromPath('/settings/devices/extra')).toBe('devices')
+    expect(sectionFromPath('/settings/training')).toBe('training')
   })
 
   it('opens 通用 for bare, unknown and foreign paths', () => {

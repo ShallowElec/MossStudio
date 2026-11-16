@@ -273,3 +273,31 @@ export function seriesFromStyle(
   }
   return { canvases: list, style, layouts }
 }
+
+/**
+ * 在创作中试用 (训练 › 完成): a 风格 named after the training that holds its
+ * LoRA at full strength, and a new 画面 wired to it whose description is a
+ * sample prompt (it carries the trigger word), side by side in free spots.
+ */
+export function tryLoraOnBoard(
+  existing: readonly ProjectCanvas[],
+  settings: CanvasSettings,
+  lora: { name: string; adapterId: string; prompt: string },
+): { canvases: ProjectCanvas[]; style: ProjectCanvas; layout: ProjectCanvas } {
+  const style: ProjectCanvas = {
+    ...createStyleCanvas(existing),
+    title:
+      lora.name.trim() ||
+      nextNodeTitle(
+        '风格',
+        existing.map((item) => item.title),
+      ),
+    adapters: normalizeCanvasAdapters([{ id: lora.adapterId, strength: 1 }]),
+  }
+  const withStyle = [...existing, style]
+  // The 画面 tries this LoRA alone; LoRA the copied settings carried would muddle the result.
+  const placed = withDescription(createLayoutCanvas(withStyle, { ...settings, adapters: [] }), lora.prompt.trim())
+  const spot = spotBeside(style, placed, withStyle)
+  const layout = setLink({ ...placed, x: spot.x, y: spot.y }, 'style', { canvasId: style.id })
+  return { canvases: [...withStyle, layout], style, layout }
+}

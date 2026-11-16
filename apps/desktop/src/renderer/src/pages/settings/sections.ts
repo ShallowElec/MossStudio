@@ -1,9 +1,13 @@
+import type { Settings } from '@shared/types'
+
 /** Settings sections, in the order they appear. The URL decides which one is open. */
-export type SettingsSectionId = 'general' | 'devices' | 'storage' | 'network' | 'features' | 'updates' | 'about'
+export type SettingsSectionId = 'general' | 'devices' | 'storage' | 'network' | 'features' | 'training' | 'updates' | 'about'
 
 export interface SettingsSection {
   id: SettingsSectionId
   label: string
+  /** Only listed while this optional feature is turned on. */
+  feature?: keyof Pick<Settings, 'trainingEnabled'>
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -12,9 +16,15 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'storage', label: '存储' },
   { id: 'network', label: '网络' },
   { id: 'features', label: '功能' },
+  { id: 'training', label: '训练', feature: 'trainingEnabled' },
   { id: 'updates', label: '通知与更新' },
   { id: 'about', label: '关于' },
 ]
+
+/** The sections listed for these settings: an optional feature's section only while it is on. */
+export function visibleSections(settings: Pick<Settings, 'trainingEnabled'> | null): SettingsSection[] {
+  return SETTINGS_SECTIONS.filter((section) => !section.feature || Boolean(settings?.[section.feature]))
+}
 
 const KNOWN = new Set<string>(SETTINGS_SECTIONS.map((section) => section.id))
 

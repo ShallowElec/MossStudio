@@ -61,10 +61,12 @@ import {
 } from './fixtures'
 import { scenario, type MockBackendState, type ScenarioName } from './scenarios'
 import { addInstallHandlers } from './install'
+import { addTrainingHandlers } from './training'
 
 export * from './fixtures'
 export * from './scenarios'
 export * from './install'
+export * from './training'
 
 export type CloverBridge = Window['clover']
 
@@ -867,8 +869,13 @@ function defaultHandlers(): Map<string, Handler> {
   // Shell integrations: accepted and recorded via `calls`.
   for (const channel of [Ipc.windowOpen, Ipc.openPath, Ipc.openExternal, Ipc.copyText, Ipc.galleryReveal]) h.set(channel, () => null)
   h.set(Ipc.pickDialog, () => null)
+  h.set(Ipc.pickImages, () => [])
   h.set(Ipc.windowControl, () => ({ maximized: false }))
   addInstallHandlers(
+    (channel, handler) => h.set(channel, handler),
+    (code, message) => new MockIpcError(code, message),
+  )
+  addTrainingHandlers(
     (channel, handler) => h.set(channel, handler),
     (code, message) => new MockIpcError(code, message),
   )

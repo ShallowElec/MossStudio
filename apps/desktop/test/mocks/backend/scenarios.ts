@@ -63,6 +63,13 @@ import {
   updaterStateFixture,
 } from './fixtures'
 import { installStateFixture, type MockInstallState } from './install'
+import {
+  trainingBlockedFixture,
+  trainingNotPreparedFixture,
+  trainingStateFixture,
+  trainingsFixture,
+  type MockTrainingState,
+} from './training'
 
 export interface MockBackendState {
   settings: Settings
@@ -104,6 +111,8 @@ export interface MockBackendState {
   systemMemoryBytes: number
   /** Free space models:space reports for a models folder; a folder not listed has plenty. */
   diskFree: Record<string, number>
+  /** 训练: readiness, the trainings and their pictures and samples (see ./training.ts). */
+  training: MockTrainingState
   /** 看图拆区域: whether GBC runs, its versions, and what reading a picture finds. */
   gbc: { status: GbcStatus; versions: GbcVersion[]; parse: GbcParseResult }
 }
@@ -123,6 +132,9 @@ export type ScenarioName =
   | 'vulkanOnly'
   | 'lowMemory'
   | 'lowDisk'
+  | 'trainingNotPrepared'
+  | 'trainingBlocked'
+  | 'trainings'
 
 /**
  * First runs on the machines of ./machines.ts (old NVIDIA driver, Turing, Volta, AMD with/without ROCm, Intel, several GPUs, macOS,
@@ -181,6 +193,8 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     localModelFiles: null,
     systemMemoryBytes: 32 * GiB,
     diskFree: {},
+    // Ready to train on 本机 (RTX 4070, 12 GB), no trainings yet.
+    training: trainingStateFixture(),
   }
 
   const firstRun = (): Partial<MockBackendState> => ({
@@ -264,6 +278,25 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     lowMemory: () => ({ ...firstRun(), systemMemoryBytes: 8 * GiB }),
     /** First run where the models folder has 12 GB free, less than the download needs. */
     lowDisk: () => ({ ...firstRun(), diskFree: { [FIXTURE_MODELS_PATH]: 12 * GiB } }),
+    /** 训练 on, nothing for it here yet: the base model and the trainer still to get. */
+    trainingNotPrepared: () => ({
+      settings: settingsFixture({ onboardingState: 'completed', trainingEnabled: true }),
+      training: trainingStateFixture({ readiness: trainingNotPreparedFixture() }),
+    }),
+    /** 训练 on, on a computer without an NVIDIA card. */
+    trainingBlocked: () => ({
+      settings: settingsFixture({ onboardingState: 'completed', trainingEnabled: true }),
+      training: trainingStateFixture({ readiness: trainingBlockedFixture() }),
+    }),
+    /** 训练 on and ready, with trainings in every state (one running). */
+    trainings: () => {
+      const { jobs, ...rest } = trainingsFixture()
+      return {
+        settings: settingsFixture({ onboardingState: 'completed', trainingEnabled: true }),
+        jobs,
+        training: trainingStateFixture(rest),
+      }
+    },
   }
 
   /** First run on each kind of machine the engine chooser knows. */

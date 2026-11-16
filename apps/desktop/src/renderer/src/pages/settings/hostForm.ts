@@ -16,6 +16,8 @@ export interface HostForm {
   engineRoot: string
   outputRoot: string
   modelsRoot: string
+  /** Folder on the remote computer with the base model for training; empty = the host decides. */
+  weightsPath: string
   downloadProxy: string
   hfEndpoint: string
   downloadConcurrency: string
@@ -42,6 +44,7 @@ export function emptyHostForm(): HostForm {
     password: '',
     hasPassword: false,
     ...REMOTE_DEFAULT_PATHS,
+    weightsPath: '',
     downloadProxy: '',
     hfEndpoint: '',
     downloadConcurrency: '',
@@ -66,6 +69,7 @@ export function hostFormFrom(host: ManagedHost): HostForm {
     engineRoot: host.engineRoot ?? REMOTE_DEFAULT_PATHS.engineRoot,
     outputRoot: host.outputRoot ?? REMOTE_DEFAULT_PATHS.outputRoot,
     modelsRoot: host.modelsRoot ?? REMOTE_DEFAULT_PATHS.modelsRoot,
+    weightsPath: host.weightsPath ?? '',
     downloadProxy: host.downloadProxy ?? '',
     hfEndpoint: host.hfEndpoint ?? '',
     downloadConcurrency: host.downloadConcurrency ? String(host.downloadConcurrency) : '',
@@ -114,6 +118,7 @@ export function hostSavePayload(form: HostForm): Record<string, unknown> {
     password: form.authMethod === 'password' ? form.password || undefined : undefined,
     trainerRoot: form.trainerRoot.trim(),
     modelsRoot: form.modelsRoot.trim() || undefined,
+    weightsPath: form.weightsPath.trim() || undefined,
     downloadProxy: form.downloadProxy.trim(),
     hfEndpoint: form.hfEndpoint.trim(),
     downloadConcurrency: form.downloadConcurrency.trim() ? Number(form.downloadConcurrency) : null,
