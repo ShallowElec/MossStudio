@@ -538,6 +538,19 @@ async function callProvider(
   return openAIChat(provider, system, turns, tools, onDelta)
 }
 
+/**
+ * One request without a conversation or tools (the 漫画 storyboard and memory):
+ * the answer's text. The provider calls carry their own timeouts.
+ */
+export async function complete(input: { providerId?: string; system: string; prompt: string }): Promise<string> {
+  const providers = load().providers
+  const provider = input.providerId ? providers.find((item) => item.id === input.providerId) : providers[0]
+  if (!provider) throw new Error('还没有连接语言模型，请先在助手里添加')
+  const { text } = await callProvider(provider, input.system, [{ role: 'user', content: input.prompt }], [], () => undefined)
+  if (!text.trim()) throw new Error('语言模型没有回答，请再试一次')
+  return text
+}
+
 const MAX_TOOL_ROUNDS = 4
 
 export async function chat(

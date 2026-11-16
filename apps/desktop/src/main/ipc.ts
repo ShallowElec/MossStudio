@@ -30,6 +30,7 @@ import {
   modelSpace,
 } from './services/models'
 import { deleteCombination, listCombinations, saveCombination } from './services/modelCombinations'
+import { deleteSeries, getSeries, listSeries, saveSeries, writeChapterPages } from './services/manga'
 import { galleryDetail, listGallery, recordJobOutputs, revealInFolder, trashGalleryItem } from './services/gallery'
 import { activeJobInputPaths, cancelJob, getJob, getJobLogs, inputJob, listJobs, onJobCompleted } from './services/supervisor'
 import { clearDiagnostics, dismissDiagnostic, listDiagnostics } from './services/diagnostics'
@@ -41,6 +42,7 @@ import { getWebAccessInfo, startBackend, stopBackend } from './services/backend'
 import {
   answerAgentCard,
   chat,
+  complete,
   listConversations,
   listProviders,
   removeConversation,
@@ -237,6 +239,8 @@ export function registerIpc(): void {
   })
 
   handle(Ipc.aiConversationRename, schemas.aiConversationTitle, ({ id, title }) => renameConversation(id, title))
+
+  handle(Ipc.aiComplete, schemas.aiComplete, (input) => complete(input))
 
   handle(Ipc.aiToolResult, schemas.aiToolResult, ({ callId, result }) => {
     pendingToolCalls.get(callId)?.(result)
@@ -656,6 +660,25 @@ export function registerIpc(): void {
   handle(Ipc.projectDelete, schemas.projectId, ({ id }) => {
     deleteProject(id)
     return true
+  })
+
+  handle(Ipc.mangaList, null, () => listSeries())
+
+  handle(Ipc.mangaGet, schemas.mangaId, ({ id }) => getSeries(id))
+
+  handle(Ipc.mangaSave, schemas.mangaSave, (input) => saveSeries(input))
+
+  handle(Ipc.mangaDelete, schemas.mangaId, ({ id }) => {
+    deleteSeries(id)
+    return true
+  })
+
+  handle(Ipc.mangaExport, schemas.mangaExport, async (input, event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = { title: '导出到哪个文件夹', properties: ['openDirectory', 'createDirectory'] }
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    return writeChapterPages(result.filePaths[0], input)
   })
 
   handle(Ipc.modelsCatalog, null, () => getCatalog(getSettings(), true))

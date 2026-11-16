@@ -21,6 +21,7 @@
 import { bestBundleFor, cliGpuUuids, generationGpus, isFileBundle } from '@shared/bundleFit'
 import { Events, Ipc } from '@shared/channels'
 import { combinationBundle } from '@shared/modelCombos'
+import { MANGA_SCHEMA_VERSION, seriesSummary, type MangaSeries, type MangaSeriesSave } from '@shared/manga/model'
 import type { AiChatInput, AiConversationInfo, AiMessage } from '@shared/ai'
 import type { WebAccessInfo } from '@shared/backend'
 import type { EngineHello } from '@shared/engineProtocol'
@@ -109,6 +110,7 @@ export interface MockBackend {
   readonly unhandled: string[]
   callsTo(channel: string): unknown[]
   handle(channel: string, handler: Handler): void
+  /** Make `channel` fail, `times` times (all calls by default); `times: 0` clears it. */
   fail(channel: string, error?: Partial<IpcError>, options?: { times?: number }): void
   hold(channel: string): HeldCall
   emit(event: string, data: unknown): void
@@ -793,6 +795,56 @@ function defaultHandlers(): Map<string, Handler> {
     return null
   })
 
+  // 漫画: series like main/services/manga.ts, each with its backing project.
+  h.set(Ipc.mangaList, (_, { state }) => state.manga.map(seriesSummary))
+  h.set(Ipc.mangaGet, (payload, { state }) => state.manga.find((item) => item.id === p<{ id: string }>(payload).id) ?? null)
+  h.set(Ipc.mangaSave, (payload, { state }) => {
+    const input = p<MangaSeriesSave>(payload)
+    const existing = input.id ? state.manga.find((item) => item.id === input.id) : undefined
+    if (input.id && !existing) throw new MockIpcError('E_NOT_FOUND', '这部漫画已经删除了')
+    const id = existing?.id ?? `manga-${state.manga.length + 1}`
+    let projectId = existing?.projectId
+    if (!projectId) {
+      projectId = `project-manga-${state.manga.length + 1}`
+      state.projects = [
+        {
+          schemaVersion: 3,
+          id: projectId,
+          name: `漫画 · ${input.title}`,
+          canvases: [],
+          seriesId: id,
+          createdAt: FIXTURE_NOW,
+          updatedAt: FIXTURE_NOW,
+        },
+        ...state.projects,
+      ]
+    }
+    const series: MangaSeries = {
+      ...input,
+      schemaVersion: MANGA_SCHEMA_VERSION,
+      id,
+      projectId,
+      createdAt: existing?.createdAt ?? FIXTURE_NOW,
+      updatedAt: FIXTURE_NOW,
+    }
+    state.manga = [series, ...state.manga.filter((item) => item.id !== id)]
+    return series
+  })
+  h.set(Ipc.mangaDelete, (payload, { state }) => {
+    const { id } = p<{ id: string }>(payload)
+    const series = state.manga.find((item) => item.id === id)
+    state.manga = state.manga.filter((item) => item.id !== id)
+    if (series) state.projects = state.projects.filter((project) => project.id !== series.projectId)
+    return true
+  })
+  h.set(Ipc.mangaExport, (payload) => `/fixture/export/${p<{ title: string }>(payload).title}`)
+  h.set(Ipc.aiComplete, (_, { state }) => {
+    const answer = state.aiCompletions.shift()
+    if (answer === undefined) throw new MockIpcError('E_AI', '语言模型没有回答，请再试一次')
+    return answer
+  })
+  h.set(Ipc.pickImages, (_, { state }) => state.pickedImages)
+
   // 看图拆区域: setup and reading answer at once, with the events main sends on the way.
   h.set(Ipc.gbcStatus, (_, { state }) => state.gbc.status)
   h.set(Ipc.gbcVersions, (_, { state }) => state.gbc.versions)
@@ -952,6 +1004,7 @@ export function createMockBackend(initial: ScenarioName | MockBackendState = 're
       overrides.set(channel, handler)
     },
     fail(channel, error = {}, { times = Number.POSITIVE_INFINITY } = {}) {
+      if (times <= 0) return void failures.delete(channel)
       failures.set(channel, { error: { code: error.code ?? 'E_MOCK_FAIL', message: error.message ?? `${channel} failed` }, times })
     },
     hold(channel) {

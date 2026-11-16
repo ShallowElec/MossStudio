@@ -30,6 +30,16 @@ export const Ipc = {
   projectGet: 'projects:get',
   projectSave: 'projects:save',
   projectDelete: 'projects:delete',
+  /** 漫画 series (shared/manga/model.ts): → MangaSeriesSummary[]. */
+  mangaList: 'manga:list',
+  /** `{ id }` → MangaSeries | null. */
+  mangaGet: 'manga:get',
+  /** MangaSeriesSave → MangaSeries (a new series also gets its backing Studio project). */
+  mangaSave: 'manga:save',
+  /** `{ id }`: removes the series and its pictures. */
+  mangaDelete: 'manga:delete',
+  /** `{ title, chapterNumber, pages: Uint8Array[] }` → the folder written, or null when the folder dialog is canceled. */
+  mangaExport: 'manga:export',
   onboardingStatus: 'onboarding:status',
   pythonInstall: 'python:install',
   pythonInstallState: 'python:install-state',
@@ -125,6 +135,8 @@ export const Ipc = {
   aiConversationRemove: 'ai:conversation-remove',
   aiConversationRename: 'ai:conversation-rename',
   aiChat: 'ai:chat',
+  /** One request without a conversation or tools: `{ providerId?, system, prompt }` → the answer text. */
+  aiComplete: 'ai:complete',
   aiToolResult: 'ai:tool-result',
   aiCardAnswer: 'ai:card-answer',
   gbcStatus: 'gbc:status',

@@ -35,6 +35,7 @@ The terms MossStudio coins or uses in a fixed sense, with the Chinese the UI sho
 | 控制图 | control image, role `control` | A picture whose depth or edges guide the composition. Needs a 控制适配器. | `renderer/src/pages/studio/recipes.ts`, `shared/types.ts` (`EngineFeatures.control`) |
 | 参考图 | reference image, role `reference` | A picture whose look the result follows. | `renderer/src/pages/studio/recipes.ts`, `shared/types.ts` (`EngineFeatures.references`) |
 | 高清修复 | hires | A second pass that renders the picture at a larger size. | `shared/types.ts` (`JobHires`, `hires`) |
+| 漫画 | manga series, route `/manga` | A comic series: characters (人物卡), chapters (话), pages and panels (格). See [manga.md](manga.md). | `renderer/src/pages/manga/`, `shared/manga/` |
 | 作品 | Library, route `/library` | All generated pictures, for browsing and reuse. | `renderer/src/pages/library/` |
 | 活动 | Activity panel, `ActivityTab: 'jobs' \| 'notifications' \| 'problems'` | The panel opened from the Rail that lists jobs, notifications and problems. | `renderer/src/components/shell/ActivityPanel.tsx`, `renderer/src/lib/shell.ts` |
 | | assistant | The AI helper inside the Studio, with its provider settings, tools and cards. See [studio-assistant.md](studio-assistant.md). | `renderer/src/pages/studio/assistant/`, `renderer/src/lib/agent/`, `renderer/src/lib/agentTools.ts`, `shared/agent/`, `shared/ai.ts` |
