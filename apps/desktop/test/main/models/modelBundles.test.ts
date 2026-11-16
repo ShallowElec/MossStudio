@@ -321,6 +321,16 @@ describe('prepareModelBundle', () => {
     expect(readFileSync(join(second, 'transformer', 'config.json'), 'utf8')).toBe('{"d":1}')
   })
 
+  it('names the folder it would use without writing anything, and the one it made once it has', async () => {
+    installAll()
+    const planned = await bundles.plannedBundleFolder(binding, settings)
+    expect(existsSync(planned)).toBe(false)
+    expect(existsSync(join(modelsRoot(), 'bundles'))).toBe(false)
+    const made = await bundles.prepareModelBundle(binding, settings)
+    expect(made).toBe(planned)
+    expect(await bundles.plannedBundleFolder(binding, settings)).toBe(made)
+  })
+
   it('fails with a clear message when a component is not installed', async () => {
     await expect(bundles.prepareModelBundle(binding, settings)).rejects.toThrow(/组件未就绪/)
   })

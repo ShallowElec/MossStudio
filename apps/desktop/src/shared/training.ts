@@ -38,7 +38,8 @@ export interface TrainingRecipe {
   overrides: string
 }
 
-export type TrainingState = 'draft' | 'running' | 'done' | 'failed' | 'stopped'
+/** `starting`: pictures are being prepared or uploaded and the job is being started; nothing is editable. */
+export type TrainingState = 'draft' | 'starting' | 'running' | 'done' | 'failed' | 'stopped'
 
 export interface TrainingProject {
   id: string
@@ -66,6 +67,8 @@ export interface TrainingProject {
   adapterId: string | null
   /** Why the LoRA could not be saved, in plain words; the 完成 view offers 重试. */
   saveError: string | null
+  /** The step whose save failed; 重试 saves this one. null when saveError is null. */
+  saveErrorStep: number | null
   /** Why the run failed, in plain words. */
   failure: string | null
   /** A sample picture to show on the card: the chosen step's first sample, else the newest. */

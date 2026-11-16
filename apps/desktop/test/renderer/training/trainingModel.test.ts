@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { baseModelTasks, checkRows, homeCard, homeView, projectView, splitHome } from '@renderer/pages/training/trainingModel'
+import { baseModelTasks, checkRows, homeCard, homeView, projectView, savedLora, splitHome } from '@renderer/pages/training/trainingModel'
 import { catalogFixture, downloadFixture } from '../../mocks/backend/fixtures'
 import {
   trainingBlockedFixture,
@@ -50,6 +50,7 @@ describe('projectView', () => {
   it('edits a draft, follows a running training, and shows the result otherwise', () => {
     expect(projectView('draft')).toBe('editor')
     expect(projectView('running')).toBe('running')
+    expect(projectView('starting')).toBe('running')
     expect(projectView('done')).toBe('result')
     expect(projectView('stopped')).toBe('result')
     expect(projectView('failed')).toBe('result')
@@ -119,9 +120,10 @@ describe('home cards', () => {
       trainingProjectFixture({ id: 'tp-aaaa', updatedAt: '2026-11-01T00:00:00Z', state: 'done' }),
       trainingProjectFixture({ id: 'tp-bbbb', updatedAt: '2026-11-03T00:00:00Z', state: 'failed' }),
       trainingProjectFixture({ id: 'tp-cccc', updatedAt: '2026-10-01T00:00:00Z', state: 'running' }),
+      trainingProjectFixture({ id: 'tp-dddd', updatedAt: '2026-11-04T00:00:00Z', state: 'starting' }),
     ]
     const { running, rest } = splitHome(list)
-    expect(running.map((item) => item.id)).toEqual(['tp-cccc'])
+    expect(running.map((item) => item.id)).toEqual(['tp-dddd', 'tp-cccc'])
     expect(rest.map((item) => item.id)).toEqual(['tp-bbbb', 'tp-aaaa'])
   })
 
@@ -142,6 +144,29 @@ describe('home cards', () => {
     expect(homeCard(trainingProjectFixture({ state: 'done', saveError: '磁盘满了' }), relative).pill).toEqual({
       tone: 'warn',
       text: '没有保存',
+    })
+  })
+})
+
+describe('savedLora: the result view after a save', () => {
+  it('retries the step whose automatic save failed, even when no step was ever saved', () => {
+    expect(savedLora({ adapterId: null, chosenStep: null, saveError: '复制超时', saveErrorStep: 3000 })).toEqual({
+      saved: false,
+      retryStep: 3000,
+    })
+  })
+
+  it('keeps the earlier LoRA usable when saving another step fails, and retries the failed step', () => {
+    expect(savedLora({ adapterId: 'lora-tp-juzi', chosenStep: 1000, saveError: '磁盘满了', saveErrorStep: 500 })).toEqual({
+      saved: true,
+      retryStep: 500,
+    })
+  })
+
+  it('offers no retry when nothing failed', () => {
+    expect(savedLora({ adapterId: 'lora-tp-juzi', chosenStep: 1000, saveError: null, saveErrorStep: null })).toEqual({
+      saved: true,
+      retryStep: null,
     })
   })
 })

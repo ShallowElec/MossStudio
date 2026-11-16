@@ -74,7 +74,7 @@ import { inspectRemoteResource, removeRemoteResource } from './services/remoteRe
 import { getTrainingHost } from './services/trainingHosts'
 import { pushTestNotification } from './services/desktopNotifications'
 import { isInside } from './lib/paths'
-import { errorCode } from './lib/codedError'
+import { codedError, errorCode } from './lib/codedError'
 import { getEngineFeatures } from './services/engineFeatures'
 import { importImageBytes, importImageFile, pruneProjectMasks, saveMask } from './services/studioAssets'
 import { addControlAdapter, listControlAdapters, removeControlAdapter } from './services/controlAdapters'
@@ -95,6 +95,7 @@ import { autoCaption } from './services/training/captions'
 import { addToDataset, removeFromDataset, scanDataset, setCaption } from './services/training/dataset'
 import { prepareTraining, trainingReadiness } from './services/training/readiness'
 import {
+  trainerVersionInUse,
   trainingChooseStep,
   trainingCommand,
   trainingCreate,
@@ -131,6 +132,12 @@ import {
   remoteVersion,
   remoteVersions,
 } from './services/remoteTrainer'
+
+async function assertTrainerVersionFree(versionId: string): Promise<void> {
+  if (await trainerVersionInUse(versionId)) {
+    throw codedError('E_TRAINER_IN_USE', '有训练正在用这个训练器版本。等训练结束或停止后再删除。')
+  }
+}
 
 function toResult<T>(fn: () => Promise<T> | T): Promise<IpcResult<T>> {
   return Promise.resolve()
@@ -415,6 +422,7 @@ export function registerIpc(): void {
   )
 
   handle(Ipc.trainerRemoteRemove, schemas.trainerRemoteVersion, async ({ hostId, versionId }) => {
+    await assertTrainerVersionFree(versionId)
     await remoteRemoveVersion(getSettings(), remoteVersion(getSettings(), hostId, versionId))
     return true
   })
@@ -430,6 +438,7 @@ export function registerIpc(): void {
   handle(Ipc.trainerCreate, schemas.trainerCreate, (input) => createTrainerVersion(getSettings(), input))
 
   handle(Ipc.trainerRemove, schemas.trainerId, async ({ id }) => {
+    await assertTrainerVersionFree(id)
     await removeTrainerVersion(getSettings(), id)
     return true
   })

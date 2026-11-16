@@ -1,6 +1,7 @@
 ---
 status: accepted
 date: 2026-10-19
+amended-by: ADR-0015
 ---
 
 # ADR-0002：KohakuMossTrainer 不作为 git submodule，而是外部训练后端

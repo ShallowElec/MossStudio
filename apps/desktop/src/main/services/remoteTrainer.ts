@@ -7,7 +7,8 @@ import { TRAINER_SOURCE } from './trainerGit'
 /** A shell expression for a host path that may start with `~`, which stays unexpanded inside quotes. */
 export function rootExpression(root: string): string {
   if (root === '~') return '"$HOME"'
-  if (root.startsWith('~/')) return `"$HOME/${root.slice(2).replace(/"/g, '\\"')}"`
+  // Only $HOME expands; the rest is quoted as written, `$`, backticks and backslashes included.
+  if (root.startsWith('~/')) return `"$HOME"/${posixQuote(root.slice(2))}`
   return posixQuote(root)
 }
 

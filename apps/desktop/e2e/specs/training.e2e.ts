@@ -102,6 +102,8 @@ describe('training: a new training', () => {
     expect(await advanced.textContent()).toContain('LoKr · 3,000 步 · 本机')
     await advanced.click()
     await expect.poll(() => page.locator('[data-recipe-fields]').isVisible()).toBe(true)
+    // The trainer accumulates gradients over this many passes per step (GRAD_ACC).
+    expect(await page.getByLabel('梯度累积').inputValue()).toBe('1')
     await page.getByLabel('步数').fill('3500')
     await page.getByLabel('步数').press('Enter')
     await expect.poll(() => page.locator('[data-length-label]').textContent()).toBe('自定义 · 3,500 步')
@@ -125,14 +127,17 @@ describe('training: a new training', () => {
     await expect.poll(() => page.getByRole('button', { name: '连接语言模型' }).isVisible()).toBe(true)
   })
 
-  it('shows why 开始训练 was refused next to the button', async () => {
+  it('brings the draft back with the reason when a start fails after starting', async () => {
     const page = await app.open({ scenario: 'trainings', route: '/training/tp-aming', defer: true })
     await page.evaluate(() => {
-      window.__mock.state.training.startError = '显卡正在被另一个任务使用'
+      window.__mock.state.training.startMs = 400
+      window.__mock.state.training.startError = '图片没能传到训练主机。请检查网络后再试。'
     })
     await app.start()
     await page.getByRole('button', { name: '开始训练' }).click()
-    await expect.poll(() => page.locator('[data-start-problem]').textContent()).toContain('显卡正在被另一个任务使用')
+    await expect.poll(() => page.locator('[data-run-progress]').textContent()).toBe('正在准备图片…')
+    await expect.poll(() => page.locator('[data-start-problem]').textContent()).toContain('图片没能传到训练主机')
+    expect(await page.getByRole('button', { name: '开始训练' }).isEnabled()).toBe(true)
   })
 })
 
@@ -149,10 +154,25 @@ describe('training: runs and results', () => {
     await expect.poll(() => hash(page)).toBe('#/training/tp-watercolor')
   })
 
-  it('starts a draft and follows it as sample columns', async () => {
-    const page = await app.open({ scenario: 'trainings', route: '/training/tp-aming' })
+  it('starts a draft: preparing the pictures first, then following it as sample columns', async () => {
+    const page = await app.open({ scenario: 'trainings', route: '/training/tp-aming', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.training.startMs = null
+    })
+    await app.start()
     await page.getByRole('button', { name: '开始训练' }).click()
     await expect.poll(() => page.locator('[data-training-view="running"]').isVisible()).toBe(true)
+    // Starting: nothing to edit, a moving bar, and no 停止 until the job exists.
+    expect(await page.locator('[data-run-progress]').textContent()).toBe('正在准备图片…')
+    expect(await page.locator('[data-training-view="running"] [role="progressbar"][data-indeterminate]').count()).toBe(1)
+    expect(await page.getByText('准备中', { exact: true }).isVisible()).toBe(true)
+    expect(await page.getByRole('button', { name: '停止' }).count()).toBe(0)
+    expect(await page.getByRole('button', { name: '开始训练' }).count()).toBe(0)
+
+    await page.evaluate(() =>
+      window.__mock.trainingFixtures.runStarted({ state: window.__mock.state, emit: window.__mock.emit }, 'tp-aming'),
+    )
+    await expect.poll(() => page.getByRole('button', { name: '停止' }).isVisible()).toBe(true)
     await expect.poll(() => page.locator('[data-sample-column="0"]').textContent()).toBe('训练前')
     expect(await page.locator('[data-sample-row]').count()).toBe(3)
     expect(await page.locator('[data-sample-pending]').count()).toBeGreaterThan(0)
@@ -177,21 +197,45 @@ describe('training: runs and results', () => {
     expect(await page.getByText('已保存到 模型 › LoRA').isVisible()).toBe(true)
   })
 
-  it('offers 重试 when the chosen step could not be saved', async () => {
+  it('keeps the saved LoRA when saving another step fails, and 重试 saves the step that failed', async () => {
     const page = await app.open({ scenario: 'trainings', route: '/training/tp-watercolor', defer: true })
     await page.evaluate(() => {
       window.__mock.state.training.saveError = '模型文件夹满了，腾出空间后重试'
     })
     await app.start()
     await page.locator('[data-sample-column="1000"]').click()
-    await expect.poll(() => page.getByText('模型文件夹满了，腾出空间后重试').isVisible()).toBe(true)
-    expect(await page.getByRole('button', { name: '在创作中试用' }).count()).toBe(0)
+    await expect.poll(() => page.locator('[data-save-error]').textContent()).toContain('第 1,000 步 没有保存')
+    expect(await page.locator('[data-save-error]').textContent()).toContain('模型文件夹满了，腾出空间后重试')
+    // The step-1,250 LoRA is still in 模型.
+    expect(await page.locator('[data-chosen-step]').textContent()).toContain('第 1,250 步')
+    expect(await page.getByRole('button', { name: '在创作中试用' }).isVisible()).toBe(true)
     await page.evaluate(() => {
       window.__mock.state.training.saveError = null
     })
     await page.getByRole('button', { name: '重试' }).click()
     await expect.poll(() => app.calls('training:choose-step').then((calls) => calls.at(-1))).toEqual({ id: 'tp-watercolor', step: 1000 })
+    await expect.poll(() => page.locator('[data-chosen-step]').textContent()).toContain('第 1,000 步')
+    expect(await page.locator('[data-save-error]').count()).toBe(0)
+  })
+
+  it('shows a failed automatic save of the last step with 重试, and 重试 saves it', async () => {
+    const page = await app.open({ scenario: 'trainings', route: '/training/tp-watercolor', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.training.projects = window.__mock.state.training.projects.map((project) =>
+        project.id === 'tp-watercolor'
+          ? { ...project, chosenStep: null, adapterId: null, saveError: '从远程电脑复制 LoRA 超时了', saveErrorStep: 1500 }
+          : project,
+      )
+    })
+    await app.start()
+    await expect.poll(() => page.locator('[data-save-error]').textContent()).toContain('第 1,500 步 没有保存')
+    expect(await page.locator('[data-save-error]').textContent()).toContain('从远程电脑复制 LoRA 超时了')
+    expect(await page.getByRole('button', { name: '在创作中试用' }).count()).toBe(0)
+    await page.getByRole('button', { name: '重试' }).click()
+    await expect.poll(() => app.calls('training:choose-step')).toEqual([{ id: 'tp-watercolor', step: 1500 }])
     await expect.poll(() => page.getByRole('button', { name: '在创作中试用' }).isVisible()).toBe(true)
+    expect(await page.locator('[data-chosen-step]').textContent()).toContain('用 第 1,500 步 的结果')
+    expect(await page.locator('[data-save-error]').count()).toBe(0)
   })
 
   it('tries the LoRA in 创作 as a 风格 wired into a new 画面', async () => {

@@ -161,7 +161,7 @@ A LoRA is an `AdapterEntry` (`kind: 'lora' | 'lycoris' | 'dmd'`) in the catalog'
 | --- | --- | --- |
 | Catalog download | `runAdapterDownload` | The repository files listed in the entry, then `adapter.json` (the entry itself). Installed when `adapter.json` and every file exist. |
 | Imported file, 导入 LoRA 文件 | `importAdapterFile` | A `.safetensors` file (LoRA or LyCORIS) is copied into `<adapters root>/<id>/`, id from the file name with `-2`, `-3` on collision; origin `imported`, tag `local-import`. Copied, not referenced, because the engine opens the path itself and people move downloads. |
-| Trained in 训练 | `registerTrainedAdapter` | Origin `trained`, tag `trained`. |
+| Trained in 训练 | `registerTrainedAdapter` | The checkpoint of the step the person keeps is copied in as `trained-<training id>`; origin `trained`, tag `trained`. Keeping another step registers the same id again and replaces the file ([training.md](/docs/reference/training.md#10-choosing-a-step-and-the-lora)). |
 
 Local adapters are indexed in `<adapters root>/index.json` (`LocalAdapterIndex`). Deleting one removes its folder and its index row.
 

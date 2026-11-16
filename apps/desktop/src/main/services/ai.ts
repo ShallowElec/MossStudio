@@ -674,7 +674,16 @@ export interface ImageQuestion {
 export const E_NO_IMAGE_INPUT = 'E_NO_IMAGE_INPUT'
 
 /** Provider answers that mean "this model takes no picture" rather than a passing failure. */
-const NO_IMAGE_INPUT = /image|vision|multimodal|multi-modal|does not support|not supported|unsupported content/i
+const NO_IMAGE_INPUT = new RegExp(
+  [
+    // "does not support image input", "cannot process images", "doesn't support vision"
+    String.raw`(?:does ?n[o']?t|do not|cannot|can't|unable to) (?:support|accept|process|handle|read|take) (?:image|vision|multi-?modal|picture)`,
+    // "image input is not supported", "vision is not enabled for this model"
+    String.raw`(?:image|vision|multi-?modal)(?: input| inputs| content| understanding)? (?:is |are )?(?:not supported|unsupported|not enabled|not available)`,
+    String.raw`text[- ]only model|model (?:is|only supports?) text|unknown variant .?image_url|image_url.{0,30}(?:not supported|unsupported|unknown|invalid type)`,
+  ].join('|'),
+  'i',
+)
 
 function imageRequest(provider: StoredProvider, question: ImageQuestion): { url: string; headers: Record<string, string>; body: unknown } {
   const base64 = Buffer.from(question.image.data).toString('base64')

@@ -66,6 +66,7 @@ import { installStateFixture, type MockInstallState } from './install'
 import {
   trainingBlockedFixture,
   trainingNotPreparedFixture,
+  trainedAdapterFixture,
   trainingStateFixture,
   trainingsFixture,
   type MockTrainingState,
@@ -291,8 +292,12 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     /** 训练 on and ready, with trainings in every state (one running). */
     trainings: () => {
       const { jobs, ...rest } = trainingsFixture()
+      const catalog = catalogFixture({ installed: SFT_BUNDLE_IDS })
+      // The LoRA the finished trainings saved are in 模型, as main registers them.
+      const trained = rest.projects.flatMap((project) => (project.adapterId ? [trainedAdapterFixture(project.id, project.name)] : []))
       return {
         settings: settingsFixture({ onboardingState: 'completed', trainingEnabled: true }),
+        catalog: { ...catalog, adapters: [...catalog.adapters, ...trained] },
         jobs,
         training: trainingStateFixture(rest),
       }

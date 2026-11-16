@@ -8,8 +8,12 @@
  *   state.training.samples[id]      a training's sample pictures per step
  *   state.training.captionError     自动写描述 answers this error instead of writing descriptions
  *   state.training.saveError        saving a chosen step fails with this reason
- *   state.training.startError       开始训练 is refused with this reason
+ *   state.training.startError       after 'starting', the start fails with this reason (E_TRAINING_UPLOAD) and goes back to 'draft'
  *   state.training.prepareStepMs    pause between the steps training:prepare plays (download, trainer, environment)
+ *   state.training.startMs          how long training:start stays 'starting' (pictures uploaded) before the job runs;
+ *                                   null = until `runStarted` (the start call answers only then, as main's does)
+ *
+ * Codes and messages are main's (main/services/training/store.ts, run.ts).
  *
  * Picture paths carry their pixel size (`-384x288`), which the E2E protocol handler draws.
  */
@@ -41,6 +45,8 @@ export interface MockTrainingState {
   saveError: string | null
   startError: string | null
   prepareStepMs: number
+  /** How long a started training stays `starting` before its job runs; null keeps it starting. */
+  startMs: number | null
   /** Next number for a new training's id. */
   nextId: number
 }
@@ -104,6 +110,7 @@ export function trainingProjectFixture(patch: Partial<TrainingProject> = {}): Tr
     chosenStep: null,
     adapterId: null,
     saveError: null,
+    saveErrorStep: null,
     failure: null,
     cover: null,
     imageCount: 0,
@@ -207,6 +214,7 @@ export function trainingsFixture(): Pick<MockTrainingState, 'projects' | 'datase
   const styleRecipe = presetRecipe('style', 'standard', { samples: true, trigger: '' })
   const watercolor = trainingProjectFixture({
     id: 'tp-watercolor',
+    runName: 'watercolor-1',
     name: '水彩小镇',
     kind: 'style',
     trigger: '',
@@ -218,13 +226,14 @@ export function trainingsFixture(): Pick<MockTrainingState, 'projects' | 'datase
     updatedAt: ago(2),
     stepReached: 1500,
     chosenStep: 1250,
-    adapterId: 'lora-tp-watercolor',
+    adapterId: 'trained-tp-watercolor',
     imageCount: 30,
     cover: '/fixture/training/tp-watercolor/samples/s1250-p0-512x512.png',
   })
   const objectRecipe = presetRecipe('object', 'standard', { samples: true, trigger: 'green_mug' })
   const mug = trainingProjectFixture({
     id: 'tp-green-mug',
+    runName: 'green_mug-1',
     name: '绿色马克杯',
     kind: 'object',
     trigger: 'green_mug',
@@ -235,12 +244,13 @@ export function trainingsFixture(): Pick<MockTrainingState, 'projects' | 'datase
     updatedAt: ago(5),
     stepReached: 2000,
     chosenStep: 2000,
-    adapterId: 'lora-tp-green-mug',
+    adapterId: 'trained-tp-green-mug',
     imageCount: 18,
     cover: '/fixture/training/tp-green-mug/samples/s2000-p0-512x512.png',
   })
   const film = trainingProjectFixture({
     id: 'tp-film',
+    runName: 'film-1',
     name: '胶片感',
     kind: 'style',
     trigger: '',
@@ -254,6 +264,7 @@ export function trainingsFixture(): Pick<MockTrainingState, 'projects' | 'datase
   })
   const stopped = trainingProjectFixture({
     id: 'tp-juzi-2',
+    runName: 'juzi-2',
     name: '橘子 2',
     state: 'stopped',
     startedAt: ago(8),
@@ -290,6 +301,7 @@ export function trainingStateFixture(patch: Partial<MockTrainingState> = {}): Mo
     saveError: null,
     startError: null,
     prepareStepMs: 400,
+    startMs: 300,
     nextId: 1,
     ...patch,
   }
@@ -315,7 +327,7 @@ const p = <T>(payload: unknown): T => (payload ?? {}) as T
 
 function find(state: TrainingContext['state'], id: string): TrainingProject {
   const project = state.training.projects.find((item) => item.id === id)
-  if (!project) throw new TrainingMockError('E_NOT_FOUND', '找不到这个训练')
+  if (!project) throw new TrainingMockError('E_TRAINING_MISSING', '找不到这个训练，它可能已经被删除。')
   return project
 }
 
@@ -331,7 +343,7 @@ function save(context: TrainingContext, project: TrainingProject, emit = false):
 function readinessFor(context: TrainingContext, hostId: string): TrainingReadiness {
   if (hostId === 'local') return context.state.training.readiness
   const host = context.state.hosts.find((item) => item.id === hostId)
-  if (!host) throw new TrainingMockError('E_HOST', '这台远程电脑已经移除了')
+  if (!host) throw new TrainingMockError('E_TRAINING_HOST', '找不到这台训练主机，请在设置里检查主机。')
   return trainingReadinessFixture({ hostId, gpu: { name: host.remote?.gpu ?? 'NVIDIA GeForce RTX 4090', memoryBytes: 24 * GiB, ok: true } })
 }
 
@@ -425,6 +437,66 @@ function draftName(kind: TrainingKind, projects: readonly TrainingProject[]): st
   return name
 }
 
+const busy = (project: TrainingProject): boolean => project.state === 'starting' || project.state === 'running'
+
+/** As main's assertDatasetEditable: pictures and descriptions change only while no run reads them. */
+function assertPicturesEditable(project: TrainingProject): void {
+  if (busy(project)) throw new TrainingMockError('E_TRAINING_RUNNING', '训练正在开始或进行，图片和描述先不能改。')
+}
+
+/** The LoRA a chosen step is saved as, registered in 模型 like main's `trained-<id>`. */
+export function trainedAdapterFixture(id: string, name: string): AdapterEntry {
+  const adapterId = `trained-${id}`
+  return {
+    id: adapterId,
+    name,
+    provider: 'local',
+    repo: `/fixture/data/models/adapters/${adapterId}/${adapterId}.safetensors`,
+    revision: 'local',
+    kind: 'lora',
+    license: 'local',
+    files: [`${adapterId}.safetensors`],
+    sizeBytes: 151_000_000,
+    tags: ['trained'],
+    installed: true,
+    installedBytes: 151_000_000,
+  }
+}
+
+/** Starts waiting for `runStarted` (startMs null), by training id. */
+const waitingStarts = new Map<string, () => void>()
+
+/** The pictures are ready and the job runs: `starting` becomes `running`, as main reports it. */
+export function runStarted(context: TrainingContext, id: string): void {
+  const project = context.state.training.projects.find((item) => item.id === id)
+  if (project?.state !== 'starting') return
+  waitingStarts.get(id)?.()
+  waitingStarts.delete(id)
+  const now = new Date().toISOString()
+  const running: TrainingProject = {
+    ...project,
+    state: 'running',
+    jobId: `job-${project.id}`,
+    runName: `${project.trigger || 'run'}-1`,
+    updatedAt: now,
+    stepReached: 10,
+  }
+  const job = trainingJobFixture(running, {
+    startedAt: now,
+    metrics: { step: 10, loss: 0.21 },
+    progress: { stage: 'denoise', current: 10, total: running.recipe.steps, percent: 0.3, etaMs: 50 * 60_000 },
+  })
+  context.state.jobs = [job, ...context.state.jobs.filter((item) => item.id !== job.id)]
+  context.emit(Events.job, job)
+  context.state.training.samples[project.id] = samplesFixture(
+    project.id,
+    project.recipe.samplePrompts,
+    [0],
+    project.recipe.sampleEvery || null,
+  )
+  save(context, running, true)
+}
+
 const handlers: Array<[string, Handler]> = [
   [Ipc.trainingReadiness, (payload, context) => readinessFor(context, p<{ hostId: string }>(payload).hostId)],
   [
@@ -432,12 +504,11 @@ const handlers: Array<[string, Handler]> = [
     (payload, context) => {
       const { hostId } = p<{ hostId: string }>(payload)
       const readiness = readinessFor(context, hostId)
-      if (readiness.blockReason) throw new TrainingMockError('E_TRAINING_BLOCKED', '这台电脑不能训练')
-      if (hostId !== 'local' || readiness.ready || readiness.prepare.running) return null
+      if (hostId !== 'local' || readiness.blockReason || readiness.ready || readiness.prepare.running) return readiness
       context.state.training.readiness = { ...readiness, prepare: { running: true, step: 'model', error: null } }
       context.emit(Events.trainingReadinessChanged, context.state.training.readiness)
       playPrepare(context)
-      return null
+      return context.state.training.readiness
     },
   ],
   [Ipc.trainingList, (_, { state }) => [...state.training.projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
@@ -469,7 +540,9 @@ const handlers: Array<[string, Handler]> = [
     (payload, context) => {
       const { id, patch } = p<{ id: string; patch: Partial<TrainingProject> }>(payload)
       const project = find(context.state, id)
-      if (project.state !== 'draft') throw new TrainingMockError('E_TRAINING_STARTED', '训练已经开始，不能再改')
+      if (busy(project)) throw new TrainingMockError('E_TRAINING_RUNNING', '训练正在开始或进行，设置先不能改。')
+      if (project.state !== 'draft')
+        throw new TrainingMockError('E_TRAINING_NOT_DRAFT', '这个训练已经开始过，设置不能再改。可以复制一份再改。')
       return save(context, { ...project, ...patch, updatedAt: new Date().toISOString() })
     },
   ],
@@ -477,7 +550,7 @@ const handlers: Array<[string, Handler]> = [
     Ipc.trainingRemove,
     (payload, { state }) => {
       const { id } = p<{ id: string }>(payload)
-      find(state, id)
+      if (busy(find(state, id))) throw new TrainingMockError('E_TRAINING_RUNNING', '训练正在开始或进行。等它开始后先停止，再删除。')
       state.training.projects = state.training.projects.filter((item) => item.id !== id)
       delete state.training.datasets[id]
       delete state.training.samples[id]
@@ -517,7 +590,7 @@ const handlers: Array<[string, Handler]> = [
     Ipc.trainingDatasetAdd,
     (payload, context) => {
       const { id, paths } = p<{ id: string; paths: string[] }>(payload)
-      find(context.state, id)
+      assertPicturesEditable(find(context.state, id))
       const images = [...imagesOf(context, id)]
       for (const path of paths) {
         for (const image of picturesFrom(path, images.length)) if (!images.some((item) => item.name === image.name)) images.push(image)
@@ -529,6 +602,7 @@ const handlers: Array<[string, Handler]> = [
     Ipc.trainingDatasetRemove,
     (payload, context) => {
       const { id, names } = p<{ id: string; names: string[] }>(payload)
+      assertPicturesEditable(find(context.state, id))
       return setImages(
         context,
         id,
@@ -540,8 +614,9 @@ const handlers: Array<[string, Handler]> = [
     Ipc.trainingCaptionSet,
     (payload, context) => {
       const { id, name, caption } = p<{ id: string; name: string; caption: string }>(payload)
+      assertPicturesEditable(find(context.state, id))
       const image = imagesOf(context, id).find((item) => item.name === name)
-      if (!image) throw new TrainingMockError('E_NOT_FOUND', '找不到这张图片')
+      if (!image) throw new TrainingMockError('E_TRAINING_PICTURE', '这张图片已经不在了，请刷新后再试。')
       const next = { ...image, caption: caption.trim() ? caption : null }
       context.state.training.datasets[id] = imagesOf(context, id).map((item) => (item.name === name ? next : item))
       return next
@@ -552,6 +627,7 @@ const handlers: Array<[string, Handler]> = [
     (payload, context): TrainingCaptionResult => {
       const { id } = p<{ id: string }>(payload)
       const project = find(context.state, id)
+      assertPicturesEditable(project)
       const error = context.state.training.captionError
       if (error) return { written: 0, failed: 0, error }
       let written = 0
@@ -572,30 +648,25 @@ const handlers: Array<[string, Handler]> = [
   ],
   [
     Ipc.trainingStart,
-    (payload, context) => {
+    async (payload, context) => {
       const project = find(context.state, p<{ id: string }>(payload).id)
       const training = context.state.training
-      if (!imagesOf(context, project.id).length) throw new TrainingMockError('E_TRAINING_EMPTY', '先添加一些图片，再开始训练')
-      if (training.startError) throw new TrainingMockError('E_TRAINING_START', training.startError)
-      const now = new Date().toISOString()
-      const running: TrainingProject = {
-        ...project,
-        state: 'running',
-        jobId: `job-${project.id}`,
-        runName: `${project.trigger || 'run'}-1`,
-        startedAt: now,
-        updatedAt: now,
-        stepReached: 10,
+      if (busy(project)) throw new TrainingMockError('E_TRAINING_RUNNING', '这个训练已经在开始或进行了。')
+      if (project.state === 'done') throw new TrainingMockError('E_TRAINING_DONE', '这个训练已经完成。想再练一次，可以复制一份。')
+      // As main: `starting` first (pictures prepared or uploaded); the call answers once the job runs, or the training is a draft again.
+      save(context, { ...project, state: 'starting', updatedAt: new Date().toISOString() }, true)
+      const back = (code: string, message: string): never => {
+        save(context, { ...find(context.state, project.id), state: 'draft' }, true)
+        throw new TrainingMockError(code, message)
       }
-      const job = trainingJobFixture(running, {
-        startedAt: now,
-        metrics: { step: 10, loss: 0.21 },
-        progress: { stage: 'denoise', current: 10, total: running.recipe.steps, percent: 0.3, etaMs: 50 * 60_000 },
+      if (!imagesOf(context, project.id).length) back('E_TRAINING_EMPTY', '先添加至少一张图片。')
+      await new Promise<void>((resolve) => {
+        if (training.startMs === null) waitingStarts.set(project.id, resolve)
+        else setTimeout(resolve, training.startMs)
       })
-      context.state.jobs = [job, ...context.state.jobs.filter((item) => item.id !== job.id)]
-      context.emit(Events.job, job)
-      training.samples[project.id] = samplesFixture(project.id, project.recipe.samplePrompts, [0], project.recipe.sampleEvery || null)
-      return save(context, running)
+      if (training.startError) back('E_TRAINING_UPLOAD', training.startError)
+      runStarted(context, project.id)
+      return find(context.state, project.id)
     },
   ],
   [
@@ -624,29 +695,28 @@ const handlers: Array<[string, Handler]> = [
     (payload, context) => {
       const { id, step } = p<{ id: string; step: number }>(payload)
       const project = find(context.state, id)
-      const samples = context.state.training.samples[id]
-      if (!samples?.checkpoints.includes(step)) throw new TrainingMockError('E_NO_CHECKPOINT', '这一步没有保存下来，选另一步')
-      const saveError = context.state.training.saveError
-      const adapterId = saveError ? null : `lora-${id}`
-      if (adapterId && !context.state.catalog.adapters.some((item) => item.id === adapterId)) {
-        const adapter: AdapterEntry = {
-          id: adapterId,
-          name: project.name,
-          provider: 'local',
-          repo: `/fixture/data/models/adapters/${adapterId}/${adapterId}.safetensors`,
-          revision: 'local',
-          kind: 'lora',
-          license: 'unknown',
-          files: [`${adapterId}.safetensors`],
-          sizeBytes: 151_000_000,
-          tags: ['trained'],
-          installed: true,
-          installedBytes: 151_000_000,
-        }
+      if (busy(project)) throw new TrainingMockError('E_TRAINING_RUNNING', '训练还在进行。等它结束或停止后再选。')
+      if (!project.runName) throw new TrainingMockError('E_TRAINING_NO_RUN', '这个训练还没有结果。')
+      const samples = context.state.training.samples[id] ?? { prompts: [], columns: [], checkpoints: [], nextStep: null }
+      // As main: a failed save keeps the step (and LoRA) saved before, and says which step failed.
+      const saveError = samples.checkpoints.includes(step)
+        ? context.state.training.saveError
+        : `没有找到第 ${step} 步保存的 LoRA。换一步试试。`
+      if (saveError) return save(context, { ...project, saveError, saveErrorStep: step, updatedAt: new Date().toISOString() })
+      const adapter = trainedAdapterFixture(id, project.name)
+      if (!context.state.catalog.adapters.some((item) => item.id === adapter.id))
         context.state.catalog = { ...context.state.catalog, adapters: [...context.state.catalog.adapters, adapter] }
-      }
+      const adapterId = adapter.id
       const cover = samples.columns.find((column) => column.step === step)?.images[0] ?? project.cover
-      return save(context, { ...project, chosenStep: step, adapterId, saveError, cover, updatedAt: new Date().toISOString() })
+      return save(context, {
+        ...project,
+        chosenStep: step,
+        adapterId,
+        saveError: null,
+        saveErrorStep: null,
+        cover,
+        updatedAt: new Date().toISOString(),
+      })
     },
   ],
   [

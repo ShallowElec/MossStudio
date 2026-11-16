@@ -14,6 +14,7 @@ import { Events, Ipc } from '@shared/channels'
 import type { JobRecord, Settings } from '@shared/types'
 import * as fixtures from '../../test/mocks/backend/fixtures'
 import * as installFixtures from '../../test/mocks/backend/install'
+import * as trainingFixtures from '../../test/mocks/backend/training'
 import { createMockBackend, type MockBackend, type MockBackendState, type ScenarioName } from '../../test/mocks/backend'
 import { startTelemetry } from './telemetry'
 
@@ -44,6 +45,8 @@ export interface E2eMock {
   fixtures: typeof fixtures
   /** Setup/uninstall window fixtures and scenarios (test/mocks/backend/install.ts). */
   installFixtures: typeof installFixtures
+  /** 训练 fixtures and steps the mock plays (test/mocks/backend/training.ts), e.g. `runStarted`. */
+  trainingFixtures: typeof trainingFixtures
   Ipc: typeof Ipc
   Events: typeof Events
   /** Mount the app (only needed with `defer=1`). */
@@ -156,6 +159,7 @@ export function installHarness(mount: () => void): E2eMock {
     },
     fixtures,
     installFixtures,
+    trainingFixtures,
     Ipc,
     Events,
     started: false,

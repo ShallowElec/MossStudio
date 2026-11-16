@@ -110,6 +110,7 @@ A PR must touch docs when it changes any of these:
 | Assistant tools, cards or modes | `docs/reference/studio-assistant.md` |
 | Engine packages, GPU support, tiers, engine protocol version | `docs/reference/engines.md`; an ADR if the supported hardware changes |
 | Model directories, bundles, component binding | `docs/reference/models.md` |
+| Training states, channels, the run's commands, samples, the saved LoRA, training screens | `docs/reference/training.md` |
 | A UI primitive or its rules | `docs/reference/ui-rules.md` |
 | Commands, CI, branch rules | `CONTRIBUTING.md` and `AGENTS.md` |
 | Release or update flow | `docs/how-to/release.md` |

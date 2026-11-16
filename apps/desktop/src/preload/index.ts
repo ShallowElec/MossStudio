@@ -20,7 +20,7 @@ const api = {
   platform: process.platform,
   version: process.versions.electron,
   acrylic: process.argv.includes('--clover-acrylic'),
-  windowKind: (process.argv.find((arg) => arg.startsWith('--clover-window='))?.split('=')[1] ?? 'studio') as 'studio' | 'trainer',
+  windowKind: (process.argv.find((arg) => arg.startsWith('--clover-window='))?.split('=')[1] ?? 'studio') as 'studio' | 'install',
   channel: process.argv.find((arg) => arg.startsWith('--clover-channel='))?.split('=')[1] ?? 'dev',
 }
 

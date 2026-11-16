@@ -10,10 +10,10 @@ import { useApp } from '../../store'
 import { Notice } from '../../components/common/Notice'
 import { Button, ConfirmDialog, EmptyState, FieldLabel, LoadingRow, Pill, ProgressBar, Spinner, useToast } from '../../components/ui'
 import { recipeLine } from './editorModel'
-import { curvePath, lossCurve, runProgress } from './runModel'
+import { curvePath, lossCurve, runPill, runProgress } from './runModel'
 import { SampleGrid } from './SampleGrid'
 import { newestDrawnStep, sampleColumns, stepName } from './sampleGridModel'
-import { KIND_LABEL } from './trainingModel'
+import { KIND_LABEL, savedLora } from './trainingModel'
 import { errorText } from './useTraining'
 
 /** How often a running training's sample pictures are read again while it is on screen. */
@@ -147,10 +147,11 @@ export function RunningView({
             chosenStep: null,
             sampleEvery: project.recipe.sampleEvery,
             totalSteps: progress.total,
-            running: { step: progress.step, etaMs: progress.etaMs },
+            // While starting there is no run to place steps on yet: no empty columns to come.
+            running: project.state === 'running' ? { step: progress.step, etaMs: progress.etaMs } : undefined,
           })
         : [],
-    [samples, project.recipe.sampleEvery, progress.total, progress.step, progress.etaMs],
+    [samples, project.state, project.recipe.sampleEvery, progress.total, progress.step, progress.etaMs],
   )
   const [done, left] = progress.text.split(' · 还要')
 
@@ -169,7 +170,7 @@ export function RunningView({
   return (
     <div ref={root} className="flex h-full min-h-0" data-training-view="running">
       <Panel>
-        <PanelHead project={project} pill={<Pill tone="accent">训练中</Pill>} onBack={onBack} />
+        <PanelHead project={project} pill={<Pill tone="accent">{runPill(project.state)}</Pill>} onBack={onBack} />
         <div className="flex flex-col gap-2">
           <ProgressBar value={progress.percent} label={`${project.name} 训练进度`} />
           <div className="tabular flex justify-between gap-3 text-caption text-ink-2" data-run-progress>
@@ -185,15 +186,18 @@ export function RunningView({
         ) : null}
         <Facts project={project} place={place} />
         <div className="flex-1" />
-        <div className="flex gap-2">
-          <Button className="flex-1" disabled={stopping} onClick={() => void stop()}>
-            {stopping ? <Spinner /> : <Square className="size-3.5" strokeWidth={1.6} aria-hidden="true" />}
-            停止
-          </Button>
-          <Button tone="ghost" onClick={() => openActivity('jobs', project.jobId)}>
-            查看日志
-          </Button>
-        </div>
+        {/* Until the job exists (starting) there is nothing to stop or read yet. */}
+        {project.jobId ? (
+          <div className="flex gap-2">
+            <Button className="flex-1" disabled={stopping} onClick={() => void stop()}>
+              {stopping ? <Spinner /> : <Square className="size-3.5" strokeWidth={1.6} aria-hidden="true" />}
+              停止
+            </Button>
+            <Button tone="ghost" onClick={() => openActivity('jobs', project.jobId)}>
+              查看日志
+            </Button>
+          </div>
+        ) : null}
       </Panel>
       {samples === undefined ? (
         <div className="flex-1 bg-board px-7 py-6">
@@ -262,7 +266,7 @@ export function ResultView({
         : [],
     [samples, project.chosenStep, project.recipe.sampleEvery, project.recipe.steps],
   )
-  const saved = project.chosenStep !== null && project.adapterId !== null && !project.saveError
+  const { saved, retryStep } = savedLora(project)
   const canChoose = columns.some((column) => column.choosable)
 
   async function choose(step: number): Promise<void> {
@@ -336,16 +340,21 @@ export function ResultView({
             </p>
             {saved ? <p className="text-caption text-ink-2">已保存到 模型 › LoRA</p> : null}
           </div>
-        ) : canChoose ? (
+        ) : canChoose && !project.saveError ? (
           <p className="text-control text-ink">点一列样图，保存那一步的结果</p>
         ) : null}
-        {project.saveError && project.chosenStep !== null ? (
+        {project.saveError ? (
           <Notice
             tone="danger"
+            data-save-error={project.saveErrorStep ?? ''}
+            title={project.saveErrorStep !== null ? `${stepName(project.saveErrorStep)} 没有保存` : undefined}
             action={
-              <Button size="xs" disabled={choosing !== null} onClick={() => void choose(project.chosenStep!)}>
-                重试
-              </Button>
+              retryStep !== null ? (
+                <Button size="xs" disabled={choosing !== null} onClick={() => void choose(retryStep)}>
+                  {choosing === retryStep ? <Spinner /> : null}
+                  重试
+                </Button>
+              ) : undefined
             }
           >
             {project.saveError}

@@ -4,13 +4,18 @@
  */
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, open, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { copyFile, link, mkdir, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
-import { SMALL_PICTURE_SIDE, type DatasetImage, type TrainingDataset } from '@shared/training'
+import { SMALL_PICTURE_SIDE, type DatasetImage, type TrainingDataset, type TrainingProject } from '@shared/training'
 import { codedError } from '../../lib/codedError'
 import { writeFileAtomic } from '../../lib/atomicWrite'
 import { readImageHeader } from '../imageHeaders'
-import { imagesDir, TRAINING_IMAGE_EXT } from './store'
+import { imagesDir, projectDir, TRAINING_IMAGE_EXT, whileEditable } from './store'
+
+/** What a run reads, rebuilt at each start: see stageDataset. */
+export function stagedDir(id: string): string {
+  return join(projectDir(id), 'dataset')
+}
 
 /** Enough of a file for its size: a JPEG's frame header can sit behind a large EXIF block. */
 const HEADER_BYTES = 256 * 1024
@@ -139,7 +144,6 @@ function freeName(name: string, taken: Set<string>): string {
 
 /** Copies pictures (files, or every picture inside folders) and their `.txt` descriptions in. */
 export async function addToDataset(id: string, sources: string[]): Promise<TrainingDataset> {
-  const dir = imagesDir(id)
   const files: string[] = []
   for (const source of sources) {
     try {
@@ -148,29 +152,35 @@ export async function addToDataset(id: string, sources: string[]): Promise<Train
       console.warn('[training]', `skipped ${source}:`, error instanceof Error ? error.message : error)
     }
   }
-  const taken = new Set(
-    (await readdir(dir).catch(() => [] as string[]))
-      .filter((name) => isImage(name) || name.endsWith('.txt'))
-      .map((name) => stemOf(name).toLowerCase()),
-  )
-  for (const file of files) {
-    // A file with a picture's name but no picture inside would stop the trainer.
-    if (!readImageHeader(await readHead(file).catch(() => new Uint8Array()))) continue
-    const name = freeName(basename(file), taken)
-    await copyFile(file, join(dir, name))
-    const sidecar = join(dirname(file), `${stemOf(basename(file))}.txt`)
-    await copyFile(sidecar, join(dir, `${stemOf(name)}.txt`)).catch(() => undefined)
-  }
+  await whileEditable(id, async () => {
+    const dir = imagesDir(id)
+    const taken = new Set(
+      (await readdir(dir).catch(() => [] as string[]))
+        .filter((name) => isImage(name) || name.endsWith('.txt'))
+        .map((name) => stemOf(name).toLowerCase()),
+    )
+    for (const file of files) {
+      // A file with a picture's name but no picture inside would stop the trainer.
+      if (!readImageHeader(await readHead(file).catch(() => new Uint8Array()))) continue
+      const name = freeName(basename(file), taken)
+      await copyFile(file, join(dir, name))
+      const sidecar = join(dirname(file), `${stemOf(basename(file))}.txt`)
+      await copyFile(sidecar, join(dir, `${stemOf(name)}.txt`)).catch(() => undefined)
+    }
+  })
   return scanDataset(id)
 }
 
 export async function removeFromDataset(id: string, names: string[]): Promise<TrainingDataset> {
-  const dir = imagesDir(id)
-  for (const name of names.map(safeName)) {
-    if (!isImage(name)) continue
-    await rm(join(dir, name), { force: true })
-    await rm(join(dir, `${stemOf(name)}.txt`), { force: true })
-  }
+  const safe = names.map(safeName)
+  await whileEditable(id, async () => {
+    const dir = imagesDir(id)
+    for (const name of safe) {
+      if (!isImage(name)) continue
+      await rm(join(dir, name), { force: true })
+      await rm(join(dir, `${stemOf(name)}.txt`), { force: true })
+    }
+  })
   return scanDataset(id)
 }
 
@@ -179,20 +189,55 @@ export async function setCaption(id: string, name: string, caption: string): Pro
   const dir = imagesDir(id)
   safeName(name)
   if (!isImage(name)) throw codedError('E_TRAINING_PICTURE', '图片名不对，请刷新后再试。')
-  await stat(join(dir, name)).catch(() => {
-    throw codedError('E_TRAINING_PICTURE', '这张图片已经不在了，请刷新后再试。')
+  await whileEditable(id, async () => {
+    await stat(join(dir, name)).catch(() => {
+      throw codedError('E_TRAINING_PICTURE', '这张图片已经不在了，请刷新后再试。')
+    })
+    const text = caption.replace(/\r\n?/g, '\n').trim()
+    const file = join(dir, `${stemOf(name)}.txt`)
+    if (text) await writeFileAtomic(file, `${text}\n`)
+    else await rm(file, { force: true })
   })
-  const text = caption.replace(/\r\n?/g, '\n').trim()
-  const file = join(dir, `${stemOf(name)}.txt`)
-  if (text) await writeFileAtomic(file, `${text}\n`)
-  else await rm(file, { force: true })
   const image = (await scanDataset(id)).images.find((item) => item.name === name)
   if (!image) throw codedError('E_TRAINING_PICTURE', '这张图片已经不在了，请刷新后再试。')
   return image
 }
 
-/** Writes several descriptions at once (start of a run, automatic descriptions). */
+/** Writes several descriptions at once (自动描述), unless a run started meanwhile. */
 export async function writeCaptions(id: string, captions: Map<string, string>): Promise<void> {
-  const dir = imagesDir(id)
-  for (const [name, caption] of captions) await writeFileAtomic(join(dir, `${stemOf(safeName(name))}.txt`), `${caption.trim()}\n`)
+  for (const name of captions.keys()) safeName(name)
+  await whileEditable(id, async () => {
+    const dir = imagesDir(id)
+    for (const [name, caption] of captions) await writeFileAtomic(join(dir, `${stemOf(name)}.txt`), `${caption.trim()}\n`)
+  })
+}
+
+/** Whether `caption` already names the trigger as a word of its own. */
+export function mentionsTrigger(caption: string, trigger: string): boolean {
+  return new RegExp(`(^|[^A-Za-z0-9_])${trigger}($|[^A-Za-z0-9_])`).test(caption)
+}
+
+/** The description a run trains on: for 人物 and 物品 the subject is always called by its trigger. */
+export function runCaption(caption: string | null, kind: TrainingProject['kind'], trigger: string): string {
+  const text = caption?.trim() ?? ''
+  if (kind === 'style' || !trigger) return text
+  if (!text) return trigger
+  return mentionsTrigger(text, trigger) ? text : `${trigger}，${text}`
+}
+
+/**
+ * The folder a run reads: the pictures linked (copied where a link cannot be made) next to the
+ * descriptions it trains on. The person's own descriptions stay as they wrote them.
+ */
+export async function stageDataset(project: Pick<TrainingProject, 'id' | 'kind' | 'trigger'>): Promise<string> {
+  const target = stagedDir(project.id)
+  await rm(target, { recursive: true, force: true })
+  await mkdir(target, { recursive: true })
+  for (const image of (await scanDataset(project.id)).images) {
+    const linked = join(target, image.name)
+    await link(image.path, linked).catch(() => copyFile(image.path, linked))
+    const caption = runCaption(image.caption, project.kind, project.trigger)
+    if (caption) await writeFile(join(target, `${stemOf(image.name)}.txt`), `${caption}\n`, 'utf8')
+  }
+  return target
 }

@@ -30,6 +30,7 @@ Developer documentation for MossStudio: an Electron + React + TypeScript desktop
 | Why the Studio is a node board, and what it refuses to be | [explanation/studio-design.md](explanation/studio-design.md) |
 | Engines and GPUs: CUDA packages, 兼容模式 (Vulkan), AMD 原生 (HIP), tiers, remote hosts | [reference/engines.md](reference/engines.md) |
 | Models: catalog, bundles, component files, directories, LoRA | [reference/models.md](reference/models.md) |
+| Training (训练): a training's files and states, channels, how a run is composed, samples, the saved LoRA, screens | [reference/training.md](reference/training.md) |
 
 ## I want to look up...
 
@@ -50,7 +51,7 @@ Decisions are ADRs in [decisions/](decisions/README.md), one per choice, never e
 | MossInfer is the only inference engine | [0009](decisions/0009-mossinfer-inference.md), amended by [0012](decisions/0012-vulkan-and-hip-cli-engines.md) (Vulkan and HIP) |
 | Rail navigation and the node board | [0011](decisions/0011-rail-navigation-and-node-board.md), which supersedes [0008](decisions/0008-studio-window-and-dock.md) |
 | Own installer, launcher and signed updates | [0010](decisions/0010-own-installer-and-signed-updates.md), amended by [0014](decisions/0014-nightly-update-channel.md) (nightly channel) |
-| The Trainer stays an external Python tool | [0002](decisions/0002-trainer-backend.md) |
+| The Trainer stays an external Python tool; training runs in the main window | [0002](decisions/0002-trainer-backend.md), amended by [0015](decisions/0015-training-in-the-main-window.md) (no trainer window) |
 | How these docs are organised | [0013](decisions/0013-documentation-structure-and-language.md) |
 
 ## Records and history

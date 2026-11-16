@@ -7,7 +7,7 @@ import { relative } from '../../lib/format'
 import { useApp } from '../../store'
 import { Button, PageHeader, Pill, ProgressBar, Spinner, Tag, cn } from '../../components/ui'
 import { KIND_LABEL, KIND_TILE_LABEL, homeCard, splitHome } from './trainingModel'
-import { runProgress } from './runModel'
+import { runPill, runProgress } from './runModel'
 
 const KIND_ICON: Record<TrainingKind, LucideIcon> = { person: UserRound, style: Palette, object: Package }
 
@@ -92,7 +92,7 @@ function RunningCard({
         <ProgressBar value={progress.percent} className="max-w-[420px]" label={`${training.name} 训练进度`} />
         <span className="tabular text-caption text-ink-2">{progress.text}</span>
       </div>
-      <Pill tone="accent">训练中</Pill>
+      <Pill tone="accent">{runPill(training.state)}</Pill>
       <Button onClick={onOpen}>查看</Button>
     </div>
   )

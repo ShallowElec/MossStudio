@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiProviderKind } from '@shared/ai'
@@ -83,6 +83,13 @@ describe('automatic descriptions', () => {
     const { captions, project } = await setup('openai')
     reply = () => json({ error: { message: 'This model does not support image input' } }, 400)
     expect(await captions.autoCaption(project.id)).toEqual({ written: 0, failed: 0, error: captions.NO_IMAGE_INPUT })
+    // A picture the provider cannot take is a failed description, not a model that cannot see.
+    reply = () => json({ error: { message: 'image too large: 8 MB, the limit is 5 MB' } }, 400)
+    expect(await captions.autoCaption(project.id, ['a.png'])).toEqual({ written: 0, failed: 1, error: captions.ALL_FAILED })
+    reply = () => json({ error: { message: 'Invalid image data' } }, 400)
+    expect((await captions.autoCaption(project.id, ['a.png'])).error).toBe(captions.ALL_FAILED)
+    reply = () => json({ error: { message: 'Vision is not supported for this model' } }, 400)
+    expect((await captions.autoCaption(project.id, ['a.png'])).error).toBe(captions.NO_IMAGE_INPUT)
     reply = () => json({ error: { message: 'overloaded' } }, 503)
     expect(await captions.autoCaption(project.id, ['a.png', 'b.png'])).toEqual({ written: 0, failed: 2, error: captions.ALL_FAILED })
   })
@@ -91,5 +98,19 @@ describe('automatic descriptions', () => {
     const { captions } = await setup(null, 'style')
     expect(captions.captionPrompt('style', '')).toContain('不要描述画风')
     expect(captions.cleanCaption('一只猫坐在窗台上', 'style', '')).toBe('一只猫坐在窗台上')
+  })
+
+  it('writes nothing when a run started while the model was answering', async () => {
+    const { captions, project, images } = await setup('openai')
+    const store = await import('@main/services/training/store')
+    reply = () => json({ choices: [{ message: { content: '坐在窗边' } }] })
+    const fetchMock = vi.mocked(fetch)
+    const answer = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (...args) => {
+      await store.mutateTrainingProject(project.id, (current) => ({ ...current, state: 'starting' }))
+      return answer(...args)
+    })
+    await expect(captions.autoCaption(project.id)).rejects.toMatchObject({ code: 'E_TRAINING_RUNNING' })
+    expect(existsSync(join(images, 'a.txt'))).toBe(false)
   })
 })

@@ -22,6 +22,8 @@ export interface TrainingCommandPlan {
   /** OUTPUT_DIR: the run lands in `<outputDir>/<runName>/`. */
   outputDir: string
   cacheDir: string
+  /** Where the run's two config files are written (`--out`), so they never depend on the checkout. */
+  configDir: string
   runName: string
   recipe: TrainingRecipe
   /** Remote only: the file the script writes its pid to, so 停止 can end it. */
@@ -50,7 +52,9 @@ export function trainKnobs(plan: Pick<TrainingCommandPlan, 'cacheDir' | 'outputD
     `OUTPUT_DIR=${plan.outputDir}`,
     `CACHE_DIR=${plan.cacheDir}`,
     `TARGET_AREA=${recipe.resolution ** 2}`,
-    `MICROBATCHES=${recipe.batch}`,
+    // MICROBATCHES only counts under pipeline parallelism; on one GPU the batch per optimizer step
+    // grows by accumulating gradients, which leaves the VRAM layer's per-pass token budget alone.
+    `GRAD_ACC=${recipe.batch}`,
     ...(recipe.dim === null ? [] : [`DIM=${recipe.dim}`]),
     ...(recipe.alpha === null ? [] : [`ALPHA=${recipe.alpha}`]),
     ...(recipe.lr === null ? [] : [`LR=${recipe.lr}`]),
@@ -64,9 +68,17 @@ export function trainKnobs(plan: Pick<TrainingCommandPlan, 'cacheDir' | 'outputD
   ]
 }
 
+/** The train config and the data config the first command writes (`<run>_data.py` beside it, upstream). */
+export function configFiles(plan: Pick<TrainingCommandPlan, 'shell' | 'configDir' | 'runName'>): { train: string; data: string } {
+  const separator = plan.shell === 'powershell' ? '\\' : '/'
+  const base = `${plan.configDir}${separator}${plan.runName}`
+  return { train: `${base}.py`, data: `${base}_data.py` }
+}
+
 /** Each command as its program and arguments, in the order they run. */
 export function trainingSteps(plan: TrainingCommandPlan): string[][] {
   const { recipe, runName } = plan
+  const files = configFiles(plan)
   const config = [
     plan.configBin,
     'new',
@@ -85,15 +97,16 @@ export function trainingSteps(plan: TrainingCommandPlan): string[][] {
     String(recipe.steps),
     ...(recipe.vram === 'auto' ? [] : ['--vram', recipe.vram]),
     ...recipe.samplePrompts.flatMap((prompt) => ['--prompt', prompt]),
+    '--out',
+    files.train,
     '--force',
   ]
   const sets = (knobs: string[]): string[] => knobs.flatMap((knob) => ['--set', knob])
-  const dataConfig = `configs/user/${runName}_data.py`
   return [
     config,
-    [plan.kogine, 'run', 'scripts/data/cache_text.py', '--config', dataConfig, ...sets(dataKnobs(plan))],
-    [plan.kogine, 'run', 'scripts/data/cache_latents.py', '--config', dataConfig, ...sets(dataKnobs(plan))],
-    [plan.kogine, 'run', 'scripts/train/moss.py', '--config', `configs/user/${runName}.py`, ...sets(trainKnobs(plan))],
+    [plan.kogine, 'run', 'scripts/data/cache_text.py', '--config', files.data, ...sets(dataKnobs(plan))],
+    [plan.kogine, 'run', 'scripts/data/cache_latents.py', '--config', files.data, ...sets(dataKnobs(plan))],
+    [plan.kogine, 'run', 'scripts/train/moss.py', '--config', files.train, ...sets(trainKnobs(plan))],
   ]
 }
 
@@ -113,19 +126,40 @@ export function powershellArg(value: string): string {
   return `'${escaped.replace(/'/g, "''")}'`
 }
 
+/**
+ * The version's own package folder (upstream's src layout, `[tool.setuptools.packages.find] where = ["src"]`).
+ * Versions with the same dependencies share one environment, whose editable install points at the
+ * checkout installed last (a setuptools `__editable__` .pth line). PYTHONPATH comes before .pth
+ * entries on sys.path, so with this first `kohakumoss` and its console scripts load the checkout
+ * being run.
+ */
+export function versionSourceDir(plan: Pick<TrainingCommandPlan, 'shell' | 'versionDir'>): string {
+  return `${plan.versionDir}${plan.shell === 'powershell' ? '\\' : '/'}src`
+}
+
 /** The script that runs the plan, in its shell's syntax. */
 export function trainingScript(plan: TrainingCommandPlan): string {
   const steps = trainingSteps(plan)
+  const source = versionSourceDir(plan)
   if (plan.shell === 'powershell') {
     const lines = [
-      "$ErrorActionPreference = 'Stop'",
+      // No ErrorActionPreference = 'Stop': with its output piped, PowerShell 5.1 turns a native
+      // program's stderr lines into errors, and Stop would end the run on the trainer's first log line.
+      // Each step's exit code is checked instead.
       `Set-Location -LiteralPath ${powershellArg(plan.versionDir)}`,
+      'if (-not $?) { exit 1 }',
+      `$env:PYTHONPATH = '${source.replace(/'/g, "''")}' + $(if ($env:PYTHONPATH) { ';' + $env:PYTHONPATH } else { '' })`,
       ...steps.flatMap((step) => [`& ${step.map(powershellArg).join(' ')}`, 'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }']),
       'exit 0',
     ]
     return `${lines.join('\r\n')}\r\n`
   }
-  const lines = ['#!/usr/bin/env bash', 'set -euo pipefail', `cd ${posixQuote(plan.versionDir)}`]
+  const lines = [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    `cd ${posixQuote(plan.versionDir)}`,
+    `export PYTHONPATH=${posixQuote(source)}"\${PYTHONPATH:+:$PYTHONPATH}"`,
+  ]
   if (plan.shell === 'remote' && plan.pidFile) {
     lines.push(`PID_FILE=${posixQuote(plan.pidFile)}`, 'echo $$ > "$PID_FILE"', 'trap \'rm -f -- "$PID_FILE"\' EXIT')
   }

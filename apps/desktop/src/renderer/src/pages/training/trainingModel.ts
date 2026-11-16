@@ -29,7 +29,7 @@ export type ProjectView = 'editor' | 'running' | 'result'
 
 export function projectView(state: TrainingState): ProjectView {
   if (state === 'draft') return 'editor'
-  if (state === 'running') return 'running'
+  if (state === 'starting' || state === 'running') return 'running'
   return 'result'
 }
 
@@ -150,10 +150,12 @@ export interface HomeCard {
   caption: string
 }
 
-/** Running trainings first (they get the wide card), then the rest, newest first. */
+const UNDER_WAY = new Set<TrainingState>(['starting', 'running'])
+
+/** Trainings under way first (starting or running; they get the wide card), then the rest, newest first. */
 export function splitHome(trainings: readonly TrainingProject[]): { running: TrainingProject[]; rest: TrainingProject[] } {
   const sorted = [...trainings].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  return { running: sorted.filter((item) => item.state === 'running'), rest: sorted.filter((item) => item.state !== 'running') }
+  return { running: sorted.filter((item) => UNDER_WAY.has(item.state)), rest: sorted.filter((item) => !UNDER_WAY.has(item.state)) }
 }
 
 export function homeCard(training: TrainingProject, relative: (value: string) => string): HomeCard {
@@ -169,4 +171,19 @@ export function homeCard(training: TrainingProject, relative: (value: string) =>
     }
   if (training.saveError) return { ...base, pill: { tone: 'warn', text: '没有保存' }, caption: training.saveError }
   return { ...base, pill: null, caption: relative(training.finishedAt ?? training.updatedAt) }
+}
+
+/**
+ * What the result view offers about the saved LoRA. It is usable whenever one
+ * is in 模型 (a later failed save of another step does not take it away), and
+ * 重试 saves the step whose save failed.
+ */
+export function savedLora(project: Pick<TrainingProject, 'adapterId' | 'chosenStep' | 'saveError' | 'saveErrorStep'>): {
+  saved: boolean
+  retryStep: number | null
+} {
+  return {
+    saved: project.adapterId !== null,
+    retryStep: project.saveError ? (project.saveErrorStep ?? project.chosenStep) : null,
+  }
 }

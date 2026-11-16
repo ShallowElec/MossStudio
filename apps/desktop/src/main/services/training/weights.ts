@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import type { Settings } from '@shared/types'
 import { codedError } from '../../lib/codedError'
 import { paths } from '../../lib/paths'
-import { bundleBinding, prepareModelBundle } from '../modelBundles'
+import { bundleBinding, plannedBundleFolder, prepareModelBundle } from '../modelBundles'
 import { fileSize, linkInPlace, safePath } from '../modelFiles'
 import { componentSnapshot } from '../models'
 import { COMFY_WEIGHT_FILES, installedBaseBundle } from './readiness'
@@ -22,6 +22,14 @@ async function singleFile(id: string, settings: Settings): Promise<string> {
   const weights = record.entries.filter((file) => file.path.endsWith('.safetensors'))
   if (weights.length !== 1) throw codedError('E_TRAINING_WEIGHTS', `「${model.name}」的文件不完整。请在模型库修复它。`)
   return safePath(root, weights[0]!.path)
+}
+
+/** The folder localWeightsFolder will give, worked out without linking or writing anything. */
+export async function plannedWeightsFolder(settings: Settings): Promise<{ bundleId: string; path: string }> {
+  const bundle = await installedBaseBundle(settings)
+  if (bundle && bundle.id !== 'moss-base-int8')
+    return { bundleId: bundle.id, path: await plannedBundleFolder(bundleBinding(bundle), settings) }
+  return { bundleId: 'moss-base-int8', path: comfyWeightsFolder(settings, 'moss-base-int8') }
 }
 
 /** Links (never copies) the base parts into place, replacing a link that no longer matches its source. */

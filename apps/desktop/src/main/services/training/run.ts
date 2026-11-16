@@ -21,15 +21,16 @@ import { listTrainerVersions, trainerRuntimeSummary } from '../trainers'
 import { remoteSetup, remoteVersions, rootExpression } from '../remoteTrainer'
 import { getTrainingHost } from '../trainingHosts'
 import { trainingScript, type TrainingCommandPlan } from './commands'
-import { scanDataset, writeCaptions } from './dataset'
+import { scanDataset, stageDataset, stagedDir } from './dataset'
 import { GENERIC_FAILURE, trainingFailureReason } from './failure'
 import { installedBaseBundle, localTrainingGpu, samplesByDefault, trainingReadiness } from './readiness'
-import { checkpointSteps, coverOf, exportCandidates, exportFileName, listSamples, localRunDir, syncRemoteRun } from './samples'
+import { checkpointSteps, coverOf, exportCandidates, exportFileName, listSamples, localRunDir, stepFolder, syncRemoteRun } from './samples'
 import {
   createTrainingProject,
   duplicateTrainingProject,
   getTrainingProject,
-  imagesDir,
+  isBusy,
+  keyedQueue,
   listTrainingProjects,
   mutateTrainingProject,
   projectDir,
@@ -37,12 +38,22 @@ import {
   updateTrainingProject,
   type TrainingPatch,
 } from './store'
-import { comfyWeightsFolder, localWeightsFolder } from './weights'
+import { localWeightsFolder, plannedWeightsFolder } from './weights'
 
 const REMOTE_TIMEOUT_MS = 30_000
 const UPLOAD_TIMEOUT_MS = 30 * 60_000
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000
 const INTERRUPTED = '训练被打断了：应用关闭时它还在进行。可以重新开始。'
+const START_INTERRUPTED = '训练没能开始：应用在准备时关闭了。可以重新开始。'
+
+/** Trainings this process is starting, with the trainer version once it is known. */
+const startingHere = new Map<string, string | null>()
+/** One save of a training's LoRA at a time: they share the adapter and the download folder. */
+const saves = keyedQueue()
+
+function jobLive(job: JobRecord): boolean {
+  return job.state === 'running' || job.state === 'starting' || job.state === 'queued'
+}
 
 /** The training as the renderer sees it: the live step of a running job and the card's picture. */
 async function present(project: TrainingProject): Promise<TrainingProject> {
@@ -57,11 +68,47 @@ async function changed(project: TrainingProject): Promise<TrainingProject> {
   return shown
 }
 
+function warn(context: string, error: unknown): void {
+  console.warn('[training]', `${context}:`, error instanceof Error ? error.message : error)
+}
+
+/**
+ * A training left `starting` or `running` by something that is no longer there: a start this
+ * process is not making (the app closed during it), or a job that ended while nothing listened.
+ * A remote run's end needs the host (samples, the stop command), so the list does not wait for it.
+ */
+async function settle(project: TrainingProject): Promise<void> {
+  if (project.state === 'starting') {
+    if (startingHere.has(project.id)) return
+    const failed = await mutateTrainingProject(project.id, (current) =>
+      current.state === 'starting' && !startingHere.has(current.id)
+        ? { ...current, state: 'failed', failure: START_INTERRUPTED, finishedAt: new Date().toISOString() }
+        : current,
+    )
+    if (failed.state === 'failed') await changed(failed)
+    return
+  }
+  if (project.state !== 'running') return
+  const job = project.jobId ? await getJob(project.jobId) : null
+  if (job && jobLive(job)) return
+  if (!job) {
+    const failed = await finishAs(project.id, project.jobId, { state: 'failed', failure: INTERRUPTED })
+    if (failed) await changed(failed)
+    return
+  }
+  if (project.hostId === 'local') await onTrainingJobEnded(job)
+  else void onTrainingJobEnded(job).catch((error: unknown) => warn(`settling ${project.id}`, error))
+}
+
 export async function trainingList(): Promise<TrainingProject[]> {
-  const projects = await listTrainingProjects()
-  // A run that ended while nothing listened (the app was closed) is settled here.
-  for (const project of projects.filter((item) => item.state === 'running')) await settleIfEnded(project)
+  for (const project of await listTrainingProjects()) if (isBusy(project)) await settle(project)
   return Promise.all((await listTrainingProjects()).map(present))
+}
+
+export async function trainingGet(id: string): Promise<TrainingProject> {
+  const project = await getTrainingProject(id)
+  if (isBusy(project)) await settle(project)
+  return present(await getTrainingProject(id))
 }
 
 export async function trainingCreate(kind: TrainingKind, hostId = 'local'): Promise<TrainingProject> {
@@ -85,21 +132,14 @@ export async function trainingRemove(id: string): Promise<void> {
     const host = sshHost(getSettings(), project.hostId)
     await sshExec(host, `rm -rf ${posixQuote(remoteTrainingDir(await remoteRoot(host), id))}`, REMOTE_TIMEOUT_MS)
   } catch (error) {
-    console.warn('[training]', `remote files of ${id} stay:`, error instanceof Error ? error.message : error)
+    warn(`remote files of ${id} stay`, error)
   }
 }
 
-export async function trainingGet(id: string): Promise<TrainingProject> {
-  const project = await getTrainingProject(id)
-  if (project.state === 'running') await settleIfEnded(project)
-  return present(await getTrainingProject(id))
-}
-
-async function settleIfEnded(project: TrainingProject): Promise<void> {
-  const job = project.jobId ? await getJob(project.jobId) : null
-  if (job && (job.state === 'running' || job.state === 'starting' || job.state === 'queued')) return
-  if (job) await onTrainingJobEnded(job)
-  else await finishAs(project.id, project.jobId, { state: 'failed', failure: INTERRUPTED })
+/** Whether a training is starting or running on this trainer version, so it must not be removed. */
+export async function trainerVersionInUse(versionId: string): Promise<boolean> {
+  if ([...startingHere.values()].includes(versionId)) return true
+  return (await listJobs()).some((job) => job.kind === 'training' && job.trainerVersionId === versionId && jobLive(job))
 }
 
 function sshHost(settings: Settings, hostId: string): TrainingHost {
@@ -135,6 +175,35 @@ function remoteTrainingDir(root: string, id: string): string {
   return `${root}/training/${id}`
 }
 
+/** Ends the run whose pid the script wrote, with its whole process group (its own session). */
+export function remoteStopCommand(pidFile: string): string {
+  return `P="$(cat ${posixQuote(pidFile)} 2>/dev/null)" && [ -n "$P" ] && { kill -TERM -- "-$P" 2>/dev/null || kill -TERM "$P" 2>/dev/null; }; true`
+}
+
+/**
+ * Whether a trainer started by this app still runs on the host, for any training: a run whose
+ * SSH session dropped keeps going in its own session. A pid only counts while it is still a run.sh.
+ */
+export function remoteBusyCommand(root: string): string {
+  return [
+    `for f in ${posixQuote(root)}/training/*/run.pid; do`,
+    '  [ -f "$f" ] || continue',
+    '  P="$(cat "$f" 2>/dev/null)"',
+    '  [ -n "$P" ] && kill -0 "$P" 2>/dev/null && ps -p "$P" -o args= 2>/dev/null | grep -q "run\\.sh" && { echo busy; exit 0; }',
+    'done',
+    'true',
+  ].join('\n')
+}
+
+async function stopRemoteRun(project: TrainingProject): Promise<void> {
+  try {
+    const host = sshHost(getSettings(), project.hostId)
+    await sshExec(host, remoteStopCommand(`${remoteTrainingDir(await remoteRoot(host), project.id)}/run.pid`), REMOTE_TIMEOUT_MS)
+  } catch (error) {
+    warn(`stopping the remote run of ${project.id}`, error)
+  }
+}
+
 /** The version a run uses: the one the training names, else the newest ready one at its host. */
 async function trainerVersion(settings: Settings, project: TrainingProject): Promise<TrainerVersion> {
   const versions = project.hostId === 'local' ? await listTrainerVersions(settings) : remoteVersions(settings, project.hostId)
@@ -160,6 +229,7 @@ interface PreparedPlan {
   remoteDir: string | null
 }
 
+/** The run's plan; `materialize` links the local weights into place (a start), else only names them. */
 async function preparePlan(project: TrainingProject, runName: string, materialize: boolean): Promise<PreparedPlan> {
   const settings = getSettings()
   const version = await trainerVersion(settings, project)
@@ -168,12 +238,7 @@ async function preparePlan(project: TrainingProject, runName: string, materializ
     if (!runtime || runtime.state !== 'ready') throw codedError('E_TRAINING_TRAINER', '训练环境还没装好。先在训练页点「准备」。')
     const windows = process.platform === 'win32'
     const bin = join(runtime.path, windows ? 'Scripts' : 'bin')
-    const installed = await installedBaseBundle(settings)
-    const weights = materialize
-      ? await localWeightsFolder(settings)
-      : installed && installed.id !== 'moss-base-int8'
-        ? await localWeightsFolder(settings)
-        : { bundleId: 'moss-base-int8', path: comfyWeightsFolder(settings, 'moss-base-int8') }
+    const weights = materialize ? await localWeightsFolder(settings) : await plannedWeightsFolder(settings)
     return {
       bundleId: weights.bundleId,
       host: null,
@@ -185,9 +250,10 @@ async function preparePlan(project: TrainingProject, runName: string, materializ
         configBin: join(bin, windows ? 'kohakumoss-config.exe' : 'kohakumoss-config'),
         kogine: join(bin, windows ? 'kogine.exe' : 'kogine'),
         weights: weights.path,
-        data: imagesDir(project.id),
+        data: stagedDir(project.id),
         outputDir: join(projectDir(project.id), 'runs'),
         cacheDir: join(projectDir(project.id), 'cache'),
+        configDir: join(projectDir(project.id), 'configs'),
         runName,
         recipe: project.recipe,
       },
@@ -209,9 +275,10 @@ async function preparePlan(project: TrainingProject, runName: string, materializ
       configBin: `${runtime}/bin/kohakumoss-config`,
       kogine: `${runtime}/bin/kogine`,
       weights: await remoteWeights(host),
-      data: `${dir}/images`,
+      data: `${dir}/dataset`,
       outputDir: `${dir}/runs`,
       cacheDir: `${dir}/cache`,
+      configDir: `${dir}/configs`,
       runName,
       recipe: project.recipe,
       pidFile: `${dir}/run.pid`,
@@ -219,35 +286,18 @@ async function preparePlan(project: TrainingProject, runName: string, materializ
   }
 }
 
-/** The commands the next run will execute, for copying. */
+/** The commands the next run will execute, for copying. Nothing is written or linked for it. */
 export async function trainingCommand(id: string): Promise<string> {
   const project = await getTrainingProject(id)
-  const runName = project.state === 'running' && project.runName ? project.runName : nextRunName(project)
+  const runName = isBusy(project) && project.runName ? project.runName : nextRunName(project)
   return trainingScript((await preparePlan(project, runName, false)).plan)
-}
-
-/** Whether `caption` already names the trigger as a word of its own. */
-export function mentionsTrigger(caption: string, trigger: string): boolean {
-  return new RegExp(`(^|[^A-Za-z0-9_])${trigger}($|[^A-Za-z0-9_])`).test(caption)
-}
-
-/** For 人物 and 物品 every description must call the subject by its trigger word. */
-async function addTriggerToCaptions(project: TrainingProject): Promise<void> {
-  if (project.kind === 'style' || !project.trigger) return
-  const updates = new Map<string, string>()
-  for (const image of (await scanDataset(project.id)).images) {
-    const caption = image.caption?.trim() ?? ''
-    if (!caption) updates.set(image.name, project.trigger)
-    else if (!mentionsTrigger(caption, project.trigger)) updates.set(image.name, `${project.trigger}，${caption}`)
-  }
-  await writeCaptions(project.id, updates)
 }
 
 async function startLocal(prepared: PreparedPlan, project: TrainingProject): Promise<JobRecord> {
   const { plan, version } = prepared
   const script = join(projectDir(project.id), plan.shell === 'powershell' ? 'run.ps1' : 'run.sh')
   // Windows PowerShell 5.1 reads a script without a BOM in the ANSI code page, which breaks non-ASCII paths.
-  await writeFile(script, `${plan.shell === 'powershell' ? '\uFEFF' : ''}${trainingScript(plan)}`, { encoding: 'utf8', mode: 0o755 })
+  await writeFile(script, `${plan.shell === 'powershell' ? '﻿' : ''}${trainingScript(plan)}`, { encoding: 'utf8', mode: 0o755 })
   const gpu = await localTrainingGpu().catch(() => null)
   return startTrainingJob({
     versionId: version.id,
@@ -266,14 +316,20 @@ async function startLocal(prepared: PreparedPlan, project: TrainingProject): Pro
   })
 }
 
-async function startRemote(prepared: PreparedPlan, project: TrainingProject): Promise<JobRecord> {
+async function startRemote(prepared: PreparedPlan, project: TrainingProject, staged: string): Promise<JobRecord> {
   const { plan, version } = prepared
   const host = prepared.host!
   const dir = prepared.remoteDir!
+  const root = dir.slice(0, dir.lastIndexOf('/training/'))
+  const busy = await sshExec(host, remoteBusyCommand(root), REMOTE_TIMEOUT_MS)
+  if (busy.code !== 0) throw codedError('E_TRAINING_HOST', `连不上训练主机「${host.name}」。请检查网络和主机设置。`)
+  if (busy.stdout.includes('busy')) {
+    throw codedError('E_TRAINING_BUSY', '训练主机上还有一个训练在运行（可能是上次没停下的）。等它结束，或在主机上结束它后再开始。')
+  }
   // The pictures go up fresh each run, so pictures removed here are gone there too.
-  const clean = await sshExec(host, `mkdir -p ${posixQuote(dir)} && rm -rf ${posixQuote(`${dir}/images`)}`, REMOTE_TIMEOUT_MS)
+  const clean = await sshExec(host, `mkdir -p ${posixQuote(dir)} && rm -rf ${posixQuote(plan.data)}`, REMOTE_TIMEOUT_MS)
   if (clean.code !== 0) throw codedError('E_TRAINING_HOST', `连不上训练主机「${host.name}」。请检查网络和主机设置。`)
-  const upload = await scpTo(host, imagesDir(project.id), `${dir}/images`, UPLOAD_TIMEOUT_MS, true)
+  const upload = await scpTo(host, staged, plan.data, UPLOAD_TIMEOUT_MS, true)
   if (upload.code !== 0) {
     console.warn('[training]', 'upload failed:', (upload.stderr || upload.stdout).trim().slice(-400))
     throw codedError('E_TRAINING_UPLOAD', '图片没能传到训练主机。请检查网络后再试。')
@@ -282,7 +338,6 @@ async function startRemote(prepared: PreparedPlan, project: TrainingProject): Pr
   await sshWriteFile(host, script, Buffer.from(trainingScript(plan), 'utf8'), REMOTE_TIMEOUT_MS)
   // Its own session, so 停止 can end the whole tree (the trainer starts workers) by its group.
   const start = `if command -v setsid >/dev/null 2>&1; then exec setsid -w bash ${posixQuote(script)}; else exec bash ${posixQuote(script)}; fi`
-  const stop = `P="$(cat ${posixQuote(plan.pidFile!)} 2>/dev/null)" && [ -n "$P" ] && { kill -TERM -- "-$P" 2>/dev/null || kill -TERM "$P" 2>/dev/null; }; true`
   return startTrainingJob({
     versionId: version.id,
     hostId: host.id,
@@ -296,25 +351,54 @@ async function startRemote(prepared: PreparedPlan, project: TrainingProject): Pr
     env: sshEnv(host),
     args: sshArgs(host, start),
     totalSteps: plan.recipe.steps,
-    cancelCommand: { command: sshCommand(), args: sshArgs(host, stop), env: sshEnv(host) },
+    cancelCommand: { command: sshCommand(), args: sshArgs(host, remoteStopCommand(plan.pidFile!)), env: sshEnv(host) },
   })
 }
 
-export async function trainingStart(id: string): Promise<TrainingProject> {
-  const project = await getTrainingProject(id)
-  if (project.state === 'running') throw codedError('E_TRAINING_RUNNING', '这个训练已经在进行了。')
-  if (project.state === 'done') throw codedError('E_TRAINING_DONE', '这个训练已经完成。想再练一次，可以复制一份。')
-  if (!(await scanDataset(id)).images.length) throw codedError('E_TRAINING_EMPTY', '先添加至少一张图片。')
+/** Everything between `starting` and a started job; any failure here sends the training back to a draft. */
+async function launch(project: TrainingProject): Promise<{ job: JobRecord; runName: string }> {
+  if (!(await scanDataset(project.id)).images.length) throw codedError('E_TRAINING_EMPTY', '先添加至少一张图片。')
   const readiness = await trainingReadiness(project.hostId)
   if (!readiness.ready) throw codedError('E_TRAINING_NOT_READY', '这台电脑还没准备好训练。先在训练页完成准备。')
-  const busy = (await listJobs()).find(
-    (job) => job.kind === 'training' && (job.hostId ?? 'local') === project.hostId && (job.state === 'running' || job.state === 'starting'),
-  )
+  const busy = (await listJobs()).find((job) => job.kind === 'training' && (job.hostId ?? 'local') === project.hostId && jobLive(job))
   if (busy) throw codedError('E_TRAINING_BUSY', '这台电脑上已经有一个训练在进行。等它结束或停止后再开始。')
   const runName = nextRunName(project)
   const prepared = await preparePlan(project, runName, true)
-  await addTriggerToCaptions(project)
-  const job = project.hostId === 'local' ? await startLocal(prepared, project) : await startRemote(prepared, project)
+  startingHere.set(project.id, prepared.version.id)
+  // The run reads a copy whose descriptions name the trigger; the person's own stay as written.
+  const staged = await stageDataset(project)
+  const job = project.hostId === 'local' ? await startLocal(prepared, project) : await startRemote(prepared, project, staged)
+  return { job, runName }
+}
+
+export async function trainingStart(id: string): Promise<TrainingProject> {
+  // Through the write queue: a second start, an edit or a delete queued behind this sees `starting`.
+  let marked = false
+  let starting: TrainingProject
+  try {
+    starting = await mutateTrainingProject(id, (current) => {
+      if (isBusy(current)) throw codedError('E_TRAINING_RUNNING', '这个训练已经在开始或进行了。')
+      if (current.state === 'done') throw codedError('E_TRAINING_DONE', '这个训练已经完成。想再练一次，可以复制一份。')
+      // Before the write, so a list running meanwhile does not take it for a start the app lost.
+      startingHere.set(id, null)
+      marked = true
+      return { ...current, state: 'starting' }
+    })
+  } catch (error) {
+    if (marked) startingHere.delete(id)
+    throw error
+  }
+  await changed(starting)
+  let launched: { job: JobRecord; runName: string }
+  try {
+    launched = await launch(starting)
+  } catch (error) {
+    startingHere.delete(id)
+    const draft = await mutateTrainingProject(id, (current) => (current.state === 'starting' ? { ...current, state: 'draft' } : current))
+    await changed(draft)
+    throw error
+  }
+  const { job, runName } = launched
   const started = await mutateTrainingProject(id, (current) => ({
     ...current,
     state: 'running',
@@ -324,11 +408,16 @@ export async function trainingStart(id: string): Promise<TrainingProject> {
     finishedAt: null,
     stepReached: 0,
     chosenStep: null,
-    adapterId: current.adapterId,
     saveError: null,
+    saveErrorStep: null,
     failure: null,
   }))
-  return changed(started)
+  startingHere.delete(id)
+  await changed(started)
+  // A job that ended before its id was saved found no training when it ended; settle it now.
+  const now = await getJob(job.id)
+  if (now && !jobLive(now)) await onTrainingJobEnded(now)
+  return present(await getTrainingProject(id))
 }
 
 export async function trainingStop(id: string): Promise<TrainingProject> {
@@ -336,7 +425,7 @@ export async function trainingStop(id: string): Promise<TrainingProject> {
   if (project.state === 'running' && project.jobId) {
     const job = await cancelJob(project.jobId)
     // The job may already be gone (the app restarted): settle the training now.
-    if (!job || (job.state !== 'running' && job.state !== 'starting')) await settleIfEnded(project)
+    if (!job || !jobLive(job)) await settle(project)
   }
   return present(await getTrainingProject(id))
 }
@@ -367,7 +456,7 @@ async function syncIfRemote(project: TrainingProject): Promise<void> {
     const host = sshHost(getSettings(), project.hostId)
     await syncRemoteRun(project, host, `${remoteTrainingDir(await remoteRoot(host), project.id)}/runs/${project.runName}`)
   } catch (error) {
-    console.warn('[training]', 'remote samples:', error instanceof Error ? error.message : error)
+    warn('remote samples', error)
   }
 }
 
@@ -376,6 +465,8 @@ export async function onTrainingJobEnded(job: JobRecord): Promise<void> {
   if (job.kind !== 'training') return
   const project = (await listTrainingProjects()).find((item) => item.jobId === job.id)
   if (!project || project.state !== 'running') return
+  // A failed SSH session (a dropped connection) leaves the trainer running in its own session.
+  if (project.hostId !== 'local' && job.state === 'failed') await stopRemoteRun(project)
   await syncIfRemote(project)
   if (job.state === 'succeeded') {
     const done = await finishAs(project.id, job.id, { state: 'done', stepReached: project.recipe.steps })
@@ -406,12 +497,12 @@ export async function onTrainingJobEnded(job: JobRecord): Promise<void> {
 }
 
 /** The local file of step `step`'s LoRA: found in the run folder, or copied down from the host. */
-async function exportFile(project: TrainingProject, step: number): Promise<{ path: string; temporary: boolean } | null> {
+async function exportFile(project: TrainingProject, step: number): Promise<{ path: string; temporary: string | null } | null> {
   const runName = project.runName!
   const candidates = exportCandidates(runName, step, project.recipe.steps)
   if (project.hostId === 'local') {
     const found = candidates.map((relative) => join(localRunDir(project), ...relative.split('/'))).find((path) => existsSync(path))
-    return found ? { path: found, temporary: false } : null
+    return found ? { path: found, temporary: null } : null
   }
   const host = sshHost(getSettings(), project.hostId)
   const runDir = `${remoteTrainingDir(await remoteRoot(host), project.id)}/runs/${runName}`
@@ -425,22 +516,30 @@ async function exportFile(project: TrainingProject, step: number): Promise<{ pat
   )
   const relative = probe.stdout.trim().split('\n').pop()
   if (probe.code !== 0 || !relative || !candidates.includes(relative)) return null
-  // Named as the trainer named it: the adapter keeps the file name.
-  const local = join(projectDir(project.id), 'download', exportFileName(runName))
-  await mkdir(join(projectDir(project.id), 'download'), { recursive: true })
+  // A folder per step; the file keeps the trainer's name, which the adapter keeps.
+  const folder = join(projectDir(project.id), 'download', stepFolder(step))
+  await mkdir(folder, { recursive: true })
+  const local = join(folder, exportFileName(runName))
   const copied = await scpFrom(host, `${runDir}/${relative}`, local, DOWNLOAD_TIMEOUT_MS)
-  if (copied.code !== 0) throw new Error((copied.stderr || copied.stdout).trim().slice(-400) || 'scp failed')
-  return { path: local, temporary: true }
+  if (copied.code !== 0) {
+    await rm(folder, { recursive: true, force: true })
+    throw new Error((copied.stderr || copied.stdout).trim().slice(-400) || 'scp failed')
+  }
+  return { path: local, temporary: folder }
 }
 
-/** Saves step `step`'s checkpoint as the training's LoRA; a failure lands in `saveError`. */
-export async function trainingChooseStep(id: string, step: number): Promise<TrainingProject> {
+/** Saves step `step`'s checkpoint as the training's LoRA, one save per training at a time; a failure lands in `saveError`. */
+export function trainingChooseStep(id: string, step: number): Promise<TrainingProject> {
+  return saves(id, () => saveStep(id, step))
+}
+
+async function saveStep(id: string, step: number): Promise<TrainingProject> {
   const project = await getTrainingProject(id)
-  if (project.state === 'running') throw codedError('E_TRAINING_RUNNING', '训练还在进行。等它结束或停止后再选。')
+  if (isBusy(project)) throw codedError('E_TRAINING_RUNNING', '训练还在进行。等它结束或停止后再选。')
   if (!project.runName) throw codedError('E_TRAINING_NO_RUN', '这个训练还没有结果。')
   let saveError: string | null = null
   let adapterId = project.adapterId
-  let file: { path: string; temporary: boolean } | null = null
+  let file: { path: string; temporary: string | null } | null = null
   try {
     file = await exportFile(project, step)
     if (!file) saveError = `没有找到第 ${step} 步保存的 LoRA。换一步试试。`
@@ -457,16 +556,18 @@ export async function trainingChooseStep(id: string, step: number): Promise<Trai
       adapterId = adapter.id
     }
   } catch (error) {
-    console.warn('[training]', `saving step ${step} of ${id} failed:`, error instanceof Error ? error.message : error)
+    warn(`saving step ${step} of ${id}`, error)
     saveError =
       project.hostId === 'local'
         ? `第 ${step} 步的 LoRA 没能存进模型库。检查磁盘空间后重试。`
         : `第 ${step} 步的 LoRA 没能从训练主机取回。检查网络后重试。`
   } finally {
-    if (file?.temporary) await rm(file.path, { force: true }).catch(() => undefined)
+    if (file?.temporary) await rm(file.temporary, { recursive: true, force: true }).catch(() => undefined)
   }
   const saved = await mutateTrainingProject(id, (current) =>
-    saveError ? { ...current, saveError } : { ...current, chosenStep: step, adapterId, saveError: null },
+    saveError
+      ? { ...current, saveError, saveErrorStep: step }
+      : { ...current, chosenStep: step, adapterId, saveError: null, saveErrorStep: null },
   )
   return changed(saved)
 }

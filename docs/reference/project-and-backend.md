@@ -153,5 +153,5 @@ Regions (区域) are `layers: ProjectLayer[]` on a canvas; their coordinate rule
 
 - A project refers to models by `modelBundleId` and to devices by `deviceUuid` or `deviceId`. Model files are never copied into a project.
 - Generated pictures live in `outputs/` and are referenced from `ProjectCanvas.outputs` by path. Deleting a project removes its folder, `assets/` included, and nothing in `outputs/`; the Library (作品) owns those.
-- Training data lives under `trainer/` and never enters a project.
+- Training data lives under `training/` (a training's pictures and runs, [training.md](/docs/reference/training.md#2-data-on-disk)) and `trainer/` (the trainer itself) and never enters a project. A trained LoRA reaches a project only as an adapter id.
 - A job's picture inputs may only come from the Library roots or the project's own `assets/` (section 3, step 4).

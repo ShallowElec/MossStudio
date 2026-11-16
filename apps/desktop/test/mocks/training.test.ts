@@ -26,6 +26,7 @@ describe('mock backend: 训练', () => {
     expect(trainingSchemas.id.safeParse({ id: draft.id }).success).toBe(true)
     expect(draft.state).toBe('draft')
     expect(await error(backend, Ipc.trainingStart, { id: draft.id })).toBe('E_TRAINING_EMPTY')
+    expect((await data<TrainingProject>(backend, Ipc.trainingGet, { id: draft.id })).state).toBe('draft')
 
     const dataset = await data<TrainingDataset>(backend, Ipc.trainingDatasetAdd, {
       id: draft.id,
@@ -33,10 +34,32 @@ describe('mock backend: 训练', () => {
     })
     expect(dataset.counts).toEqual({ total: 4, small: 1, duplicate: 0, noCaption: 4 })
 
-    const running = await data<TrainingProject>(backend, Ipc.trainingStart, { id: draft.id })
-    expect(running.state).toBe('running')
-    expect(backend.state.jobs.find((job) => job.id === running.jobId)?.kind).toBe('training')
-    expect(await error(backend, Ipc.trainingUpdate, { id: draft.id, patch: { name: 'x' } })).toBe('E_TRAINING_STARTED')
+    backend.state.training.startMs = 5
+    const changed: TrainingProject[] = []
+    backend.bridge.on(Events.trainingChanged, (next) => changed.push(next as TrainingProject))
+    // As main: the start call answers only once the job runs; 'starting' arrives as an event first.
+    const started = data<TrainingProject>(backend, Ipc.trainingStart, { id: draft.id })
+    await settle(1)
+    expect(changed.at(-1)).toMatchObject({ id: draft.id, state: 'starting', jobId: null })
+    // Nothing is editable while the pictures are prepared, with main's codes.
+    expect(await error(backend, Ipc.trainingUpdate, { id: draft.id, patch: { name: 'x' } })).toBe('E_TRAINING_RUNNING')
+    expect(await error(backend, Ipc.trainingDatasetAdd, { id: draft.id, paths: ['/photos/x.png'] })).toBe('E_TRAINING_RUNNING')
+    expect(await error(backend, Ipc.trainingStart, { id: draft.id })).toBe('E_TRAINING_RUNNING')
+    expect(await error(backend, Ipc.trainingRemove, { id: draft.id })).toBe('E_TRAINING_RUNNING')
+
+    expect((await started).state).toBe('running')
+    expect(changed.at(-1)).toMatchObject({ id: draft.id, state: 'running' })
+    expect(backend.state.jobs.find((job) => job.id === changed.at(-1)!.jobId)?.kind).toBe('training')
+  })
+
+  it('goes back to a draft when the start fails after starting', async () => {
+    const backend = createMockBackend(scenario('trainings'))
+    backend.state.training.startMs = 1
+    backend.state.training.startError = '图片没能传到训练主机。请检查网络后再试。'
+    const changed: string[] = []
+    backend.bridge.on(Events.trainingChanged, (next) => changed.push((next as TrainingProject).state))
+    expect(await error(backend, Ipc.trainingStart, { id: 'tp-aming' })).toBe('E_TRAINING_UPLOAD')
+    expect(changed).toEqual(['starting', 'draft'])
   })
 
   it('prepares step by step, with the base model download in between', async () => {
@@ -54,15 +77,29 @@ describe('mock backend: 训练', () => {
   it('saves a chosen step as a LoRA in 模型, or says why it could not', async () => {
     const backend = createMockBackend(scenario('trainings'))
     const chosen = await data<TrainingProject>(backend, Ipc.trainingChooseStep, { id: 'tp-green-mug', step: 1500 })
-    expect(chosen).toMatchObject({ chosenStep: 1500, adapterId: 'lora-tp-green-mug', saveError: null })
-    expect(backend.state.catalog.adapters.some((adapter) => adapter.id === 'lora-tp-green-mug' && adapter.installed)).toBe(true)
+    expect(chosen).toMatchObject({ chosenStep: 1500, adapterId: 'trained-tp-green-mug', saveError: null })
+    expect(backend.state.catalog.adapters.some((adapter) => adapter.id === 'trained-tp-green-mug' && adapter.installed)).toBe(true)
 
+    // As main: a failed save keeps the step and LoRA saved before, and names the step that failed.
     backend.state.training.saveError = '磁盘满了'
     expect(await data<TrainingProject>(backend, Ipc.trainingChooseStep, { id: 'tp-green-mug', step: 1000 })).toMatchObject({
-      adapterId: null,
+      chosenStep: 1500,
+      adapterId: 'trained-tp-green-mug',
       saveError: '磁盘满了',
+      saveErrorStep: 1000,
     })
-    expect(await error(backend, Ipc.trainingChooseStep, { id: 'tp-green-mug', step: 750 })).toBe('E_NO_CHECKPOINT')
+    backend.state.training.saveError = null
+    expect(await data<TrainingProject>(backend, Ipc.trainingChooseStep, { id: 'tp-green-mug', step: 1000 })).toMatchObject({
+      chosenStep: 1000,
+      saveError: null,
+      saveErrorStep: null,
+    })
+    expect(await data<TrainingProject>(backend, Ipc.trainingChooseStep, { id: 'tp-green-mug', step: 750 })).toMatchObject({
+      chosenStep: 1000,
+      saveError: '没有找到第 750 步保存的 LoRA。换一步试试。',
+      saveErrorStep: 750,
+    })
+    expect(await error(backend, Ipc.trainingChooseStep, { id: 'tp-juzi', step: 1000 })).toBe('E_TRAINING_RUNNING')
   })
 
   it('answers the blocked and the not-prepared scenarios', async () => {

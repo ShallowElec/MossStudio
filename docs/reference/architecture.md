@@ -6,7 +6,7 @@ code: apps/desktop/src/main/index.ts, apps/desktop/src/main/windows.ts, apps/des
 
 # Architecture
 
-MossStudio is an Electron app: a main process that owns engines, models, jobs and files; a sandboxed React renderer with two windows; and a small utility process that serves HTTP and WebSocket for the Studio's generation requests and the LAN web page. This is the contributor's map: where each piece lives and how the pieces talk. Details live in the docs it links.
+MossStudio is an Electron app: a main process that owns engines, models, jobs and files; a sandboxed React renderer in one window; and a small utility process that serves HTTP and WebSocket for the Studio's generation requests and the LAN web page. This is the contributor's map: where each piece lives and how the pieces talk. Details live in the docs it links.
 
 Paths in this doc are relative to `apps/desktop/src/` unless they start with `apps/` or `docs/`. The repository layout and the commands are in [CONTRIBUTING.md](/CONTRIBUTING.md).
 
@@ -24,14 +24,13 @@ The build (`apps/desktop/electron.vite.config.ts`) has two main entries, `index`
 
 ## Windows and run modes
 
-`main/windows.ts` knows two `BrowserWindow`s (`WindowKind`):
+`main/windows.ts` knows one `BrowserWindow` (`WindowKind`):
 
 | Kind | Route | Size | Title |
 | --- | --- | --- | --- |
 | `studio` | `/studio` | 1600 × 1000, minimum 1024 × 640 | MossStudio |
-| `trainer` | `/trainer` | 1280 × 840, minimum 960 × 600 | Kohaku Trainer |
 
-The studio window opens at start; the trainer window opens from 训练 through `window:open`. On Linux the window is frameless and the renderer draws the title bar (`components/shell/Titlebar.tsx`, `window:control`, `event:window-state`); Windows uses a hidden title bar with an overlay, macOS `hiddenInset`. Two more windows exist outside the app proper: the setup and uninstall windows (`createInstallWindow` in `main/install/app.ts`) load the same renderer at `/install` and `/uninstall`, which `App.tsx` renders standalone without settings, models or jobs.
+The studio window opens at start. The separate trainer window is retired ([ADR-0015](/docs/decisions/0015-training-in-the-main-window.md)); `window:open` with `kind: 'trainer'` opens `/training` in the studio window. On Linux the window is frameless and the renderer draws the title bar (`components/shell/Titlebar.tsx`, `window:control`, `event:window-state`); Windows uses a hidden title bar with an overlay, macOS `hiddenInset`. Two more windows exist outside the app proper: the setup and uninstall windows (`createInstallWindow` in `main/install/app.ts`) load the same renderer at `/install` and `/uninstall`, which `App.tsx` renders standalone without settings, models or jobs.
 
 How the process was started decides paths and behaviour (`RunMode` in `main/install/runContext.ts`):
 
@@ -57,13 +56,13 @@ The Rail (`components/shell/Rail.tsx`) lists `PRIMARY_ROUTES` from `components/s
 | `/studio` | 创作, `pages/Studio.tsx` → `pages/studio/StudioPage.tsx` | Always; the default |
 | `/library` | 作品, `pages/Library.tsx` | Always |
 | `/models` | 模型, `pages/Models.tsx` | Always |
-| `/training` | 训练, `pages/Training.tsx` | When `Settings.trainingEnabled` |
+| `/training`, `/training/<id>` | 训练, `pages/Training.tsx` → `pages/training/TrainingPage.tsx`: the list, or one training ([training.md](/docs/reference/training.md)) | When `Settings.trainingEnabled` |
 | `/settings/<section>` | 设置, `pages/Settings.tsx` | From the Rail's bottom button |
 | `/setup` | 准备开始创作, `pages/Setup.tsx`, full page without the Rail | While `Settings.onboardingState` is `pending` the app redirects here. 开始下载 installs the engine plan and the recommended model as one preparation (`lib/preparation.ts`); the Studio's 生成 button shows the same progress while it runs (`lib/usePreparation.ts`) |
 
-Settings sections (`pages/settings/sections.ts`): `general` 通用, `devices` 设备与引擎, `storage` 存储, `network` 网络, `features` 功能, `updates` 通知与更新, `about` 关于. Bare `/settings` and unknown names open 通用; older names (`engine`, `engines`, `remote`, `hosts`, `lan`, `alerts`, `notifications`, `diagnostics`, `appearance`) map to the current section (`ALIASES`).
+Settings sections (`pages/settings/sections.ts`): `general` 通用, `devices` 设备与引擎, `storage` 存储, `network` 网络, `features` 功能, `training` 训练 (listed only while `Settings.trainingEnabled` is on, `visibleSections`), `updates` 通知与更新, `about` 关于. Bare `/settings` and unknown names open 通用; older names (`engine`, `engines`, `remote`, `hosts`, `lan`, `alerts`, `notifications`, `diagnostics`, `appearance`) map to the current section (`ALIASES`).
 
-Old routes redirect (`LEGACY_REDIRECTS`): `/gallery` → `/library`; `/engines`, `/devices`, `/instances` → `/settings/devices`; `/diagnostics` → `/studio` and opens the Activity panel's 问题 tab. The Activity panel (`components/shell/ActivityPanel.tsx`, state in `lib/shell.ts`) has the tabs `jobs`, `notifications` and `problems`. The trainer window ignores the route and renders `pages/TrainerWindow.tsx`. The Studio itself is described in [studio-node-board.md](/docs/reference/studio-node-board.md); the navigation decision is [ADR-0011](/docs/decisions/0011-rail-navigation-and-node-board.md).
+Old routes redirect (`LEGACY_REDIRECTS`): `/gallery` → `/library`; `/engines`, `/devices`, `/instances` → `/settings/devices`; `/diagnostics` → `/studio` and opens the Activity panel's 问题 tab. The Activity panel (`components/shell/ActivityPanel.tsx`, state in `lib/shell.ts`) has the tabs `jobs`, `notifications` and `problems`. The Studio itself is described in [studio-node-board.md](/docs/reference/studio-node-board.md); the navigation decision is [ADR-0011](/docs/decisions/0011-rail-navigation-and-node-board.md).
 
 ## Renderer folders
 
@@ -93,7 +92,8 @@ Old routes redirect (`LEGACY_REDIRECTS`): `/gallery` → `/library`; `/engines`,
 | Models | `models.ts`, `modelFiles.ts`, `modelBundles.ts`, `modelScan.ts`, `modelImports.ts`, `modelReadiness.ts`, `controlAdapters.ts`, `hfCredentials.ts`, `hfNetwork.ts` ([models.md](/docs/reference/models.md)) |
 | Projects and pictures | `projects.ts`, `studioAssets.ts`, `gallery.ts`, `galleryMeta.ts`, `imageHeaders.ts` ([project-and-backend.md](/docs/reference/project-and-backend.md)) |
 | Remote hosts and SSH | `ssh.ts`, `sshSessions.ts`, `sshCredentials.ts`, `sshHostKeys.ts`, `sshTools.ts`, `trainingHosts.ts`, `remoteEngine.ts`, `remoteEngineInstall.ts`, `remoteCuda.ts`, `remoteModels.ts`, `remoteDownloads.ts`, `remoteModelDelete.ts`, `remoteResources.ts`, `remoteTrainer.ts` |
-| Trainer | `trainers.ts`, `trainerEnv.ts`, `trainerGit.ts`, `trainerArtifacts.ts`, `managedPython.ts`, `gitHealth.ts`, `git.ts` |
+| Trainer versions and environments | `trainers.ts`, `trainerEnv.ts`, `trainerGit.ts`, `managedPython.ts`, `gitHealth.ts`, `git.ts` |
+| Training | `training/` (`store.ts`, `dataset.ts`, `captions.ts`, `readiness.ts`, `weights.ts`, `commands.ts`, `run.ts`, `samples.ts`, `failure.ts`), the one subfolder ([training.md](/docs/reference/training.md)) |
 | App | `settings.ts`, `diagnostics.ts`, `desktopNotifications.ts`, `network.ts`, `env.ts`, `onboarding.ts`, `ai.ts` (assistant providers and chat), `gbc.ts`, `gbcGit.ts`, `githubCredentials.ts`, `backend.ts` |
 | Leftovers from the runner era | `instances.ts`, `remoteInstances.ts`, `runtimes.ts`, `cases.ts`, `launchQueue.ts`, `legacyMigration.ts`. Their pages are gone; some IPC handlers remain. |
 
@@ -137,8 +137,9 @@ The LAN page (`renderer/src/web/main.tsx` with `web/LayoutEditor.tsx`) is a sepa
 | `outputs/` | Generated pictures with their JSON sidecars; the Library reads them | `services/gallery.ts` |
 | `models/` | Default models root; a custom `Settings.modelsRoot` replaces it ([models.md](/docs/reference/models.md)) | `services/models.ts` |
 | `mossinfer/` | Engine root: one folder per installed package, `.staging`, `.backup`, `.probe`, `machine.json`, `external.json`, `last-attempt.json` ([engines.md](/docs/reference/engines.md)) | engine services |
-| `cache/` | `mossinfer/` (the engine's cache), `previews/` (live previews), `trainer-artifacts/` | various |
+| `cache/` | `mossinfer/` (the engine's cache), `previews/` (live previews) | various |
 | `trainer/` | Trainer git mirror, versions and runtimes ([ADR-0002](/docs/decisions/0002-trainer-backend.md)) | trainer services |
+| `training/<id>/` | One folder per training: `project.json`, its pictures, caches and runs ([training.md](/docs/reference/training.md#2-data-on-disk)) | `services/training/` |
 | `ai/agent.json`, `gbc/` | Assistant providers and conversations; GBC runs | `services/ai.ts`, `gbc.ts` |
 | `logs/`, `downloads/` | Logs and in-flight downloads | |
 | `git/`, `instances/`, `runtimes/`, `launch-queue.json`, `cases.json` | Runner era; archived on first start by `services/legacyMigration.ts` | leftovers |

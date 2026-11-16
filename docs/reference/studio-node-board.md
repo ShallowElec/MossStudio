@@ -41,7 +41,7 @@ Right-click menus (`studio/BoardMenu.tsx`, entries built in `studio/Board.tsx`):
 | UI | `kind` | What it is | Created by | Code |
 | --- | --- | --- | --- | --- |
 | 画面 | `layout` | The editable node: description, regions, inputs, sampling. It generates. | 新建画面, a recipe, 复制为新画面, 用作起始图, a wire released on the empty board | `studio/canvases.ts` (`createLayoutCanvas`, `canvasFromPicture`, `copyAsLayout`) |
-| 风格 | `style` | A description and LoRA that every 画面 wired to it generates with | 新建风格, the 风格 socket's 新建风格, recipe 一组同风格的图 | `studio/nodes.ts` (`createStyleCanvas`) |
+| 风格 | `style` | A description and LoRA that every 画面 wired to it generates with | 新建风格, the 风格 socket's 新建风格, recipe 一组同风格的图, 在创作中试用 on a finished training (section 10) | `studio/nodes.ts` (`createStyleCanvas`, `tryLoraOnBoard`) |
 | 放大 | `layout` with `upscale` | A 画面 that redraws its 原图 at ×1.5 or ×2 | 放大 in a card's menu or the wire-drop menu, recipe 放大一张图 | `studio/nodes.ts` (`upscaleFromPicture`) |
 | result (no label; it carries its 画面's title) | `result` | One run: its picture and the settings it was made with, pointing back through `sourceCanvasId` | Every run | `studio/canvases.ts` (`taskCanvasFor`), `studio/runs.ts` |
 | picture card (原图 or 图片 in messages) | `image` | An imported file: `imagePath` and its pixel size `imageSize` | 导入图片…, 从作品选择…, drop, paste, 输入 › 添加 | `studio/canvases.ts` (`createImageCanvas`), `studio/useInputImport.ts` |
@@ -159,6 +159,7 @@ The Studio does not read `preview`: a live preview shows on the card whenever th
 
 - LoRA rows (`LoraSection` in `studio/ParamsPanel.tsx`) exist on a 画面 and on a 风格. 添加 opens the adapter picker; each row has 强度 0 to 2 in steps of 0.05 (`shared/adapters.ts`), at most `ADAPTERS_PER_CANVAS_MAX` (16) per canvas. A row whose file is gone reads 找不到文件 and blocks 生成. LoRA files and import are in [models.md](/docs/reference/models.md).
 - At generation (`studio/nodes.ts` `generationCanvas`) a 画面's description is followed by each wired 风格's, joined with "，", and its LoRA list by theirs; a LoRA the 画面 already has keeps the 画面's strength. The result records what it was really made with in `generated` (`generatedSnapshot`), so 重新生成 reproduces it; `styleLoraNote` names the 风格 in a LoRA blocker (其中有风格「…」里的).
+- 在创作中试用 on a finished training ([training.md](/docs/reference/training.md#10-choosing-a-step-and-the-lora)) hands the Studio a `StudioTryRequest` through the store (`lib/studioTry.ts`, `takeStudioTryRequest`). `StudioPage.tsx` takes it once and calls `tryLoraOnBoard` (`studio/nodes.ts`): a 风格 named after the training that holds the trained LoRA at strength 1, and beside it a new 画面 wired to that 风格, with the training's first sample prompt as its description, the settings of the newest 画面 or result, and no LoRA of its own. The 画面 is selected and the board fits the view.
 - A 放大 (`CanvasUpscale`) is sized from its 原图 times `UPSCALE_SCALES` (1.5 or 2) within `MAX_DIMENSION` 2048 on the 16 px grid. 细节 sets the start strength: 贴近原图 0.25, 适中 0.4, 更多细节 0.55 (`UPSCALE_DETAIL`). Without a description it takes its 原图's, 风格 included, or `UPSCALE_FALLBACK_PROMPT`. It never adds a 高清修复 pass and has no regions or 风格 socket. The engine has no separate upscaler; this is the redraw 高清修复 does.
 
 ## 11. The assistant on the board

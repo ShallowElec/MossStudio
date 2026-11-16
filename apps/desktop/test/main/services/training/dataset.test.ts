@@ -104,4 +104,15 @@ describe('training dataset', () => {
     await expect(dataset.setCaption(project.id, '../project.json', 'x')).rejects.toMatchObject({ code: 'E_TRAINING_PICTURE' })
     await expect(dataset.removeFromDataset(project.id, ['..\\x.png'])).rejects.toMatchObject({ code: 'E_TRAINING_PICTURE' })
   })
+
+  it('gives a run descriptions that name the trigger, as a word of its own', async () => {
+    const { dataset } = await setup()
+    expect(dataset.mentionsTrigger('mira，坐着', 'mira')).toBe(true)
+    expect(dataset.mentionsTrigger('miranda stands', 'mira')).toBe(false)
+    expect(dataset.runCaption(null, 'person', 'mira')).toBe('mira')
+    expect(dataset.runCaption('坐在窗边', 'object', 'mug')).toBe('mug，坐在窗边')
+    expect(dataset.runCaption('miranda stands', 'person', 'mira')).toBe('mira，miranda stands')
+    expect(dataset.runCaption('一只猫', 'style', '')).toBe('一只猫')
+    expect(dataset.runCaption(null, 'style', '')).toBe('')
+  })
 })

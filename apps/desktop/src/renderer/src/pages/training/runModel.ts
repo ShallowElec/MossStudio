@@ -13,9 +13,19 @@ export interface RunProgress {
   loss: number | null
 }
 
-/** Where a running training is, from its job (metrics, progress, time left) and the training itself. */
-export function runProgress(training: Pick<TrainingProject, 'recipe' | 'stepReached'>, job: JobRecord | undefined): RunProgress {
+/** The pill of a training that is under way: preparing its pictures, or training. */
+export function runPill(state: TrainingProject['state']): string {
+  return state === 'starting' ? '准备中' : '训练中'
+}
+
+/**
+ * Where a training under way is, from its job (metrics, progress, time left)
+ * and the training itself. While `starting` (pictures prepared or uploaded,
+ * no job yet) there is nothing to count.
+ */
+export function runProgress(training: Pick<TrainingProject, 'recipe' | 'stepReached' | 'state'>, job: JobRecord | undefined): RunProgress {
   const total = job && job.progress.total > 0 ? job.progress.total : training.recipe.steps
+  if (training.state === 'starting') return { step: 0, total, percent: null, etaMs: null, text: '正在准备图片…', loss: null }
   const step = Math.max(job?.metrics?.step ?? job?.progress.current ?? 0, training.stepReached)
   const loss = typeof job?.metrics?.loss === 'number' && Number.isFinite(job.metrics.loss) ? job.metrics.loss : null
   const etaMs = job?.progress.etaMs && job.progress.etaMs > 0 ? job.progress.etaMs : null

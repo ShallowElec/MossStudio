@@ -23,6 +23,7 @@ const plan = (patch: Partial<TrainingCommandPlan> = {}): TrainingCommandPlan => 
   data: '/data/training/tp-1/images',
   outputDir: '/data/training/tp-1/runs',
   cacheDir: '/data/training/tp-1/cache',
+  configDir: '/data/training/tp-1/configs',
   runName: 'mug-ab12',
   recipe: recipe(),
   ...patch,
@@ -43,10 +44,20 @@ describe('training commands', () => {
     )
     expect(config.filter((arg, index) => config[index - 1] === '--prompt')).toEqual(recipe().samplePrompts)
     expect(config).not.toContain('--vram')
-    expect(steps[1]).toContain('configs/user/mug-ab12_data.py')
     expect(steps[1]).toContain('TARGET_AREA=1048576')
     expect(steps[1]).toContain('CACHE_DIR=/data/training/tp-1/cache')
-    expect(steps[3]).toContain('configs/user/mug-ab12.py')
+  })
+
+  it("writes both configs into the training's own folder and runs them by absolute path, whatever checkout the environment points at", () => {
+    const steps = trainingSteps(plan())
+    const config = steps[0]!
+    expect(config[config.indexOf('--out') + 1]).toBe('/data/training/tp-1/configs/mug-ab12.py')
+    for (const step of [steps[1]!, steps[2]!])
+      expect(step[step.indexOf('--config') + 1]).toBe('/data/training/tp-1/configs/mug-ab12_data.py')
+    expect(steps[3]![steps[3]!.indexOf('--config') + 1]).toBe('/data/training/tp-1/configs/mug-ab12.py')
+    expect(steps.flat().some((arg) => arg.includes('configs/user'))).toBe(false)
+    const windows = trainingSteps(plan({ shell: 'powershell', configDir: 'C:\\data\\training\\tp-1\\configs' }))
+    expect(windows[3]).toContain('C:\\data\\training\\tp-1\\configs\\mug-ab12.py')
   })
 
   it('samples and checkpoints every sampleEvery steps from step 0, and keeps every checkpoint', () => {
@@ -54,7 +65,7 @@ describe('training commands', () => {
       'OUTPUT_DIR=/data/training/tp-1/runs',
       'CACHE_DIR=/data/training/tp-1/cache',
       'TARGET_AREA=1048576',
-      'MICROBATCHES=1',
+      'GRAD_ACC=1',
       'DIM=16',
       'ALPHA=16',
       'LR=1e-4',
@@ -64,6 +75,28 @@ describe('training commands', () => {
       'SAMPLE_EVERY=250',
       'SAMPLE_AT_START=true',
     ])
+  })
+
+  it("loads the trainer's code from the version being run, ahead of any PYTHONPATH already set", () => {
+    const posix = trainingScript(plan()).split('\n')
+    const exportLine = `export PYTHONPATH='/data/trainer/versions/kohaku-abc1234/src'"\${PYTHONPATH:+:$PYTHONPATH}"`
+    expect(posix).toContain(exportLine)
+    expect(posix.indexOf(exportLine)).toBeLessThan(posix.findIndex((line) => line.includes('kohakumoss-config')))
+
+    const remote = trainingScript(plan({ shell: 'remote', versionDir: '/home/moss/t/versions/remote-ssh-gpu-abc1234', pidFile: '/p' }))
+    expect(remote).toContain(`export PYTHONPATH='/home/moss/t/versions/remote-ssh-gpu-abc1234/src'"\${PYTHONPATH:+:$PYTHONPATH}"`)
+
+    const windows = trainingScript(plan({ shell: 'powershell', versionDir: "C:\\Users\\o'neil\\trainer\\versions\\kohaku" })).split('\r\n')
+    const assign =
+      "$env:PYTHONPATH = 'C:\\Users\\o''neil\\trainer\\versions\\kohaku\\src' + $(if ($env:PYTHONPATH) { ';' + $env:PYTHONPATH } else { '' })"
+    expect(windows).toContain(assign)
+    expect(windows.indexOf(assign)).toBeLessThan(windows.findIndex((line) => line.startsWith('& ')))
+  })
+
+  it('makes 批大小 a real batch on one GPU by accumulating gradients, not the pipeline-only MICROBATCHES', () => {
+    const knobs = trainKnobs(plan({ recipe: recipe({ batch: 4 }) }))
+    expect(knobs).toContain('GRAD_ACC=4')
+    expect(knobs.some((knob) => knob.startsWith('MICROBATCHES='))).toBe(false)
   })
 
   it('leaves out knobs the recipe leaves to the algorithm, and checkpoints every 500 steps without samples', () => {
@@ -102,12 +135,22 @@ describe('training commands', () => {
       }),
     )
     const lines = script.split('\r\n')
-    expect(lines[0]).toBe("$ErrorActionPreference = 'Stop'")
-    expect(lines[1]).toBe("Set-Location -LiteralPath 'C:\\Users\\张三\\trainer\\versions\\kohaku'")
-    expect(lines[2]).toMatch(/^& 'C:\\Users\\张三\\trainer\\runtimes\\tr\\Scripts\\kohakumoss-config\.exe' 'new' 'train'/)
+    expect(lines[0]).toBe("Set-Location -LiteralPath 'C:\\Users\\张三\\trainer\\versions\\kohaku'")
+    expect(lines[1]).toBe('if (-not $?) { exit 1 }')
+    expect(lines[2]).toMatch(/^\$env:PYTHONPATH = /)
+    expect(lines[3]).toMatch(/^& 'C:\\Users\\张三\\trainer\\runtimes\\tr\\Scripts\\kohakumoss-config\.exe' 'new' 'train'/)
     expect(lines.filter((line) => line === 'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }')).toHaveLength(4)
     expect(script).toContain(`'--prompt' 'it''s a \\"mug\\"'`)
     expect(script.endsWith('exit 0\r\n')).toBe(true)
+  })
+
+  it("does not let PowerShell stop the run on the trainer's log lines to stderr", () => {
+    const script = trainingScript(plan({ shell: 'powershell' }))
+    expect(script).not.toMatch(/ErrorActionPreference\s*=\s*'Stop'/)
+    const lines = script.split('\r\n')
+    for (const [index, line] of lines.entries()) {
+      if (line.startsWith('& ')) expect(lines[index + 1]).toBe('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }')
+    }
   })
 
   it('escapes PowerShell arguments the way the C runtime reads them back', () => {

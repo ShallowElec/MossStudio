@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { curvePath, lossCurve, runProgress } from '@renderer/pages/training/runModel'
+import { curvePath, lossCurve, runPill, runProgress } from '@renderer/pages/training/runModel'
 import { trainingJobFixture, trainingProjectFixture } from '../../mocks/backend/training'
 
 const project = trainingProjectFixture({ state: 'running', jobId: 'job-tp-juzi' })
@@ -20,6 +20,21 @@ describe('run progress', () => {
     })
     expect(runProgress({ ...project, stepReached: 0 }, job)).toMatchObject({ percent: null, text: '排队中', total: 3000 })
     expect(runProgress({ ...project, stepReached: 0 }, undefined).text).toBe('正在启动…')
+  })
+})
+
+describe('a training that is starting', () => {
+  it('says the pictures are being prepared, with a moving bar and nothing counted', () => {
+    expect(runProgress({ ...project, state: 'starting', stepReached: 0 }, undefined)).toEqual({
+      step: 0,
+      total: 3000,
+      percent: null,
+      etaMs: null,
+      text: '正在准备图片…',
+      loss: null,
+    })
+    expect(runPill('starting')).toBe('准备中')
+    expect(runPill('running')).toBe('训练中')
   })
 })
 

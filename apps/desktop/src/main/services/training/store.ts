@@ -62,24 +62,34 @@ async function imageCount(id: string): Promise<number> {
 async function readProject(id: string): Promise<TrainingProject | null> {
   try {
     const project = JSON.parse(await readFile(projectFile(id), 'utf8')) as TrainingProject
-    return project.id === id ? { ...project, imageCount: await imageCount(id) } : null
+    // Written before saveErrorStep existed.
+    return project.id === id ? { ...project, saveErrorStep: project.saveErrorStep ?? null, imageCount: await imageCount(id) } : null
   } catch {
     return null
   }
 }
 
-const queues = new Map<string, Promise<unknown>>()
+/** A queue per key: each task starts after the key's earlier tasks have finished, failed or not. */
+export function keyedQueue(): <T>(key: string, task: () => Promise<T>) => Promise<T> {
+  const queues = new Map<string, Promise<unknown>>()
+  return <T>(key: string, task: () => Promise<T>): Promise<T> => {
+    const previous = queues.get(key) ?? Promise.resolve()
+    const next = previous.catch(() => undefined).then(task)
+    const settled = next.catch(() => undefined)
+    queues.set(key, settled)
+    void settled.then(() => {
+      if (queues.get(key) === settled) queues.delete(key)
+    })
+    return next
+  }
+}
 
-/** Runs `task` after every earlier write of this project has finished. */
-function serial<T>(id: string, task: () => Promise<T>): Promise<T> {
-  const previous = queues.get(id) ?? Promise.resolve()
-  const next = previous.catch(() => undefined).then(task)
-  const settled = next.catch(() => undefined)
-  queues.set(id, settled)
-  void settled.then(() => {
-    if (queues.get(id) === settled) queues.delete(id)
-  })
-  return next
+/** One queue for everything that writes a project: its project.json, pictures and descriptions. */
+const serial = keyedQueue()
+
+/** A run is being started or is going: settings, pictures and descriptions stay as they are. */
+export function isBusy(project: Pick<TrainingProject, 'state'>): boolean {
+  return project.state === 'starting' || project.state === 'running'
 }
 
 async function writeProject(project: TrainingProject): Promise<void> {
@@ -93,10 +103,23 @@ export async function getTrainingProject(id: string): Promise<TrainingProject> {
   return project
 }
 
+const NOT_EDITABLE = '训练正在开始或进行，图片和描述先不能改。'
+
 /** Pictures and descriptions change only while no run reads them. */
 export async function assertDatasetEditable(id: string): Promise<void> {
-  const project = await getTrainingProject(id)
-  if (project.state === 'running') throw codedError('E_TRAINING_RUNNING', '训练进行时不能改图片和描述。')
+  if (isBusy(await getTrainingProject(id))) throw codedError('E_TRAINING_RUNNING', NOT_EDITABLE)
+}
+
+/**
+ * Runs a change to the pictures or descriptions in the project's write queue, after checking
+ * that no run is starting: a start marks the training `starting` through the same queue, so a
+ * change either lands before it or is refused.
+ */
+export function whileEditable<T>(id: string, task: () => Promise<T>): Promise<T> {
+  return serial(id, async () => {
+    await assertDatasetEditable(id)
+    return task()
+  })
 }
 
 export async function listTrainingProjects(): Promise<TrainingProject[]> {
@@ -148,6 +171,7 @@ export async function createTrainingProject(input: { kind: TrainingKind; hostId?
     chosenStep: null,
     adapterId: null,
     saveError: null,
+    saveErrorStep: null,
     failure: null,
     cover: null,
     imageCount: 0,
@@ -209,6 +233,7 @@ export function applyTrainingPatch(project: TrainingProject, patch: TrainingPatc
 
 export function updateTrainingProject(id: string, patch: TrainingPatch): Promise<TrainingProject> {
   return mutateTrainingProject(id, (project) => {
+    if (isBusy(project)) throw codedError('E_TRAINING_RUNNING', '训练正在开始或进行，设置先不能改。')
     if (project.state !== 'draft') {
       throw codedError('E_TRAINING_NOT_DRAFT', '这个训练已经开始过，设置不能再改。可以复制一份再改。')
     }
@@ -219,7 +244,7 @@ export function updateTrainingProject(id: string, patch: TrainingPatch): Promise
 export async function removeTrainingProject(id: string): Promise<void> {
   await serial(id, async () => {
     const project = await readProject(id)
-    if (project?.state === 'running') throw codedError('E_TRAINING_RUNNING', '训练还在进行。先停止它，再删除。')
+    if (project && isBusy(project)) throw codedError('E_TRAINING_RUNNING', '训练正在开始或进行。等它开始后先停止，再删除。')
     await rm(projectDir(id), { recursive: true, force: true, maxRetries: 3 })
   })
 }
@@ -243,6 +268,7 @@ export async function duplicateTrainingProject(id: string): Promise<TrainingProj
     chosenStep: null,
     adapterId: null,
     saveError: null,
+    saveErrorStep: null,
     failure: null,
     cover: null,
   }

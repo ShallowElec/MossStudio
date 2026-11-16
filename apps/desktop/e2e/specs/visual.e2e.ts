@@ -108,6 +108,14 @@ async function seedPreparing(page: Page): Promise<void> {
   })
 }
 
+/** A training whose pictures are still being prepared: no job yet. */
+async function seedStarting(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const training = window.__mock.state.training
+    training.projects = training.projects.map((project) => (project.id === 'tp-aming' ? { ...project, state: 'starting' } : project))
+  })
+}
+
 async function seedRemote(page: Page): Promise<void> {
   await page.evaluate(() => {
     window.__mock.state.hosts = [window.__mock.fixtures.sshHostFixture()]
@@ -236,6 +244,7 @@ const STOPS: Stop[] = [
       await page.getByRole('group', { name: '图片显示方式' }).getByRole('button', { name: '列表' }).click()
     },
   },
+  { page: 'training', state: 'starting', open: { scenario: 'trainings', route: '/training/tp-aming' }, seed: seedStarting },
   { page: 'training', state: 'running', open: { scenario: 'trainings', route: '/training/tp-juzi' } },
   { page: 'training', state: 'done', open: { scenario: 'trainings', route: '/training/tp-watercolor' } },
   { page: 'training', state: 'failed', open: { scenario: 'trainings', route: '/training/tp-film' } },

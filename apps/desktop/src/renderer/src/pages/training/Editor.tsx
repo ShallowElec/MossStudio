@@ -60,6 +60,8 @@ export function Editor({
   sshHosts,
   onSaved,
   onBack,
+  startProblem,
+  onStartProblem,
 }: {
   initial: TrainingProject
   readiness: TrainingReadiness | null | undefined
@@ -67,6 +69,9 @@ export function Editor({
   sshHosts: ManagedHost[]
   onSaved: (project: TrainingProject) => void
   onBack: () => void
+  /** Why the last 开始训练 failed. It is kept by the page: while starting, this editor is not on screen. */
+  startProblem: string | null
+  onStartProblem: (problem: string | null) => void
 }): React.JSX.Element {
   const toast = useToast()
   const [project, setProject] = useState(initial)
@@ -77,24 +82,29 @@ export function Editor({
   const [providers, setProviders] = useState<AiProviderInfo[] | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [starting, setStarting] = useState(false)
-  const [problem, setProblem] = useState<string | null>(null)
+  const [problem, setProblem] = useState<string | null>(startProblem)
   const [dragging, setDragging] = useState(false)
   const pending = useRef<DraftPatch>({})
   const timer = useRef<number | null>(null)
   const latest = useRef(project)
   latest.current = project
 
-  const flush = useCallback(async (): Promise<void> => {
+  /** Save what is waiting; false when the save failed (the changes stay waiting for the next try). */
+  const flush = useCallback(async (): Promise<boolean> => {
     if (timer.current !== null) window.clearTimeout(timer.current)
     timer.current = null
     const patch = acceptable(pending.current)
     pending.current = {}
-    if (!Object.keys(patch).length) return
+    if (!Object.keys(patch).length) return true
     try {
       const saved = await call<TrainingProject>(Ipc.trainingUpdate, { id: initial.id, patch })
       onSaved(saved)
+      return true
     } catch (error) {
+      // Edits made meanwhile are newer than the ones that failed.
+      pending.current = { ...patch, ...pending.current }
       toast.push(`没有保存：${errorText(error)}`, 'error')
+      return false
     }
   }, [initial.id, onSaved, toast])
 
@@ -106,6 +116,7 @@ export function Editor({
     setProject((previous) => ({ ...previous, ...patch }))
     pending.current = { ...pending.current, ...patch }
     setProblem(null)
+    onStartProblem(null)
     if (timer.current !== null) window.clearTimeout(timer.current)
     timer.current = window.setTimeout(() => void flush(), AUTOSAVE_MS)
   }
@@ -182,15 +193,26 @@ export function Editor({
     }
   }
 
+  /**
+   * The start shows as `starting` (an event) long before this call answers, so the run
+   * view replaces the editor meanwhile; a failure brings the draft back, and the page
+   * hands the reason to the editor that shows it then.
+   */
   async function start(): Promise<void> {
     setStarting(true)
     setProblem(null)
+    onStartProblem(null)
     try {
-      await flush()
+      // The run uses the settings on disk, so it never starts with ones that did not save.
+      if (!(await flush())) {
+        setProblem('设置没有保存，所以没有开始训练。请再试一次。')
+        return
+      }
       const started = await call<TrainingProject>(Ipc.trainingStart, { id: initial.id })
       onSaved(started)
     } catch (error) {
       setProblem(errorText(error))
+      onStartProblem(errorText(error))
     } finally {
       setStarting(false)
     }

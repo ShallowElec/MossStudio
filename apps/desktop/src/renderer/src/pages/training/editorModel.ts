@@ -70,17 +70,16 @@ export function withRecipe(project: TrainingProject, patch: Partial<TrainingReci
   return { recipe, length: lengthOf(project.kind, recipe, project.trigger) }
 }
 
-/** The trigger word changed: sample descriptions that used the old one use the new one. */
+/**
+ * The trigger word changed. Sample descriptions follow it only while they are
+ * still this kind's defaults (where the trigger stands as a word of its own);
+ * descriptions the person wrote are theirs and stay as written.
+ */
 export function withTrigger(project: TrainingProject, trigger: string): DraftPatch {
-  const before = project.trigger.trim()
-  const after = trigger.trim()
-  const prompts =
-    before && after && before !== after
-      ? project.recipe.samplePrompts.map((prompt) => prompt.split(before).join(after))
-      : !before && after && project.kind !== 'style'
-        ? defaultSamplePrompts(project.kind, after)
-        : project.recipe.samplePrompts
-  return { trigger, recipe: { ...project.recipe, samplePrompts: prompts } }
+  const prompts = project.recipe.samplePrompts
+  const defaults = defaultSamplePrompts(project.kind, project.trigger)
+  const untouched = prompts.length === defaults.length && prompts.every((prompt, index) => prompt === defaults[index])
+  return untouched ? { trigger, recipe: { ...project.recipe, samplePrompts: defaultSamplePrompts(project.kind, trigger) } } : { trigger }
 }
 
 export type PictureFilter = 'all' | 'small' | 'duplicate' | 'noCaption'

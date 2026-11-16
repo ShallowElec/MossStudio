@@ -3,6 +3,7 @@ status: proposed
 date: 2026-11-08
 supersedes: ADR-0008
 amends: ADR-0007
+amended-by: ADR-0015
 ---
 
 # ADR-0011: Rail navigation and the node board replace the dock layout

@@ -189,7 +189,7 @@ export function RecipeFields({
           onCommit={(text) => onRecipe({ lr: text.trim() || null })}
         />
         {intField('steps', '步数', recipe, onRecipe)}
-        {intField('batch', '批大小', recipe, onRecipe)}
+        {intField('batch', '梯度累积', recipe, onRecipe)}
         {intField('resolution', '分辨率', recipe, onRecipe)}
         <div className="flex min-w-0 flex-col gap-1">
           <FieldLabel>显存</FieldLabel>

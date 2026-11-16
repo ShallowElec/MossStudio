@@ -72,6 +72,18 @@ describe('editing a draft', () => {
     expect(patch.trigger).toBe('orange')
     expect(patch.recipe!.samplePrompts.every((prompt) => prompt.includes('orange') && !prompt.includes('juzi'))).toBe(true)
   })
+
+  it('leaves sample descriptions the person wrote alone, even where the old trigger is part of a word', () => {
+    const custom = { ...person, trigger: 'a', recipe: { ...person.recipe, samplePrompts: ['a cat and a hat', 'a 在雪地里'] } }
+    const patch = withTrigger(custom, 'al')
+    expect(patch).toEqual({ trigger: 'al' })
+  })
+
+  it('follows the trigger through an empty field while the descriptions are still the defaults', () => {
+    const cleared = { ...person, ...withTrigger(person, '') } as typeof person
+    const retyped = withTrigger(cleared, 'mimi')
+    expect(retyped.recipe!.samplePrompts).toEqual(presetRecipe('person', 'standard', { samples: true, trigger: 'mimi' }).samplePrompts)
+  })
 })
 
 describe('picture problems', () => {

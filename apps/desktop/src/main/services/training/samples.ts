@@ -62,7 +62,10 @@ async function sampleColumns(runDir: string): Promise<TrainingSampleColumn[]> {
   const columns: TrainingSampleColumn[] = []
   for (const step of await stepsIn(join(runDir, 'samples'))) {
     const folder = join(runDir, 'samples', stepFolder(step))
-    const images = (await readdir(folder).catch(() => [] as string[]))
+    const names = await readdir(folder).catch(() => [] as string[])
+    // The trainer writes settings.json after the pictures: without it they may still be half written.
+    if (!names.includes('settings.json')) continue
+    const images = names
       .filter((name) => SAMPLE_FILE.test(name))
       .sort()
       .map((name) => join(folder, name))

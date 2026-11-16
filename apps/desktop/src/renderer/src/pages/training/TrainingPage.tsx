@@ -68,15 +68,11 @@ export function TrainingPage(): React.JSX.Element {
     }
   }
 
-  const place = placeOf(host.hostId, host.sshHosts, readiness)
-
   if (id) {
     return (
       <ProjectScreen
         key={id}
         id={id}
-        readiness={readiness}
-        place={place}
         sshHosts={host.sshHosts}
         onBack={() => void navigate('/training')}
         onChanged={upsert}
@@ -120,10 +116,9 @@ export function TrainingPage(): React.JSX.Element {
   )
 }
 
+/** One training, on its own computer: 位置 and readiness follow `project.hostId`, not the selected location. */
 function ProjectScreen({
   id,
-  readiness,
-  place,
   sshHosts,
   onBack,
   onChanged,
@@ -131,8 +126,6 @@ function ProjectScreen({
   onRemoved,
 }: {
   id: string
-  readiness: TrainingReadiness | null | undefined
-  place: string
   sshHosts: ManagedHost[]
   onBack: () => void
   onChanged: (project: TrainingProject) => void
@@ -140,6 +133,10 @@ function ProjectScreen({
   onRemoved: (id: string) => void
 }): React.JSX.Element {
   const [project, setProject] = useState<TrainingProject | null | undefined>(undefined)
+  const [startProblem, setStartProblem] = useState<string | null>(null)
+  const hostId = project?.hostId ?? null
+  const { readiness } = useReadiness(hostId)
+  const place = hostId ? placeOf(hostId, sshHosts, readiness) : ''
 
   useEffect(() => {
     let canceled = false
@@ -166,8 +163,10 @@ function ProjectScreen({
   const changed = useCallback(
     (next: TrainingProject) => {
       onChanged(next)
-      // The editor keeps its own copy while it is a draft; a state change (开始训练) moves on.
-      setProject((previous) => (previous && previous.state === 'draft' && next.state === 'draft' ? previous : next))
+      // The editor keeps its own copy while it is a draft (only the location is followed here); a state change (开始训练) moves on.
+      setProject((previous) =>
+        previous && previous.state === 'draft' && next.state === 'draft' ? { ...previous, hostId: next.hostId } : next,
+      )
     },
     [onChanged],
   )
@@ -196,6 +195,8 @@ function ProjectScreen({
         sshHosts={sshHosts}
         onSaved={changed}
         onBack={onBack}
+        startProblem={startProblem}
+        onStartProblem={setStartProblem}
       />
     )
   if (view === 'running') return <RunningView project={project} place={place} onBack={onBack} onChanged={changed} />

@@ -115,6 +115,19 @@ export async function prepareModelBundle(binding: ModelBinding, settings: Settin
  * manifest and file sizes match. A path two parts share is taken from the first.
  */
 async function materializeBundle(bundleId: string, ids: string[], settings: Settings): Promise<string> {
+  return (await bundleFolder(bundleId, ids, settings, true)).path
+}
+
+/**
+ * Where prepareModelBundle puts (or has put) this binding's folder, without writing anything:
+ * the matching folder when there is one, else the one it would create.
+ */
+export async function plannedBundleFolder(binding: ModelBinding, settings: Settings): Promise<string> {
+  const bundle = await validateBinding(binding, settings)
+  return (await bundleFolder(binding.bundleId, [binding.dit, binding.textEncoder, binding.vae, bundle.support], settings, false)).path
+}
+
+async function bundleFolder(bundleId: string, ids: string[], settings: Settings, create: boolean): Promise<{ path: string }> {
   const components = await Promise.all(ids.map((id) => componentSnapshot(id, settings)))
   const manifest = {
     version: 1,
@@ -159,11 +172,12 @@ async function materializeBundle(bundleId: string, ids: string[], settings: Sett
           Boolean,
         )
       )
-        return candidate
+        return { path: candidate }
     } catch {
       /* Ignore incomplete or damaged materializations. */
     }
   }
+  if (!create) return { path: target }
   if (candidates.includes(key)) target = join(root, `${key}-${randomUUID().slice(0, 8)}`)
   await mkdir(root, { recursive: true })
   const staging = join(root, `${key}.tmp-${randomUUID()}`)
@@ -180,7 +194,7 @@ async function materializeBundle(bundleId: string, ids: string[], settings: Sett
       if ((await readFile(join(target, 'clover_model.json'), 'utf8')) !== text) throw error
       for (const file of expected) if ((await fileSize(safePath(target, file.path))) !== (await fileSize(file.source))) throw error
     }
-    return target
+    return { path: target }
   } finally {
     await rm(staging, { recursive: true, force: true })
   }
