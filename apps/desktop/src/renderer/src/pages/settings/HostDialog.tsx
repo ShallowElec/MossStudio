@@ -5,7 +5,7 @@ import type { SshAuthMethod } from '@shared/types'
 import { call } from '../../lib/api'
 import { Advanced, Button, Field, FieldLabel, IconButton, Input, Modal, Segmented, Spinner, Switch, useToast } from '../../components/ui'
 import { errorText } from './fields'
-import { validateHostForm, type HostForm, type HostFormErrors } from './hostForm'
+import { parseSshCommand, validateHostForm, type HostForm, type HostFormErrors } from './hostForm'
 
 function FieldError({ message }: { message?: string }): React.JSX.Element | null {
   return message ? (
@@ -46,6 +46,15 @@ export function HostDialog({
   function set<K extends keyof HostForm>(key: K, value: HostForm[K]): void {
     setForm((current) => ({ ...current, [key]: value }))
     if (errors[key]) setErrors((current) => ({ ...current, [key]: undefined }))
+  }
+
+  /** A login command pasted or typed into 地址 fills 地址, 端口, 用户名 and the key. */
+  function fillFromSshCommand(text: string): boolean {
+    const parsed = parseSshCommand(text)
+    if (!parsed) return false
+    setForm((current) => ({ ...current, ...parsed }))
+    setErrors((current) => ({ ...current, host: undefined, port: undefined, user: undefined }))
+    return true
   }
 
   async function submit(): Promise<void> {
@@ -97,9 +106,13 @@ export function HostDialog({
             <Input
               data-dialog-initial-focus
               value={form.host}
-              placeholder="192.168.1.20 或 gpu.example.com"
+              placeholder="192.168.1.20、gpu.example.com 或 ssh 登录命令"
               aria-invalid={Boolean(errors.host) || undefined}
               onChange={(event) => set('host', event.target.value)}
+              onPaste={(event) => {
+                if (fillFromSshCommand(event.clipboardData.getData('text'))) event.preventDefault()
+              }}
+              onBlur={() => fillFromSshCommand(form.host)}
             />
             <FieldError message={errors.host} />
           </Field>

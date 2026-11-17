@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { emptyHostForm, hostFormFrom, hostPathsPatch, hostSavePayload, validateHostForm } from '@renderer/pages/settings/hostForm'
+import {
+  emptyHostForm,
+  hostFormFrom,
+  hostPathsPatch,
+  hostSavePayload,
+  parseSshCommand,
+  validateHostForm,
+} from '@renderer/pages/settings/hostForm'
 import { sshHostFixture } from '@test/mocks/backend/fixtures'
 
 describe('host form', () => {
@@ -75,6 +82,44 @@ describe('host form', () => {
       id: 'id',
       engineRoot: '/opt/e',
       outputRoot: undefined,
+    })
+  })
+
+  describe('pasting an SSH command', () => {
+    it('reads the port and user from a rental site login command', () => {
+      expect(parseSshCommand('ssh -p 41234 root@connect.westb.example.com')).toEqual({
+        host: 'connect.westb.example.com',
+        user: 'root',
+        port: '41234',
+      })
+      expect(parseSshCommand('  ssh -p41234 root@10.0.0.5  ')).toEqual({ host: '10.0.0.5', user: 'root', port: '41234' })
+    })
+
+    it('reads the key, -l and -o options and skips flags without a value', () => {
+      expect(parseSshCommand('ssh -A -i "C:\\Users\\me\\.ssh\\id ed" -o Port=2200 -l ubuntu gpu.example.com nvidia-smi')).toEqual({
+        host: 'gpu.example.com',
+        user: 'ubuntu',
+        port: '2200',
+        identityFile: 'C:\\Users\\me\\.ssh\\id ed',
+        authMethod: 'identityFile',
+      })
+      expect(parseSshCommand('ssh -o StrictHostKeyChecking=no -o User=moss host.test')).toEqual({ host: 'host.test', user: 'moss' })
+    })
+
+    it('reads ssh:// URLs, user@host:port and bracketed IPv6', () => {
+      expect(parseSshCommand('ssh://root@host.test:2222')).toEqual({ host: 'host.test', user: 'root', port: '2222' })
+      expect(parseSshCommand('root@host.test:2222')).toEqual({ host: 'host.test', user: 'root', port: '2222' })
+      expect(parseSshCommand('ssh root@[2001:db8::1]:2222')).toEqual({ host: '2001:db8::1', user: 'root', port: '2222' })
+      expect(parseSshCommand('ssh root@2001:db8::1')).toEqual({ host: '2001:db8::1', user: 'root' })
+    })
+
+    it('leaves a plain address, a half-typed command and other text alone', () => {
+      expect(parseSshCommand('gpu.example.com')).toBeNull()
+      expect(parseSshCommand('192.168.1.20')).toBeNull()
+      expect(parseSshCommand('ssh -p 22')).toBeNull()
+      expect(parseSshCommand('ssh')).toBeNull()
+      expect(parseSshCommand('copy this: root@host')).toBeNull()
+      expect(parseSshCommand('root@host:abc')).toBeNull()
     })
   })
 })

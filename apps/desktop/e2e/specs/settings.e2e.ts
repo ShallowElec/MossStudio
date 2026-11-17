@@ -114,6 +114,43 @@ describe('settings', () => {
     await expect.poll(() => page.getByText('Linux GPU').count()).toBe(0)
   })
 
+  it('a pasted or typed ssh login command fills 地址, 端口 and 用户名', async () => {
+    const page = await app.open({ scenario: 'remoteHost', route: '/settings/devices', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.settings = { ...window.__mock.state.settings, remoteHostsEnabled: true }
+    })
+    await app.start()
+    await page.getByRole('button', { name: /添加 SSH 主机/ }).click()
+    const dialog = page.getByRole('dialog', { name: '添加 SSH 主机' })
+    const address = dialog.getByLabel('地址', { exact: true })
+    const port = dialog.getByLabel('端口', { exact: true })
+    const user = dialog.getByLabel('用户名', { exact: true })
+    await address.focus()
+    await page.evaluate(() => {
+      const data = new DataTransfer()
+      data.setData('text/plain', 'ssh -p 41234 root@connect.example.test')
+      document.activeElement!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+    })
+    await expect.poll(() => address.inputValue()).toBe('connect.example.test')
+    expect(await port.inputValue()).toBe('41234')
+    expect(await user.inputValue()).toBe('root')
+
+    // Typed whole, it is split when the field is left; a plain address stays as typed.
+    await address.fill('ssh -p 2200 moss@gpu.example.test')
+    await port.focus()
+    await expect.poll(() => address.inputValue()).toBe('gpu.example.test')
+    expect(await port.inputValue()).toBe('2200')
+    expect(await user.inputValue()).toBe('moss')
+    await address.fill('gpu.lan')
+    await user.focus()
+    expect(await address.inputValue()).toBe('gpu.lan')
+
+    await dialog.getByRole('button', { name: '保存并测试' }).click()
+    await expect
+      .poll(() => app.calls<{ host?: string }>('hosts:save').then((calls) => calls.at(-1)))
+      .toMatchObject({ host: 'gpu.lan', user: 'moss', port: 2200 })
+  })
+
   it('局域网访问 shows its address only when on', async () => {
     const page = await app.open({ route: '/settings/features', theme: 'light' })
     expect(await page.getByRole('heading', { name: '局域网访问' }).count()).toBe(0)

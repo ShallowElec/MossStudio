@@ -104,6 +104,69 @@ export function validateHostForm(form: HostForm): HostFormErrors {
   return errors
 }
 
+/** OpenSSH options that take a value, so their value is not mistaken for the destination. */
+const SSH_VALUE_OPTIONS = new Set('BbcDEeFIiJLlmOopQRSWw'.split(''))
+
+function shellWords(text: string): string[] {
+  const words: string[] = []
+  for (const match of text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) words.push(match[1] ?? match[2] ?? match[3] ?? '')
+  return words
+}
+
+type SshLogin = Partial<Pick<HostForm, 'host' | 'user' | 'port' | 'identityFile' | 'authMethod'>>
+
+/** `[ssh://][user@]host[:port]`; a bare IPv6 address keeps its colons. */
+function destination(text: string): SshLogin | null {
+  const rest = text.replace(/^ssh:\/\//i, '').replace(/\/$/, '')
+  const at = rest.lastIndexOf('@')
+  let host = rest.slice(at + 1)
+  let port: string | undefined
+  const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(host)
+  if (bracketed) [, host = '', port] = bracketed
+  else if (host.split(':').length === 2) {
+    ;[host = '', port] = host.split(':')
+    if (!/^\d+$/.test(port ?? '')) return null
+  }
+  if (!host || /[\s/@]/.test(host)) return null
+  return { host, ...(at > 0 ? { user: rest.slice(0, at) } : {}), ...(port ? { port } : {}) }
+}
+
+/**
+ * Host, user, port and key from what a GPU rental site gives to copy, such as
+ * `ssh -p 41234 root@connect.example.com`, `ssh://root@host:41234` or `root@host`. Null when the
+ * text is a plain address, so typing one is left alone.
+ */
+export function parseSshCommand(text: string): SshLogin | null {
+  const words = shellWords(text.trim())
+  const [first = ''] = words
+  if (!/(^|[\\/])ssh(\.exe)?$/i.test(first)) {
+    return words.length === 1 && (/^ssh:\/\//i.test(first) || first.includes('@')) ? destination(first) : null
+  }
+  const options: SshLogin = {}
+  let target: string | undefined
+  for (let index = 1; index < words.length && target === undefined; index++) {
+    const word = words[index]!
+    if (!word.startsWith('-') || word === '-') {
+      target = word
+      continue
+    }
+    const at = [...word.slice(1)].findIndex((flag) => SSH_VALUE_OPTIONS.has(flag)) + 1
+    if (at === 0) continue
+    const flag = word[at]
+    const value = word.slice(at + 1) || words[++index] || ''
+    const [key = '', ...rest] = flag === 'o' ? value.split(/[=\s]/) : [flag ?? '', value]
+    const option = rest.join('=').trim()
+    if (/^(p|port)$/i.test(key)) options.port = option
+    else if (/^(l|user)$/i.test(key)) options.user = option
+    else if (/^(i|identityfile)$/i.test(key)) options.identityFile = option
+  }
+  const found = target === undefined ? null : destination(target)
+  if (!found) return null
+  const login = { ...options, ...found }
+  if (login.port !== undefined && !/^\d+$/.test(login.port)) delete login.port
+  return login.identityFile ? { ...login, authMethod: 'identityFile' } : login
+}
+
 /** The `Ipc.hostsSave` payload. Paths the save call does not take go through `hostPathsPatch`. */
 export function hostSavePayload(form: HostForm): Record<string, unknown> {
   const host = form.host.trim()
