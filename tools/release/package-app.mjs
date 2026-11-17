@@ -19,7 +19,7 @@ import { packager } from '@electron/packager'
 import { DESKTOP_DIR, DIST_DIR, hostPlatform, main, readJson, REPO_ROOT, run } from './lib/cli.mjs'
 import { signApp } from './lib/signing.mjs'
 import { walkTree } from './lib/tree.mjs'
-import { isVersion, splitPlatform } from './lib/version.mjs'
+import { isVersion, splitPlatform, windowsVersion } from './lib/version.mjs'
 
 const BUNDLE_ID = 'com.cloveriris.mossstudio'
 const ICON_PNG = join(DESKTOP_DIR, 'src', 'renderer', 'public', 'mossstudio-icon.png')
@@ -112,6 +112,12 @@ function writeAppPackage(source, desktop, version) {
   writeFileSync(join(source, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`)
 }
 
+function restoreAppVersion(buildPath, version) {
+  const file = join(buildPath, 'package.json')
+  const pkg = JSON.parse(readFileSync(file, 'utf8'))
+  writeFileSync(file, `${JSON.stringify({ ...pkg, version }, null, 2)}\n`)
+}
+
 /** macOS icon: the checked-in .icns if there is one, else generated from the PNG with sips + iconutil. */
 function macIcon(tempDir) {
   if (existsSync(ICON_ICNS)) return ICON_ICNS
@@ -152,8 +158,12 @@ async function packageApp({ platform, versions, out }) {
         platform: os,
         arch,
         electronVersion,
-        appVersion: version,
-        buildVersion: version,
+        // Windows version resources take only up to four numbers, so a nightly's exe gets 2.0.1.0. Packager
+        // also writes appVersion into the app's package.json, which app.getVersion() and the updater read,
+        // so beforeAsar puts the full version back.
+        appVersion: os === 'win32' ? windowsVersion(version) : version,
+        buildVersion: os === 'win32' ? windowsVersion(version) : version,
+        beforeAsar: os === 'win32' ? [({ buildPath }) => restoreAppVersion(buildPath, version)] : undefined,
         appBundleId: BUNDLE_ID,
         appCategoryType: 'public.app-category.graphics-design',
         appCopyright: `Copyright © ${new Date().getFullYear()} CloverIris`,

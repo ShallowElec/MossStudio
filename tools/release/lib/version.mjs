@@ -17,6 +17,12 @@ export function isPrerelease(value) {
   return parseVersion(value).pre.length > 0
 }
 
+/** Windows executable resources accept only numeric versions, unlike package and update versions. */
+export function windowsVersion(value) {
+  const { major, minor, patch } = parseVersion(value)
+  return `${major}.${minor}.${patch}.0`
+}
+
 /** Semver 2.0 precedence: <0, 0, >0. */
 export function compareVersions(a, b) {
   const x = parseVersion(a)

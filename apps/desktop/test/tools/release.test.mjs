@@ -46,6 +46,7 @@ import {
   portableMarker,
   releaseAssetUrl,
   staleNightlyPackages,
+  windowsVersion,
 } from '../../../../tools/release/lib/version.mjs'
 import { asarPackageJson, readSetupTar, readTar, TRAILER_SIZE } from '../../../../tools/release/lib/inspect.mjs'
 import {
@@ -81,6 +82,12 @@ describe('versions and names', () => {
     expect(compareVersions('1.2.3', '1.2.3')).toBe(0)
     expect(isPrerelease('2.0.0-beta.1')).toBe(true)
     expect(bumpPatch('1.0.3', 2)).toBe('1.0.5')
+  })
+
+  it('uses numeric Windows executable versions for prereleases without changing package versions', () => {
+    expect(windowsVersion('2.0.0-nightly.20261115.13')).toBe('2.0.0.0')
+    expect(windowsVersion('1.2.3-beta.1')).toBe('1.2.3.0')
+    expect(windowsVersion('1.2.3')).toBe('1.2.3.0')
   })
 
   it('names every artifact per platform and round-trips delta names', () => {
