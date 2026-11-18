@@ -173,6 +173,34 @@ describe('拆成区域', () => {
   })
 })
 
+describe('解析', () => {
+  const app = useApp()
+
+  it('reads a board picture from the top bar and turns it into a 画面', async () => {
+    const page = await openBoard(app)
+    await page.locator('[data-gbc-toggle]').click()
+    const panel = page.locator('[data-gbc-panel]')
+    await panel.waitFor()
+    await panel.getByLabel('从画板选择').selectOption('img-1')
+    await panel.locator('[data-gbc-run]').click()
+    await expect.poll(() => panel.locator('#gbc-caption').inputValue()).toBe('一只橘猫睡在窗台上')
+    await app.screenshot('gbc-parse-panel-light')
+
+    await panel.getByRole('button', { name: '变成画面' }).click()
+    await expect.poll(async () => (await cardIds(page)).length).toBe(3)
+    const created = (await cardIds(page)).find((id) => id !== 'img-1' && id !== 'canvas-1')!
+    const canvas = await saved(page, created)
+    expect(canvas?.title).toBe('小猫照片')
+    expect(canvas?.layers).toHaveLength(2)
+    expect(JSON.stringify(canvas)).toContain('午后的窗台')
+  })
+
+  it('is not offered while 看图拆区域 is off', async () => {
+    const page = await openBoard(app, { settings: { gbcEnabled: false } })
+    expect(await page.locator('[data-gbc-toggle]').count()).toBe(0)
+  })
+})
+
 describe('设置 › 功能 › 看图拆区域', () => {
   const app = useApp()
 

@@ -6,7 +6,7 @@
  */
 import releaseCatalog from '../../../resources/models.json'
 import type { AiConversationInfo, AiProviderInfo } from '@shared/ai'
-import type { GbcParseResult, GbcStatus } from '@shared/gbc'
+import type { GbcParseResult, GbcPicture, GbcStatus } from '@shared/gbc'
 import type { UpdateAnnouncement, UpdaterState } from '@shared/update'
 import type {
   AdapterEntry,
@@ -698,6 +698,11 @@ export function gbcParseFixture(): GbcParseResult {
       { caption: '窗外的晴天', bbox: { x: 0.5, y: 0.08, w: 0.42, h: 0.4 } },
     ],
   }
+}
+
+export function gbcPictureFixture(): GbcPicture {
+  const parsed = gbcParseFixture()
+  return { ...parsed, short: '一只橘猫睡在窗台上' }
 }
 
 export function conversationFixture(patch: Partial<AiConversationInfo> = {}): AiConversationInfo {

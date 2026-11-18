@@ -53,6 +53,7 @@ import {
   controlAdapterFixture,
   localHostFixture,
   downloadFixture,
+  gbcPictureFixture,
   gbcStatusFixture,
   gbcVersionFixture,
   jobLifecycle,
@@ -876,6 +877,17 @@ function defaultHandlers(): Map<string, Handler> {
     return state.gbc.parse
   })
   h.set(Ipc.gbcCancel, () => true)
+  h.set(Ipc.gbcJobStart, (payload, { state, emit }) => {
+    const { files } = p<{ files?: string[] }>(payload)
+    const paths = files?.length ? files : ['/fixture/projects/project-1/assets/cat-1600x1200.png']
+    const pictures = paths.map((path, index) => ({ path, key: `k${index}`, picture: gbcPictureFixture() }))
+    const snapshot = { jobId: 'gbc-job-1', phase: 'done' as const, total: paths.length, done: paths.length, pictures, warnings: [] }
+    state.gbc.job = snapshot
+    emit(Events.gbcJob, snapshot)
+    return { jobId: snapshot.jobId, total: paths.length }
+  })
+  h.set(Ipc.gbcJobSnapshot, (_, { state }) => state.gbc.job)
+  h.set(Ipc.gbcJobCancel, () => ({ canceled: true }))
 
   // AI
   h.set(Ipc.aiProvidersList, (_, { state }) => state.aiProviders)

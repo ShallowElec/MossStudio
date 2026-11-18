@@ -6,7 +6,7 @@
  */
 import type { MangaSeries } from '@shared/manga/model'
 import type { AiConversationInfo, AiProviderInfo } from '@shared/ai'
-import type { GbcParseResult, GbcStatus } from '@shared/gbc'
+import type { GbcJobSnapshot, GbcParseResult, GbcStatus } from '@shared/gbc'
 import type { UpdaterState } from '@shared/update'
 import { cliEngineFeatures } from '@shared/cliEngine'
 import type { EngineAssetList, EngineMachine } from '@shared/engineChoice'
@@ -122,7 +122,7 @@ export interface MockBackendState {
   /** 训练: readiness, the trainings and their pictures and samples (see ./training.ts). */
   training: MockTrainingState
   /** 看图拆区域: whether GBC runs, its versions, and what reading a picture finds. */
-  gbc: { status: GbcStatus; versions: GbcVersion[]; parse: GbcParseResult }
+  gbc: { status: GbcStatus; versions: GbcVersion[]; parse: GbcParseResult; job: GbcJobSnapshot | null }
 }
 
 export type ScenarioName =
@@ -194,7 +194,7 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     pickedImages: [],
     aiProviders: [],
     conversations: [],
-    gbc: { status: gbcStatusFixture(false), versions: [], parse: gbcParseFixture() },
+    gbc: { status: gbcStatusFixture(false), versions: [], parse: gbcParseFixture(), job: null },
     engineFeatures: engineFeaturesFixture(),
     controlAdapters: [],
     install: installStateFixture(),

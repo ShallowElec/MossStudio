@@ -109,7 +109,7 @@ export function GbcPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col p-4">
+    <div data-gbc-panel className="flex h-full min-h-0 flex-col p-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-ui text-ink">解析</h2>
         <Button tone="ghost" size="xs" aria-label="关闭解析" onClick={close}>
@@ -266,7 +266,7 @@ export function GbcPanel({
               </Button>
             </>
           ) : (
-            <Button tone="primary" size="sm" disabled={!canRun} onClick={start}>
+            <Button tone="primary" size="sm" data-gbc-run disabled={!canRun} onClick={start}>
               解析
             </Button>
           )}
