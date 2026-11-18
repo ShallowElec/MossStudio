@@ -1,11 +1,11 @@
 import { ImagePlus, Square, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Ipc } from '@shared/channels'
-import type { GbcLanguage, GbcPicture } from '@shared/gbc'
+import { Events, Ipc } from '@shared/channels'
+import type { GbcLanguage, GbcPicture, GbcSetupProgress } from '@shared/gbc'
 import type { ProjectCanvas } from '@shared/types'
 import { Button, FieldLabel, Segmented, Select, Spinner, Textarea, useToast } from '../../components/ui'
 import { Notice } from '../../components/common/Notice'
-import { call } from '../../lib/api'
+import { call, onEvent } from '../../lib/api'
 import { cloverUrl } from '../../lib/clover'
 import { useGbcJob, useGbcState } from '../../lib/gbc'
 import { useApp } from '../../store'
@@ -49,6 +49,9 @@ export function GbcPanel({
   const [language, setLanguage] = useState<GbcLanguage>('auto')
   const [caption, setCaption] = useState('')
   const [installing, setInstalling] = useState(false)
+  const [setupPhase, setSetupPhase] = useState<GbcSetupProgress['phase'] | null>(null)
+
+  useEffect(() => onEvent<GbcSetupProgress>(Events.gbcSetup, (progress) => setSetupPhase(progress.phase)), [])
 
   // Settings arrive after the first render; the defaults follow them once.
   useEffect(() => {
@@ -136,7 +139,9 @@ export function GbcPanel({
                 ))}
               </ul>
               <Button tone="primary" size="sm" disabled={installing} onClick={() => void install()}>
-                {installing ? '安装中…' : '安装 KohakuGBC'}
+                {installing
+                  ? `安装中…${setupPhase === 'code' ? '（取代码）' : setupPhase === 'packages' ? '（装依赖）' : ''}`
+                  : '安装 KohakuGBC'}
               </Button>
             </>
           ) : null}

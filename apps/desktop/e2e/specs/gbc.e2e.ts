@@ -193,6 +193,19 @@ describe('解析', () => {
     expect(canvas?.title).toBe('小猫照片')
     expect(canvas?.layers).toHaveLength(2)
     expect(JSON.stringify(canvas)).toContain('午后的窗台')
+
+    // The same picture can go in as a vision reference of the 画面 just made.
+    await panel.getByRole('button', { name: '作为参考图' }).click()
+    await expect.poll(async () => (await cardIds(page)).length).toBe(4)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (canvasId) =>
+            window.__mock.state.projects[0]?.canvases.find((item) => item.id === canvasId)?.inputs?.references?.links.length ?? 0,
+          created,
+        ),
+      )
+      .toBe(1)
   })
 
   it('is not offered while 看图拆区域 is off', async () => {
