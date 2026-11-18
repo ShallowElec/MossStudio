@@ -189,10 +189,14 @@ describe('解析', () => {
     await panel.getByRole('button', { name: '变成画面' }).click()
     await expect.poll(async () => (await cardIds(page)).length).toBe(3)
     const created = (await cardIds(page)).find((id) => id !== 'img-1' && id !== 'canvas-1')!
-    const canvas = await saved(page, created)
-    expect(canvas?.title).toBe('小猫照片')
-    expect(canvas?.layers).toHaveLength(2)
-    expect(JSON.stringify(canvas)).toContain('午后的窗台')
+    // The 画面 lands on the board at once and in the project when the autosave runs.
+    await expect
+      .poll(async () => {
+        const canvas = await saved(page, created)
+        return canvas ? { title: canvas.title, layers: canvas.layers.length, text: JSON.stringify(canvas) } : null
+      })
+      .toMatchObject({ title: '小猫照片', layers: 2 })
+    expect(JSON.stringify(await saved(page, created))).toContain('午后的窗台')
 
     // The same picture can go in as a vision reference of the 画面 just made.
     await panel.getByRole('button', { name: '作为参考图' }).click()
