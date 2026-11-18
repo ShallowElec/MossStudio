@@ -183,7 +183,7 @@ describe('解析', () => {
     await panel.waitFor()
     await panel.getByLabel('从画板选择').selectOption('img-1')
     await panel.locator('[data-gbc-run]').click()
-    await expect.poll(() => panel.locator('#gbc-caption').inputValue()).toBe('一只橘猫睡在窗台上')
+    await expect.poll(() => panel.locator('#gbc-caption').inputValue()).toBe('午后的窗台，阳光照在一只睡着的橘猫身上')
     await app.screenshot('gbc-parse-panel-light')
 
     await panel.getByRole('button', { name: '变成画面' }).click()
