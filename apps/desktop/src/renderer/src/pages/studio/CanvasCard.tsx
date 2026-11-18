@@ -49,7 +49,10 @@ export type CardMenuEntry = Omit<Extract<BoardMenuEntry, { label: string }>, 'on
 export interface CanvasCardProps {
   canvas: ProjectCanvas
   view: CardJobView
+  /** The one selected card: its face can be edited, its footer and menu stay out. */
   selected: boolean
+  /** Picked along with others (or alone): ringed like the selected card, nothing more. */
+  marked?: boolean
   dragging: boolean
   tool: BoardTool
   selectedRegionId: string | null
@@ -105,7 +108,8 @@ export interface CanvasCardProps {
   onChangeDescription?: (text: string) => void
   /** Things to try, on the face of a new board's only 画面; a click writes one as the description. */
   ideas?: readonly string[]
-  onSelect: () => void
+  /** A click on the card; Shift, Ctrl or ⌘ adds it to the picked cards or takes it out. */
+  onSelect: (keys?: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
   onSelectRegion: (id: string | null) => void
   onChangeLayers: (update: (layers: ProjectLayer[]) => ProjectLayer[]) => void
   /** A box was just drawn: its field opens. */
@@ -274,9 +278,9 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
       data-canvas-card={canvas.id}
       data-canvas-kind={canvas.kind}
       data-node={canvas.upscale ? 'upscale' : undefined}
-      aria-label={`${canvas.title}${selected ? '，已选中' : ''}`}
+      aria-label={`${canvas.title}${selected || props.marked ? '，已选中' : ''}`}
       aria-current={selected ? 'true' : undefined}
-      onClick={props.onSelect}
+      onClick={(event) => props.onSelect(event)}
       onPointerEnter={() => props.onHoverChange?.(true)}
       onPointerLeave={() => props.onHoverChange?.(false)}
       className={cn('group/card absolute flex flex-col transition-opacity', props.inert && 'opacity-40', props.dragging && 'z-10')}
@@ -293,7 +297,7 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            props.onSelect()
+            props.onSelect(event)
           }}
           className="min-w-0 truncate text-left font-semibold text-ink"
         >
@@ -358,7 +362,7 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
         data-card-body
         className={cn(
           'relative select-none overflow-hidden rounded-md bg-well-strong transition-shadow',
-          selected && 'ring-2 ring-accent ring-offset-2 ring-offset-board',
+          (selected || props.marked) && 'ring-2 ring-accent ring-offset-2 ring-offset-board',
           view.active && !preview && 'studio-card-running',
         )}
         style={{ height: bodyHeight }}

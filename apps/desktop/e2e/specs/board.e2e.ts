@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { Page } from 'playwright-core'
 import type { CanvasInputs, EngineFeatures, JobRecord } from '@shared/types'
 import { settle, useApp, type E2eApp } from '../support/app'
+import { expectVisualRules } from '../support/visual'
 
 const ENGINE_JOBS = 'http:POST /api/engine-jobs'
 
@@ -115,7 +116,8 @@ async function openBlankMenu(page: Page, from?: { right: number; top: number }):
   const board = (await page.locator('[data-board]').boundingBox())!
   const at = from
     ? { x: board.x + board.width - from.right, y: board.y + from.top }
-    : { x: board.x + board.width - 120, y: board.y + board.height - 120 }
+    : // Near the bottom-right corner, clear of the minimap that sits in it.
+      { x: board.x + board.width - 260, y: board.y + board.height - 80 }
   await page.mouse.click(at.x, at.y, { button: 'right' })
   await page.getByRole('menu', { name: '画板' }).waitFor()
   return at
@@ -328,6 +330,10 @@ describe('studio board', () => {
       return box.x + box.width <= board.x + board.width && box.y + box.height <= board.y + board.height
     }
     await expect.poll(inside).toBe(true)
+    // …and clear of the minimap in that corner.
+    const map = (await page.locator('[data-minimap]').boundingBox())!
+    const placed = (await page.locator('article[data-canvas-kind="image"][aria-current="true"]').boundingBox())!
+    expect(placed.x + placed.width <= map.x || placed.y + placed.height <= map.y).toBe(true)
   })
 
   it('right-click on a card shows its menu; on a wire, 断开连线', async () => {
@@ -443,23 +449,42 @@ describe('studio board', () => {
     await expect.poll(async () => (await savedY())!, { timeout: 10_000 }).toBeGreaterThan(before + 40)
   })
 
-  it('pans by dragging the empty board and zooms with the wheel; new cards land where the click was', async () => {
+  it('pans with the right or middle button or Space held; a right-click that does not move still opens the menu', async () => {
     const page = await openBoard(app)
     const card = page.locator('article[data-canvas-card="canvas-1"]')
-    const start = (await card.boundingBox())!
     const board = (await page.locator('[data-board]').boundingBox())!
-    const from = { x: board.x + board.width - 60, y: board.y + board.height - 60 }
-    await page.mouse.move(from.x, from.y)
+    const from = { x: board.x + board.width - 300, y: board.y + board.height - 60 }
+    const offset = async (): Promise<{ x: number; y: number }> => {
+      const box = (await card.boundingBox())!
+      return { x: Math.round(box.x), y: Math.round(box.y) }
+    }
+
+    for (const button of ['right', 'middle'] as const) {
+      const start = await offset()
+      await page.mouse.move(from.x, from.y)
+      await page.mouse.down({ button })
+      await page.mouse.move(from.x - 120, from.y - 80, { steps: 5 })
+      // The board follows the pointer while it is still held.
+      expect(await offset()).toEqual({ x: start.x - 120, y: start.y - 80 })
+      await page.mouse.up({ button })
+      await settle(page)
+      expect(await offset()).toEqual({ x: start.x - 120, y: start.y - 80 })
+      await page.mouse.move(from.x, from.y)
+    }
+    // A right-button pan does not leave the menu behind.
+    expect(await page.getByRole('menu', { name: '画板' }).count()).toBe(0)
+
+    // Space held over the board: a left drag pans, even when it starts on a card.
+    const start = await offset()
+    const header = await center(page, 'article[data-canvas-card="canvas-1"] header')
+    await page.mouse.move(header.x + 40, header.y)
+    await page.keyboard.down(' ')
     await page.mouse.down()
-    await page.mouse.move(from.x - 120, from.y - 80, { steps: 5 })
-    // The board follows the pointer while it is still held.
-    const during = (await card.boundingBox())!
-    expect(Math.round(during.x - start.x)).toBe(-120)
-    expect(Math.round(during.y - start.y)).toBe(-80)
+    await page.mouse.move(header.x - 20, header.y + 30, { steps: 4 })
     await page.mouse.up()
+    await page.keyboard.up(' ')
     await settle(page)
-    const after = (await card.boundingBox())!
-    expect(Math.round(after.x - start.x)).toBe(-120)
+    expect(await offset()).toEqual({ x: start.x - 60, y: start.y + 30 })
 
     const zoom = page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: /^\d+%$/ })
     const zoomBefore = await zoom.textContent()
@@ -474,7 +499,148 @@ describe('studio board', () => {
     const created = (await page.locator('article[data-canvas-kind="layout"][aria-current="true"]').boundingBox())!
     expect(Math.abs(created.x - at.x)).toBeLessThan(4)
     expect(Math.abs(created.y - at.y)).toBeLessThan(4)
+
+    // F shows every card again.
+    await page.keyboard.press('f')
+    for (const id of ['img-1', 'img-2', 'canvas-1']) {
+      const box = (await page.locator(`article[data-canvas-card="${id}"]`).boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(board.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(board.x + board.width)
+    }
   })
+
+  it('draws a box on the empty board to pick cards; they move together, 排整齐 lines them up, 删除 asks once', async () => {
+    const page = await openBoard(app)
+    const saved = (id: string): Promise<{ x: number; y: number } | undefined> =>
+      page.evaluate((cardId) => {
+        const found = window.__mock.state.projects[0]?.canvases.find((canvas) => canvas.id === cardId)
+        return found ? { x: found.x, y: found.y } : undefined
+      }, id)
+    const first = (await page.locator('article[data-canvas-card="img-1"]').boundingBox())!
+    const second = (await page.locator('article[data-canvas-card="img-2"] [data-card-body]').boundingBox())!
+    // From the empty board above and left of the pictures to the bottom of the second one: it touches both, not the 画面.
+    await page.mouse.move(first.x - 16, first.y - 16)
+    await page.mouse.down()
+    await page.mouse.move(second.x + second.width / 2, second.y + second.height - 10, { steps: 6 })
+    await expect.poll(() => page.locator('[data-select-box]').count()).toBe(1)
+    await page.mouse.up()
+    expect(await page.locator('[data-select-box]').count()).toBe(0)
+
+    const bar = page.getByRole('toolbar', { name: '已选 2 张' })
+    await bar.waitFor()
+    for (const id of ['img-1', 'img-2'])
+      expect(await page.locator(`article[data-canvas-card="${id}"]`).getAttribute('aria-label')).toContain('已选中')
+    expect(await page.locator('article[data-canvas-card="canvas-1"]').getAttribute('aria-label')).not.toContain('已选中')
+    // The left panel shows the first picked card.
+    await expect.poll(() => page.evaluate(() => window.__mock.state.projects[0]?.selectedCanvasId), { timeout: 10_000 }).toBe('img-1')
+
+    // Dragging one picked card moves the other by the same amount.
+    const before = { a: (await saved('img-1'))!, b: (await saved('img-2'))! }
+    const header = await center(page, 'article[data-canvas-card="img-2"] header')
+    await page.mouse.move(header.x + 30, header.y)
+    await page.mouse.down()
+    await page.mouse.move(header.x + 130, header.y + 40, { steps: 6 })
+    await page.mouse.up()
+    await expect.poll(async () => (await saved('img-2'))!.x - before.b.x, { timeout: 10_000 }).toBeGreaterThan(60)
+    const moved = { a: (await saved('img-1'))!, b: (await saved('img-2'))! }
+    expect(moved.a.x - before.a.x).toBe(moved.b.x - before.b.x)
+    expect(moved.a.y - before.a.y).toBe(moved.b.y - before.b.y)
+    expect(await bar.isVisible()).toBe(true)
+
+    // 排整齐: two cards side by side, top edges level.
+    await bar.getByRole('button', { name: '排整齐' }).click()
+    await expect.poll(async () => (await saved('img-1'))!.y === (await saved('img-2'))!.y, { timeout: 10_000 }).toBe(true)
+    expect((await saved('img-2'))!.x).toBeGreaterThan((await saved('img-1'))!.x)
+    await app.screenshot('board-picked-light')
+
+    await bar.getByRole('button', { name: '删除' }).click()
+    const dialog = page.getByRole('dialog', { name: '删除这 2 张卡片？' })
+    await dialog.waitFor()
+    await dialog.getByRole('button', { name: '删除' }).click()
+    await expect.poll(() => page.locator('article[data-canvas-card]').count()).toBe(1)
+    expect(await page.locator('article[data-canvas-card="canvas-1"]').count()).toBe(1)
+    expect(await bar.count()).toBe(0)
+  })
+
+  it('Shift-click adds a card, Esc keeps only the selected one, Ctrl+A picks all, Delete asks once', async () => {
+    const page = await openBoard(app)
+    const bar = page.locator('[data-selection-bar]')
+    await page
+      .locator('article[data-canvas-card="img-1"] header button')
+      .first()
+      .click({ modifiers: ['Shift'] })
+    await expect.poll(() => bar.getAttribute('aria-label')).toBe('已选 2 张')
+    // A Shift-click on a picked card takes it out again.
+    await page
+      .locator('article[data-canvas-card="img-1"] header button')
+      .first()
+      .click({ modifiers: ['Shift'] })
+    await expect.poll(() => bar.count()).toBe(0)
+    await page
+      .locator('article[data-canvas-card="img-2"] header button')
+      .first()
+      .click({ modifiers: ['Shift'] })
+    await expect.poll(() => bar.getAttribute('aria-label')).toBe('已选 2 张')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => bar.count()).toBe(0)
+    expect(await page.locator('article[data-canvas-card="img-2"]').getAttribute('aria-current')).toBe('true')
+
+    await page.keyboard.press('Control+a')
+    await expect.poll(() => bar.getAttribute('aria-label')).toBe('已选 3 张')
+    await page.keyboard.press('Delete')
+    const dialog = page.getByRole('dialog', { name: '删除这 3 张卡片？' })
+    await dialog.waitFor()
+    await dialog.getByRole('button', { name: '取消' }).click()
+    expect(await page.locator('article[data-canvas-card]').count()).toBe(3)
+
+    // A plain click on one card picks it alone.
+    await page.locator('article[data-canvas-card="canvas-1"] header button').first().click()
+    await expect.poll(() => bar.count()).toBe(0)
+
+    // Picking ends when another card is selected some other way; an old member selected again comes alone.
+    await page.keyboard.press('Control+a')
+    await expect.poll(() => bar.getAttribute('aria-label')).toBe('已选 3 张')
+    await openBlankMenu(page)
+    await page.getByRole('menuitem', { name: '新建画面' }).click()
+    await expect.poll(() => page.locator('article[data-canvas-card]').count()).toBe(4)
+    await expect.poll(() => bar.count()).toBe(0)
+    await page.locator('article[data-canvas-card="img-1"] header').click({ button: 'right' })
+    await page.getByRole('menu', { name: '小猫照片 操作' }).waitFor()
+    await page.keyboard.press('Escape')
+    expect(await bar.count()).toBe(0)
+  })
+
+  for (const theme of ['light', 'dark'] as const) {
+    it(`shows the whole board in a minimap (${theme}); a press there moves the view, and it can be hidden`, async () => {
+      const page = await openBoard(app, { theme })
+      const minimap = page.getByRole('group', { name: '小地图' })
+      await minimap.waitFor()
+      expect(await minimap.locator('[data-minimap-card]').count()).toBe(3)
+      await page.keyboard.press('Control+a')
+      await page.getByRole('toolbar', { name: '已选 3 张' }).waitFor()
+      expect(await minimap.locator('[data-minimap-card][data-picked]').count()).toBe(3)
+      // The group stays quiet: no ＋ on the selected 画面 until it is hovered.
+      await page.mouse.move(5, 5)
+      await expect.poll(() => page.locator('[data-input-adder]').count()).toBe(0)
+      await expectVisualRules(page, `board minimap and picked cards (${theme})`)
+      await app.screenshot(`board-minimap-${theme}`)
+
+      // A press on the 画面 in the minimap centres the view on it.
+      const board = (await page.locator('[data-board]').boundingBox())!
+      const dot = await center(page, '[data-minimap-card="img-2"]')
+      await page.mouse.click(dot.x, dot.y)
+      await settle(page)
+      const target = await center(page, 'article[data-canvas-card="img-2"]')
+      expect(Math.abs(target.x - (board.x + board.width / 2))).toBeLessThan(20)
+      expect(Math.abs(target.y - (board.y + board.height / 2))).toBeLessThan(20)
+
+      const toggle = page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: '小地图' })
+      expect(await toggle.getAttribute('aria-pressed')).toBe('true')
+      await toggle.click()
+      expect(await minimap.count()).toBe(0)
+      expect(await toggle.getAttribute('aria-pressed')).toBe('false')
+    })
+  }
 
   it("pulls a wire from anywhere along a picture's right edge", async () => {
     const page = await openBoard(app)

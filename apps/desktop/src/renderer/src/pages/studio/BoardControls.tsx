@@ -195,3 +195,38 @@ export function StartRow({
     </div>
   )
 }
+
+/** Above several picked cards: how many, 排整齐 and 删除. Moving them is a drag on any of them. */
+export function SelectionBar({
+  point,
+  zoom,
+  count,
+  onTidy,
+  onDelete,
+}: {
+  /** Top middle of the picked cards, in board pixels. */
+  point: Point
+  zoom: number
+  count: number
+  onTidy: () => void
+  onDelete: () => void
+}): React.JSX.Element {
+  return (
+    <div
+      data-board-ui
+      data-selection-bar
+      role="toolbar"
+      aria-label={`已选 ${count} 张`}
+      className="absolute left-0 top-0 z-[7] flex w-max origin-top-left items-center gap-0.5 rounded-[10px] bg-raised p-1 text-ui shadow-float"
+      style={at(point, zoom, 'translate(-50%, calc(-100% - 10px))')}
+    >
+      <span className="tabular px-2.5 text-ink-2">已选 {count} 张</span>
+      <button type="button" onClick={onTidy} className="h-8 rounded-md px-2.5 text-ink transition-colors hover:bg-well">
+        排整齐
+      </button>
+      <button type="button" onClick={onDelete} className="h-8 rounded-md px-2.5 text-danger transition-colors hover:bg-danger-soft">
+        删除
+      </button>
+    </div>
+  )
+}

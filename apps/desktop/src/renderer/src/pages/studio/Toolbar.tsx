@@ -1,4 +1,4 @@
-import { Brush, Eraser, FlipHorizontal2, Hand, Maximize2, Minus, MousePointer2, Plus, Trash2 } from 'lucide-react'
+import { Brush, Eraser, FlipHorizontal2, Hand, Map as MapIcon, Maximize2, Minus, MousePointer2, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { GalleryItem } from '@shared/types'
 import { Ipc } from '@shared/channels'
@@ -111,19 +111,23 @@ function UnderlayMenu({
   )
 }
 
-/** The board's own tools: select, pan, zoom and fit. A 画面's tools sit on the card (CardToolbar). */
+/** The board's own tools: select, pan, zoom, fit and the minimap. A 画面's tools sit on the card (CardToolbar). */
 export function Toolbar({
   tool,
   onTool,
   zoom,
   onZoom,
   onFit,
+  minimap,
+  onMinimap,
 }: {
   tool: BoardTool
   onTool: (tool: BoardTool) => void
   zoom: number
   onZoom: (factor: number) => void
   onFit: () => void
+  minimap: boolean
+  onMinimap: (on: boolean) => void
 }): React.JSX.Element {
   return (
     <div
@@ -158,9 +162,12 @@ export function Toolbar({
       <IconButton label="放大" onClick={() => onZoom(1.25)} className="text-ink">
         <Plus className="size-4" strokeWidth={1.6} />
       </IconButton>
-      <IconButton label="适应窗口" onClick={onFit} className="text-ink">
+      <IconButton label="适应窗口" title="适应窗口（F）" onClick={onFit} className="text-ink">
         <Maximize2 className="size-4" strokeWidth={1.6} />
       </IconButton>
+      <ToolButton on={minimap} aria-label="小地图" title="小地图" onClick={() => onMinimap(!minimap)}>
+        <MapIcon className="size-4" strokeWidth={1.6} />
+      </ToolButton>
     </div>
   )
 }

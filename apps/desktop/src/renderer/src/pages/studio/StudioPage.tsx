@@ -160,6 +160,8 @@ export function StudioPage(): React.JSX.Element {
   const [widths, setWidths] = useState(initialWidths)
   const [viewer, setViewer] = useState<{ canvasId: string; index: number } | null>(null)
   const [deleting, setDeleting] = useState<ProjectCanvas | null>(null)
+  /** Several picked cards waiting for 删除 to be confirmed. */
+  const [deletingMany, setDeletingMany] = useState<string[] | null>(null)
   const [adapterPickerOpen, setAdapterPickerOpen] = useState(false)
   // 从作品选择: the input a picture from 作品 goes into.
   // 从作品选择: the input a picture from 作品 goes into, or (right-click on the board) where it goes on the board.
@@ -806,6 +808,13 @@ export function StudioPage(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  /** A card that cannot be deleted yet: its job, or (a 画面) any run in its filmstrip, is still going. */
+  const stillRunning = (canvas: ProjectCanvas): boolean => {
+    const job = canvas.jobId ? jobs.find((item) => item.id === canvas.jobId) : undefined
+    const running = canvas.kind === 'layout' && runsOf(canvas, project.canvasesRef.current).some((run) => isActiveRun(run, jobs))
+    return ACTIVE_JOB_STATES.has(job?.state ?? '') || running
+  }
+
   const deletingRuns = deleting ? removedWith(project.canvases, deleting.id).length - 1 : 0
   const viewerCanvas = viewer ? (project.canvases.find((canvas) => canvas.id === viewer.canvasId) ?? null) : null
   const viewerJob = viewerCanvas?.jobId ? jobs.find((job) => job.id === viewerCanvas.jobId) : undefined
@@ -931,14 +940,19 @@ export function StudioPage(): React.JSX.Element {
             requestAnimationFrame(() => board.current?.reveal(created.id))
           }}
           onDelete={(canvas) => {
-            const job = canvas.jobId ? jobs.find((item) => item.id === canvas.jobId) : undefined
-            // A 画面 is busy while any run in its filmstrip is.
-            const running = canvas.kind === 'layout' && runsOf(canvas, project.canvasesRef.current).some((run) => isActiveRun(run, jobs))
-            if (ACTIVE_JOB_STATES.has(job?.state ?? '') || running) {
+            if (stillRunning(canvas)) {
               toast.push('这个画面还在生成，先取消再删除', 'info')
               return
             }
             setDeleting(canvas)
+          }}
+          onDeleteMany={(ids) => {
+            const list = project.canvasesRef.current.filter((canvas) => ids.includes(canvas.id))
+            if (list.some(stillRunning)) {
+              toast.push('有画面还在生成，先取消再删除', 'info')
+              return
+            }
+            setDeletingMany(list.map((canvas) => canvas.id))
           }}
           engineFeatures={boardFeatures}
           controlAdapters={controlAdapters}
@@ -1072,6 +1086,22 @@ export function StudioPage(): React.JSX.Element {
             if (removedLinks) toast.push(`已删除「${deleting.title}」，并移除了 ${removedLinks} 条连到它的连线`, 'info')
           }
           setDeleting(null)
+        }}
+      />
+
+      <ConfirmDialog
+        open={deletingMany !== null}
+        onClose={() => setDeletingMany(null)}
+        title={`删除这 ${deletingMany?.length ?? 0} 张卡片？`}
+        description="它们的区域和生成记录会从项目里删除。已经生成的图片仍保留在作品里。"
+        confirmLabel="删除"
+        onConfirm={() => {
+          let removedLinks = 0
+          for (const id of deletingMany ?? []) {
+            if (project.canvasesRef.current.some((canvas) => canvas.id === id)) removedLinks += project.removeCanvas(id)
+          }
+          if (removedLinks) toast.push(`已删除，并移除了 ${removedLinks} 条连到它们的连线`, 'info')
+          setDeletingMany(null)
         }}
       />
 
