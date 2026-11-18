@@ -404,7 +404,18 @@ function playPrepare(context: TrainingContext): void {
     }
   }
   const steps: Array<() => void> = [
-    () => download(0.43, 'running'),
+    // The environment installs while the base model is still downloading, as it does in main.
+    () => {
+      download(0.43, 'running')
+      update({
+        prepare: {
+          running: true,
+          step: 'model',
+          error: null,
+          packages: { stage: 'download', package: 'torch', bytes: 2.9e9, percent: 42, downloaded: 3 },
+        },
+      })
+    },
     () => {
       download(1, 'done')
       context.state.catalog = {
@@ -419,7 +430,15 @@ function playPrepare(context: TrainingContext): void {
         prepare: { running: true, step: 'trainer', error: null },
       })
     },
-    () => update({ prepare: { running: true, step: 'environment', error: null } }),
+    () =>
+      update({
+        prepare: {
+          running: true,
+          step: 'environment',
+          error: null,
+          packages: { stage: 'install', package: null, bytes: null, percent: null, downloaded: 30 },
+        },
+      }),
     () =>
       update({
         trainer: { versionId: 'trainer-main', state: 'ready' },

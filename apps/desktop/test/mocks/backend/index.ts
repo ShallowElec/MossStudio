@@ -849,12 +849,17 @@ function defaultHandlers(): Map<string, Handler> {
   // 看图拆区域: setup and reading answer at once, with the events main sends on the way.
   h.set(Ipc.gbcStatus, (_, { state }) => state.gbc.status)
   h.set(Ipc.gbcVersions, (_, { state }) => state.gbc.versions)
-  h.set(Ipc.gbcSetup, (_, { state, emit }) => {
+  h.set(Ipc.gbcSetup, async (_, { state, emit }) => {
     emit(Events.gbcSetup, { phase: 'code' })
     if (!state.gbc.versions.length) state.gbc.versions = [gbcVersionFixture()]
     state.settings = { ...state.settings, gbcVersionId: state.gbc.versions[0]!.id }
     emit(Events.settingsChanged, state.settings)
     emit(Events.gbcSetup, { phase: 'packages' })
+    emit(Events.gbcSetup, {
+      phase: 'packages',
+      download: { stage: 'download', package: 'torch', bytes: 2.9e9, percent: 42, downloaded: 3 },
+    })
+    if (state.gbc.setupMs) await new Promise((resolve) => setTimeout(resolve, state.gbc.setupMs))
     state.gbc.status = gbcStatusFixture(true)
     emit(Events.gbcSetup, { phase: 'done' })
     return state.gbc.status

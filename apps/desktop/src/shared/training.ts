@@ -4,6 +4,7 @@
  * Main and renderer share these shapes; the trainer's own knobs stay in `TrainingRecipe`.
  */
 import { z } from 'zod'
+import type { PackageInstallProgress } from './types'
 
 export const TRAINING_KINDS = ['person', 'style', 'object'] as const
 export type TrainingKind = (typeof TRAINING_KINDS)[number]
@@ -126,7 +127,13 @@ export interface TrainingReadiness {
   disk: { path: string; freeBytes: number | null; ok: boolean }
   blockReason: TrainingBlockReason | null
   ready: boolean
-  prepare: { running: boolean; step: TrainingPrepareStep | null; error: string | null }
+  prepare: {
+    running: boolean
+    step: TrainingPrepareStep | null
+    error: string | null
+    /** While the environment installs: the package download under way. */
+    packages?: PackageInstallProgress | null
+  }
   /** Whether samples default to on here (off on cards of 8 GB or less). */
   samplesByDefault: boolean
 }

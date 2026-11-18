@@ -1,3 +1,5 @@
+import type { PackageInstallProgress } from './types'
+
 export interface GbcBBox {
   left: number
   top: number
@@ -109,6 +111,8 @@ export interface GbcParseProgress {
 export interface GbcSetupProgress {
   phase: 'code' | 'packages' | 'done' | 'failed'
   error?: string
+  /** During `packages`: the download under way. */
+  download?: PackageInstallProgress
 }
 
 /** More regions than this crowd a 画面; the largest are kept. */

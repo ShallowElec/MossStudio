@@ -69,7 +69,9 @@ describe('mock backend: 训练', () => {
     backend.bridge.on(Events.trainingReadinessChanged, (next) => seen.push(next as TrainingReadiness))
     await data(backend, Ipc.trainingPrepare, { hostId: 'local' })
     await settle()
-    expect(seen.map((item) => item.prepare.step)).toEqual(['model', 'trainer', 'environment', null])
+    // The environment installs while the base model still downloads, as in main: a second `model` update carries its download.
+    expect(seen.map((item) => item.prepare.step)).toEqual(['model', 'model', 'trainer', 'environment', null])
+    expect(seen[1]?.prepare.packages).toMatchObject({ stage: 'download', package: 'torch' })
     expect(seen.at(-1)?.ready).toBe(true)
     expect(backend.state.downloads.every((task) => task.state === 'done')).toBe(true)
   })

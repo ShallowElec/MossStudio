@@ -1,5 +1,5 @@
 import { memoryGb } from '@shared/machineFit'
-import type { JobProgress, JobRecord } from '@shared/types'
+import type { JobProgress, JobRecord, PackageInstallProgress } from '@shared/types'
 
 /**
  * The one place that turns values into words. Every screen formats dates,
@@ -224,4 +224,12 @@ export function jobSummary(job: JobRecord): string {
     parts.push(dimensions(job.params.width, job.params.height))
   }
   return parts.filter(Boolean).join(' · ')
+}
+
+/** A Python package download in words: 正在下载 torch · 2.9 GB · 已下载 12 个包. */
+export function packageProgressText(progress: PackageInstallProgress): string {
+  const done = progress.downloaded > 0 ? `已下载 ${progress.downloaded} 个包` : ''
+  if (progress.stage === 'install') return ['正在安装下载好的包', done].filter(Boolean).join(' · ')
+  if (!progress.package) return ['正在准备下载', done].filter(Boolean).join(' · ')
+  return [`正在下载 ${progress.package}`, progress.bytes ? bytes(progress.bytes) : '', done].filter(Boolean).join(' · ')
 }

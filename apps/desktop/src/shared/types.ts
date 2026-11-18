@@ -707,7 +707,19 @@ export interface TrainerRuntimeInfo {
   lockHash: string
   state: TrainerRuntimeState
   deps: string[]
+  /** The wheel index PyTorch came from (CUDA or CPU); null for PyPI; absent on environments made before it was recorded. */
+  torchIndex?: string | null
   createdAt: string
+}
+
+/** Python packages being installed with pip or uv: the one being fetched, its size and how far, and how many are done. */
+export interface PackageInstallProgress {
+  stage: 'download' | 'install'
+  package: string | null
+  bytes: number | null
+  /** Known only from pip's raw progress; uv prints none off a terminal. */
+  percent: number | null
+  downloaded: number
 }
 
 export type WorkspaceKind = 'clover'

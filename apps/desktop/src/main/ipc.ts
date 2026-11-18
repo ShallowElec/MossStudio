@@ -473,7 +473,11 @@ export function registerIpc(): void {
     return true
   })
 
-  handle(Ipc.trainerInstall, schemas.trainerId, ({ id }) => installTrainerRuntime(getSettings(), id))
+  handle(Ipc.trainerInstall, schemas.trainerId, async ({ id }) => {
+    // Installing may replace (and delete) the environment a running training is using.
+    await assertTrainerVersionFree(id)
+    return installTrainerRuntime(getSettings(), id)
+  })
 
   handle(Ipc.trainerDoctor, schemas.trainerId, ({ id }) => trainerDoctor(getSettings(), id))
 

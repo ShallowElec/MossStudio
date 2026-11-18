@@ -148,9 +148,38 @@ export async function hasUv(): Promise<boolean> {
   return (await which('uv')) !== null
 }
 
+/** An NVIDIA driver and its major version; `present: false` when there is none. */
+export interface NvidiaDriver {
+  present: boolean
+  major: number | null
+}
+
+/**
+ * Asked once per run of the app, since trainer environments check it whenever
+ * they are listed. Only a clear answer is kept: nvidia-smi that times out (a
+ * busy card, no persistence mode) answers null, unknown, and is asked again.
+ */
+let nvidia: NvidiaDriver | null = null
+export async function nvidiaDriver(): Promise<NvidiaDriver | null> {
+  if (nvidia) return nvidia
+  const result = await run('nvidia-smi', ['--query-gpu=driver_version', '--format=csv,noheader'], { timeoutMs: 5000 })
+  const version = firstLine(result.stdout)
+  if (result.code === 0 && version) {
+    const major = Number.parseInt(version, 10)
+    nvidia = { present: true, major: Number.isFinite(major) ? major : null }
+    return nvidia
+  }
+  // Only a missing nvidia-smi means no NVIDIA driver. One that fails (a driver updated before a reboot) or
+  // times out says nothing, and is asked again.
+  if (/ENOENT|not recognized|not found/i.test(result.stderr) || result.code === 127 || result.code === 9009) {
+    nvidia = { present: false, major: null }
+    return nvidia
+  }
+  return null
+}
+
 async function hasNvidia(): Promise<boolean> {
-  const result = await run('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { timeoutMs: 5000 })
-  return result.code === 0 && Boolean(firstLine(result.stdout))
+  return (await nvidiaDriver())?.present ?? false
 }
 
 /**

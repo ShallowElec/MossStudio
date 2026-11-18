@@ -122,7 +122,14 @@ export interface MockBackendState {
   /** 训练: readiness, the trainings and their pictures and samples (see ./training.ts). */
   training: MockTrainingState
   /** 看图拆区域: whether GBC runs, its versions, and what reading a picture finds. */
-  gbc: { status: GbcStatus; versions: GbcVersion[]; parse: GbcParseResult; job: GbcJobSnapshot | null }
+  gbc: {
+    status: GbcStatus
+    versions: GbcVersion[]
+    parse: GbcParseResult
+    job: GbcJobSnapshot | null
+    /** How long 安装 stays on its package download before it is done (0: at once). */
+    setupMs?: number
+  }
 }
 
 export type ScenarioName =

@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Settings, TrainerRuntimeInfo, TrainerVersion } from '@shared/types'
+import type { PackageInstallProgress, Settings, TrainerRuntimeInfo, TrainerVersion } from '@shared/types'
 import { run } from '../lib/run'
+import { installPackages } from './packageInstall'
+import { nvidiaDriver, type NvidiaDriver } from './runtimes'
 import { allRemoteVersions } from './remoteTrainer'
 import { checkBareMirror } from './gitHealth'
 import { hasUv, parseTrainerDeps, pickPython, venvPython } from './trainerEnv'
@@ -77,9 +79,78 @@ async function syncVersion(settings: Settings, version: TrainerVersion): Promise
   version.status = 'ok'
   if (version.runtimeId) {
     const runtime = await readRuntime(settings, version.runtimeId)
-    version.runtimeState = runtime?.state ?? 'missing'
+    // An environment with the wrong PyTorch build (CPU on an NVIDIA machine) is installed again.
+    version.runtimeState = runtime && (await torchCurrent(settings, runtime)) ? runtime.state : 'missing'
   }
   return version
+}
+
+const TORCH_WHEELS = 'https://download.pytorch.org/whl'
+/** PyTorch's CUDA wheel indexes, newest first, with the oldest driver each runs on (Windows; Linux needs a little less). */
+const CUDA_INDEXES: Array<{ index: string; driver: number }> = [
+  { index: `${TORCH_WHEELS}/cu130`, driver: 580 },
+  { index: `${TORCH_WHEELS}/cu128`, driver: 570 },
+  { index: `${TORCH_WHEELS}/cu126`, driver: 560 },
+]
+
+/**
+ * Where the trainer's PyTorch comes from, best first. Empty: plain PyPI,
+ * whose Linux wheel already uses CUDA and whose macOS wheel uses MPS. Only
+ * Windows needs an index of its own, since PyPI's Windows wheel is CPU only.
+ * Several CUDA indexes are offered because each carries a different range of
+ * PyTorch versions (cu128 stops at 2.11) and the trainer pins one: install
+ * takes the first that has it. `null` driver: nvidia-smi did not answer.
+ */
+export function torchIndexes(
+  settings: Pick<Settings, 'torchIndex' | 'torchBackend'>,
+  driver: NvidiaDriver | null,
+  platform: NodeJS.Platform,
+): string[] {
+  const custom = settings.torchIndex?.trim()
+  if (custom) return [custom.replace(/\/$/, '')]
+  if (settings.torchBackend === 'cpu') return [`${TORCH_WHEELS}/cpu`]
+  const cuda = (): string[] => {
+    // A driver of unknown age gets the oldest build first, the one most drivers run; one too old for any
+    // gets that one alone (CUDA's minor-version compatibility runs it on older 12.x drivers).
+    const major = driver?.major
+    if (major == null) return CUDA_INDEXES.map((item) => item.index).reverse()
+    const fits = CUDA_INDEXES.filter((item) => major >= item.driver).map((item) => item.index)
+    return fits.length ? fits : [CUDA_INDEXES.at(-1)!.index]
+  }
+  if (settings.torchBackend === 'cuda') return platform === 'darwin' ? [] : cuda()
+  if (platform !== 'win32' || driver?.present === false) return []
+  return cuda()
+}
+
+/**
+ * Whether an environment's PyTorch is a build this machine should use.
+ * Environments made before the index was recorded came from plain PyPI,
+ * whose Windows wheel is CPU only. `wanted` undefined: it cannot be told, so
+ * nothing is reinstalled.
+ */
+export function torchBuildCurrent(
+  recorded: string | null | undefined,
+  wanted: readonly string[] | undefined,
+  platform: NodeJS.Platform,
+): boolean {
+  if (wanted === undefined) return true
+  if (recorded === undefined) return !(platform === 'win32' && wanted.some((index) => index.includes('/cu')))
+  // Nothing particular wanted (PyPI): a CUDA build also runs on the CPU, so it is never worth a download.
+  if (wanted.length === 0) return recorded === null || recorded.includes('/cu')
+  return recorded !== null && wanted.includes(recorded)
+}
+
+async function wantedTorchIndexes(settings: Settings): Promise<string[] | undefined> {
+  const driver = await nvidiaDriver()
+  // Without an answer from nvidia-smi on Windows (auto), the build cannot be told.
+  if (!driver && process.platform === 'win32' && settings.torchBackend === 'auto' && !settings.torchIndex?.trim()) return undefined
+  return torchIndexes(settings, driver, process.platform)
+}
+
+async function torchCurrent(settings: Settings, runtime: TrainerRuntimeInfo): Promise<boolean> {
+  // Only a finished environment is judged; one being made has not chosen its build yet.
+  if (runtime.state !== 'ready') return true
+  return torchBuildCurrent(runtime.torchIndex, await wantedTorchIndexes(settings), process.platform)
 }
 
 export async function listAllTrainerVersions(settings: Settings): Promise<TrainerVersion[]> {
@@ -164,13 +235,19 @@ export async function ensureTrainerRuntime(settings: Settings, versionId: string
   const version = await readVersion(settings, versionId)
   if (!version) throw new Error('训练版本不存在')
   if (!existsSync(version.path)) throw new Error('训练版本目录不存在')
-  if (version.runtimeId) {
-    const existing = await readRuntime(settings, version.runtimeId)
-    if (existing && existsSync(venvPython(existing.path))) return existing
-  }
   const deps = parseTrainerDeps(version.path)
   const python = await pickPython(settings)
-  const lockHash = hash(JSON.stringify({ python: python.version, platform: process.platform, arch: process.arch, deps: [...deps].sort() }))
+  const torchIndexes = (await wantedTorchIndexes(settings)) ?? null
+  const lockHash = hash(
+    JSON.stringify({ python: python.version, platform: process.platform, arch: process.arch, deps: [...deps].sort(), torchIndexes }),
+  )
+  if (version.runtimeId) {
+    const existing = await readRuntime(settings, version.runtimeId)
+    // A finished environment stays while its PyTorch build fits. An unfinished one is taken up again only when it was
+    // made for the same sources: pip skips a torch that is already there, whatever index it came from.
+    const fits = existing?.state === 'ready' ? await torchCurrent(settings, existing) : existing?.lockHash === lockHash
+    if (existing && existsSync(venvPython(existing.path)) && fits) return existing
+  }
   const runtimeId = `tr-py${python.version.replace(/\./g, '')}-${lockHash}`
   const existing = await readRuntime(settings, runtimeId)
   if (existing) {
@@ -204,30 +281,81 @@ export async function ensureTrainerRuntime(settings: Settings, versionId: string
   return runtime
 }
 
-export async function installTrainerRuntime(settings: Settings, versionId: string): Promise<TrainerRuntimeInfo> {
-  const version = await readVersion(settings, versionId)
-  if (!version) throw new Error('训练版本不存在')
+/** The trainer's PyTorch requirements (torch, and torchvision or torchaudio when it lists them); plain torch when it names none. */
+export function torchRequirements(deps: readonly string[]): string[] {
+  const wanted = deps.filter((dep) => /^torch(?:vision|audio)?(?:\s|[<>=!~[;]|$)/.test(dep))
+  return wanted.length ? wanted : ['torch']
+}
+
+/**
+ * Installs the trainer into its environment. PyTorch comes first from the
+ * index for this machine (CUDA wheels with an NVIDIA card: PyPI's Windows
+ * wheel is CPU only), then the trainer itself, which finds torch satisfied.
+ */
+export async function installTrainerRuntime(
+  settings: Settings,
+  versionId: string,
+  onProgress?: (progress: PackageInstallProgress) => void,
+): Promise<TrainerRuntimeInfo> {
+  const before = await readVersion(settings, versionId)
+  if (!before) throw new Error('训练版本不存在')
+  const replaced = before.runtimeId
   const runtime = await ensureTrainerRuntime(settings, versionId)
+  const version = (await readVersion(settings, versionId))!
   runtime.state = 'installing'
   await writeRuntime(settings, runtime)
   version.runtimeState = 'installing'
   await writeVersion(settings, version)
-  const python = runtime.python
   const index = settings.pipIndex ?? 'https://pypi.org/simple'
   const uv = await hasUv()
-  const result = uv
-    ? await run('uv', ['pip', 'install', '--python', python, '--index-url', index, '-e', version.path], {
-        timeoutMs: 3_600_000,
-      })
-    : await run(python, ['-m', 'pip', 'install', '--index-url', index, '-e', version.path], {
-        timeoutMs: 3_600_000,
-      })
-  runtime.state = result.code === 0 ? 'ready' : 'error'
+  const install = (indexUrl: string, packages: string[]) =>
+    installPackages({ python: runtime.python, uv, indexUrl, packages, timeoutMs: 3_600_000, onProgress })
+  const fail = async (message: string): Promise<never> => {
+    runtime.state = 'error'
+    await writeRuntime(settings, runtime)
+    version.runtimeState = 'error'
+    await writeVersion(settings, version)
+    throw new Error(message)
+  }
+
+  // PyTorch first, from the first index that has a version the trainer accepts.
+  const indexes = (await wantedTorchIndexes(settings)) ?? torchIndexes(settings, { present: true, major: null }, process.platform)
+  let torchIndex: string | null = null
+  for (const candidate of indexes) {
+    const result = await install(candidate, torchRequirements(runtime.deps))
+    if (result.code === 0) {
+      torchIndex = candidate
+      break
+    }
+    if (!versionUnavailable(`${result.stdout}\n${result.stderr}`) || candidate === indexes.at(-1)) {
+      await fail(`PyTorch 安装失败（${candidate}）：${result.stderr.slice(-1200)}`)
+    }
+  }
+  const result = await install(index, ['-e', version.path])
+  if (result.code !== 0) await fail(`训练依赖安装失败：${result.stderr.slice(-1200)}`)
+  runtime.torchIndex = torchIndex
+  runtime.state = 'ready'
   await writeRuntime(settings, runtime)
-  version.runtimeState = runtime.state
+  version.runtimeState = 'ready'
   await writeVersion(settings, version)
-  if (result.code !== 0) throw new Error(`训练依赖安装失败：${result.stderr.slice(-1200)}`)
+  if (replaced && replaced !== runtime.id) await dropUnusedRuntime(settings, replaced)
   return runtime
+}
+
+/** pip and uv saying the index has no version that meets the requirement (as opposed to a network or build error). */
+export function versionUnavailable(output: string): boolean {
+  // pip says the same when it could not reach the index at all, then with no versions listed.
+  if (/\(from versions: none\)/.test(output)) return false
+  return /No matching distribution found|Could not find a version that satisfies|No solution found when resolving|there is no version of torch|only torch[^\n]* (?:is|are) available/i.test(
+    output,
+  )
+}
+
+/** An environment replaced by a new one (another PyTorch build) takes gigabytes; it goes once no version uses it. */
+async function dropUnusedRuntime(settings: Settings, runtimeId: string): Promise<void> {
+  const versions = await listTrainerVersions(settings)
+  if (versions.some((item) => item.runtimeId === runtimeId)) return
+  await rm(runtimeDir(settings, runtimeId), { recursive: true, force: true }).catch(() => undefined)
 }
 
 export async function trainerDoctor(settings: Settings, versionId: string): Promise<{ ok: boolean; output: string }> {

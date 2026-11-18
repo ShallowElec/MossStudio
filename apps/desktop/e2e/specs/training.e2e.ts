@@ -26,8 +26,15 @@ describe('training: first use', () => {
     await page.getByRole('button', { name: '准备训练' }).click()
     await expect.poll(() => app.calls('training:prepare')).toEqual([{ hostId: 'local' }])
     await expect.poll(() => page.getByRole('button', { name: '先选图片' }).isVisible()).toBe(true)
-    // The base model row follows the real download; the trainer row moves without an amount.
+    // The base model row follows the real download; alongside it, the environment says which package
+    // it is fetching and how far.
     await expect.poll(() => page.locator('[data-check-row="model"]').textContent()).toContain('下载中 43%')
+    expect(await page.locator('[data-check-row="trainer"]').textContent()).toContain('正在下载 torch · 2.7 GB · 已下载 3 个包')
+    expect(await page.locator('[data-check-row="trainer"] [role="progressbar"]').getAttribute('aria-valuenow')).toBe('42')
+    // Then it installs what it fetched; that bar moves without an amount.
+    await expect
+      .poll(() => page.locator('[data-check-row="trainer"]').textContent(), { interval: 100, timeout: 10_000 })
+      .toContain('正在安装下载好的包 · 已下载 30 个包')
     expect(await page.locator('[data-check-row="trainer"] [role="progressbar"][data-indeterminate]').count()).toBe(1)
 
     await page.getByRole('button', { name: '先选图片' }).click()

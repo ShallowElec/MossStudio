@@ -4,7 +4,7 @@ import { Events, Ipc } from '@shared/channels'
 import type { GbcSetupProgress } from '@shared/gbc'
 import type { BranchInfo, CommitInfo, GbcVersion, Settings } from '@shared/types'
 import { call, onEvent } from '../../lib/api'
-import { dateTime } from '../../lib/format'
+import { dateTime, packageProgressText } from '../../lib/format'
 import { useGbcState } from '../../lib/gbc'
 import { useApp } from '../../store'
 import { Select } from '../../components/form'
@@ -115,9 +115,13 @@ function SetupRow({
   onCheck: () => void
 }): React.JSX.Element {
   if (installing && setup && (setup.phase === 'code' || setup.phase === 'packages')) {
+    // While packages download, the row says which one and how far.
+    const download = setup.phase === 'packages' ? setup.download : undefined
+    const text = download ? packageProgressText(download) : SETUP_STEP[setup.phase]
+    const value = download?.stage === 'download' ? (download.percent ?? null) : null
     return (
-      <Row title="运行环境" description={SETUP_STEP[setup.phase]}>
-        <ProgressBar value={null} size="md" className="w-[160px]" label={SETUP_STEP[setup.phase]} />
+      <Row title="运行环境" description={text}>
+        <ProgressBar value={value} size="md" className="w-[160px]" label={text} />
       </Row>
     )
   }

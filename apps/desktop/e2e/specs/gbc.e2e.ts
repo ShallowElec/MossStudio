@@ -237,7 +237,15 @@ describe('设置 › 功能 › 看图拆区域', () => {
 
     await page.getByRole('button', { name: '安装' }).waitFor()
     await app.screenshot('gbc-settings-light')
+    await page.evaluate(() => {
+      window.__mock.state.gbc.setupMs = 1500
+    })
     await page.getByRole('button', { name: '安装' }).click()
+    // While its packages download, the row says which one and how far.
+    await page.getByText('正在下载 torch · 2.7 GB · 已下载 3 个包').first().waitFor()
+    expect(await page.getByRole('progressbar', { name: '正在下载 torch · 2.7 GB · 已下载 3 个包' }).getAttribute('aria-valuenow')).toBe(
+      '42',
+    )
     await page.getByText('可以用', { exact: true }).waitFor()
     expect(await app.calls('gbc:setup')).toHaveLength(1)
 

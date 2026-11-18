@@ -1,6 +1,6 @@
 import type { DownloadTask, ModelBundle } from '@shared/types'
 import type { TrainingAlgo, TrainingKind, TrainingProject, TrainingReadiness, TrainingState } from '@shared/training'
-import { bytes, diskFree, memorySize, percent, thousands } from '../../lib/format'
+import { bytes, diskFree, memorySize, packageProgressText, percent, thousands } from '../../lib/format'
 
 /** What the 训练 page shows at `/training`. */
 export type HomeView = 'loading' | 'error' | 'blocked' | 'oobe' | 'start' | 'home'
@@ -123,9 +123,22 @@ function trainerRow(readiness: TrainingReadiness, preparing: boolean): CheckRow 
   const step = readiness.prepare.step
   const base = { id: 'trainer' as const, title: '训练环境' }
   if (state === 'ready') return { ...base, value: 'Kohaku Trainer', pill: { tone: 'ok', text: '已准备' } }
-  if (state === 'installing' || (preparing && (step === 'trainer' || step === 'environment'))) {
-    const doing = step === 'trainer' || step === 'environment' ? PREPARE_TRAINER_TEXT[step] : PREPARE_TRAINER_TEXT.environment
-    return { ...base, value: `Kohaku Trainer · ${doing}`, pill: { tone: 'accent', text: '安装中' }, progress: null }
+  // Packages mean the environment is installing, even while `step` says the base model is downloading alongside.
+  const packages = preparing ? readiness.prepare.packages : null
+  if (state === 'installing' || packages || (preparing && (step === 'trainer' || step === 'environment'))) {
+    const doing = packages
+      ? PREPARE_TRAINER_TEXT.environment
+      : step === 'trainer'
+        ? PREPARE_TRAINER_TEXT.trainer
+        : PREPARE_TRAINER_TEXT.environment
+    // The percentage is known for one package at a time, and only from pip.
+    return {
+      ...base,
+      value: `Kohaku Trainer · ${doing}`,
+      pill: { tone: 'accent', text: '安装中' },
+      progress: packages?.stage === 'download' ? (packages.percent ?? null) : null,
+      ...(packages ? { detail: packageProgressText(packages) } : {}),
+    }
   }
   if (preparing) return { ...base, value: 'Kohaku Trainer', pill: { tone: 'accent', text: '等待安装' }, progress: null }
   if (state === 'error') return { ...base, value: 'Kohaku Trainer', pill: { tone: 'danger', text: '安装失败' } }

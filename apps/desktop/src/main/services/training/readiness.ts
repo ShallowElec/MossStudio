@@ -5,7 +5,7 @@
 import { totalmem } from 'node:os'
 import { Events } from '@shared/channels'
 import { MIN_TRAINING_VRAM_BYTES, type TrainingBlockReason, type TrainingPrepareStep, type TrainingReadiness } from '@shared/training'
-import type { GpuInventoryDevice, ModelBundle, Settings, TrainerVersion, TrainingHost } from '@shared/types'
+import type { GpuInventoryDevice, ModelBundle, PackageInstallProgress, Settings, TrainerVersion, TrainingHost } from '@shared/types'
 import { codedError, errorCode } from '../../lib/codedError'
 import { freeSpace } from '../../lib/disk'
 import { emit } from '../../lib/events'
@@ -46,12 +46,14 @@ interface PrepareState {
   error: string | null
   /** The step that failed, so the trainer shows `error` only when it was the trainer's. */
   failedStep: TrainingPrepareStep | null
+  /** The environment's package download, while it installs. */
+  packages: PackageInstallProgress | null
 }
 
 const prepares = new Map<string, PrepareState>()
 
 function prepareOf(hostId: string): PrepareState {
-  return prepares.get(hostId) ?? { running: false, step: null, error: null, failedStep: null }
+  return prepares.get(hostId) ?? { running: false, step: null, error: null, failedStep: null, packages: null }
 }
 
 export function isNvidia(device: GpuInventoryDevice): boolean {
@@ -150,7 +152,8 @@ async function localBaseModel(settings: Settings): Promise<TrainingReadiness['ba
 
 function trainerOf(versions: TrainerVersion[], prepare: PrepareState): TrainingReadiness['trainer'] {
   const ready = versions.find((version) => version.status === 'ok' && version.runtimeState === 'ready')
-  if (prepare.running && (prepare.step === 'trainer' || prepare.step === 'environment')) {
+  // The environment installs alongside the base model download, while `step` still says `model`.
+  if (prepare.running && (prepare.step === 'trainer' || prepare.step === 'environment' || prepare.packages)) {
     return { versionId: ready?.id ?? null, state: 'installing' }
   }
   if (ready) return { versionId: ready.id, state: 'ready' }
@@ -180,7 +183,7 @@ function assemble(
     disk: { ...disk, ok: diskOk },
     blockReason: verdict.blockReason,
     ready: verdict.blockReason === null && baseModel.installed && trainer.state === 'ready' && diskOk && !prepare.running,
-    prepare: { running: prepare.running, step: prepare.step, error: prepare.error },
+    prepare: { running: prepare.running, step: prepare.step, error: prepare.error, packages: prepare.packages },
     samplesByDefault: verdict.samplesByDefault,
   }
 }
@@ -300,7 +303,11 @@ async function downloadBase(settings: Settings): Promise<void> {
 }
 
 /** The trainer's stable tag, else the newest commit of its default branch. */
-async function localTrainer(settings: Settings, setStep: (step: TrainingPrepareStep) => void): Promise<void> {
+async function localTrainer(
+  settings: Settings,
+  setStep: (step: TrainingPrepareStep) => void,
+  onPackages: (progress: PackageInstallProgress) => void,
+): Promise<void> {
   if ((await listTrainerVersions(settings)).some((version) => version.status === 'ok' && version.runtimeState === 'ready')) return
   setStep('trainer')
   let versionId: string
@@ -315,7 +322,7 @@ async function localTrainer(settings: Settings, setStep: (step: TrainingPrepareS
   }
   setStep('environment')
   try {
-    await installTrainerRuntime(settings, versionId)
+    await installTrainerRuntime(settings, versionId, onPackages)
   } catch (error) {
     throw stepFailure('environment', error)
   }
@@ -365,7 +372,24 @@ async function runPrepare(hostId: string, state: PrepareState): Promise<void> {
         }),
       )
     }
-    tasks.push(localTrainer(settings, setStep))
+    // A readiness answer lists versions and checks the disk, so the download is told at most once a
+    // second; the latest state always follows, so the move to installing is never left unsaid.
+    let pending: ReturnType<typeof setTimeout> | null = null
+    tasks.push(
+      localTrainer(settings, setStep, (progress) => {
+        state.packages = progress
+        pending ??= setTimeout(() => {
+          pending = null
+          if (state.running) void broadcast(hostId)
+        }, 1000)
+      }).finally(() => {
+        // The environment is done (or failed) while the base model may still be downloading: say so now.
+        if (pending) clearTimeout(pending)
+        pending = null
+        state.packages = null
+        void broadcast(hostId)
+      }),
+    )
   } else {
     sshHost(settings, hostId)
     tasks.push(remoteTrainer(settings, hostId, setStep))
@@ -384,7 +408,7 @@ async function runPrepare(hostId: string, state: PrepareState): Promise<void> {
 /** Starts preparing (once per host at a time) and answers the readiness at that moment. */
 export async function prepareTraining(hostId: string): Promise<TrainingReadiness> {
   if (!prepareOf(hostId).running) {
-    const state: PrepareState = { running: true, step: null, error: null, failedStep: null }
+    const state: PrepareState = { running: true, step: null, error: null, failedStep: null, packages: null }
     prepares.set(hostId, state)
     void runPrepare(hostId, state)
       .catch((error: unknown) => {
@@ -395,6 +419,7 @@ export async function prepareTraining(hostId: string): Promise<TrainingReadiness
       .finally(() => {
         state.running = false
         state.step = null
+        state.packages = null
         void broadcast(hostId)
       })
   }

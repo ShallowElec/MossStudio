@@ -24,10 +24,11 @@ import {
   type GbcSetupProgress,
   type GbcStatus,
 } from '@shared/gbc'
-import type { Settings } from '@shared/types'
+import type { PackageInstallProgress, Settings } from '@shared/types'
 import { emit } from '../lib/events'
 import { paths } from '../lib/paths'
-import { firstLine, run, runStream, tail } from '../lib/run'
+import { firstLine, run, runStream, tail, type RunResult } from '../lib/run'
+import { installPackages } from './packageInstall'
 import { complete, getProviderSecret, listProviders } from './ai'
 import { createGbcVersion, listGbcBranches, listGbcVersions } from './gbcGit'
 import { pickPython, resolveTorchIndex } from './runtimes'
@@ -165,7 +166,11 @@ async function checkGbc(versionId?: string): Promise<GbcStatus> {
  * version itself with its torch extra. KohakuGBC is not on PyPI, so it is
  * always installed from its code.
  */
-export async function installGbcEnv(versionId: string, signal?: AbortSignal): Promise<{ ok: boolean; output: string; status: GbcStatus }> {
+export async function installGbcEnv(
+  versionId: string,
+  signal?: AbortSignal,
+  onProgress?: (progress: PackageInstallProgress) => void,
+): Promise<{ ok: boolean; output: string; status: GbcStatus }> {
   const settings = getSettings()
   const version = (await listGbcVersions(settings)).find((item) => item.id === versionId)
   if (!version) throw new Error('GBC 版本不存在')
@@ -176,11 +181,30 @@ export async function installGbcEnv(versionId: string, signal?: AbortSignal): Pr
   const py = versionPython(version)
   const env = { PIP_CACHE_DIR: join(paths.cache(), 'pip') }
   const lines: string[] = []
-  const runStep = async (command: string, args: string[], timeoutMs: number): Promise<void> => {
-    lines.push(`$ ${command} ${args.join(' ')}`)
-    const result = await runStream(command, args, { cwd: version.path, timeoutMs, env, signal: abort }, (line) => lines.push(line))
+  const check = (result: RunResult): void => {
     if (result.aborted) throw new Error('安装已停止')
     if (result.code !== 0) throw new Error(`安装步骤失败：${tail(result.stderr || result.stdout, 30)}`)
+  }
+  const runStep = async (command: string, args: string[], timeoutMs: number): Promise<void> => {
+    lines.push(`$ ${command} ${args.join(' ')}`)
+    check(await runStream(command, args, { cwd: version.path, timeoutMs, env, signal: abort }, (line) => lines.push(line)))
+  }
+  const pipStep = async (indexUrl: string | undefined, packages: string[]): Promise<void> => {
+    lines.push(`$ pip install ${indexUrl ? `--index-url ${indexUrl} ` : ''}${packages.join(' ')}`)
+    check(
+      await installPackages({
+        python: py,
+        uv: false,
+        indexUrl,
+        packages,
+        cwd: version.path,
+        env,
+        timeoutMs: 60 * 60_000,
+        signal: abort,
+        onLine: (line) => lines.push(line),
+        onProgress,
+      }),
+    )
   }
   try {
     if (!existsSync(py)) {
@@ -191,9 +215,9 @@ export async function installGbcEnv(versionId: string, signal?: AbortSignal): Pr
     }
     await runStep(py, ['-m', 'pip', 'install', '--upgrade', 'pip'], 300_000)
     const torchIndex = await resolveTorchIndex(settings)
-    if (torchIndex) await runStep(py, ['-m', 'pip', 'install', '--index-url', torchIndex, 'torch', 'torchvision'], 60 * 60_000)
-    const pipIndex = settings.pipIndex ? ['--index-url', settings.pipIndex] : []
-    await runStep(py, ['-m', 'pip', 'install', ...pipIndex, '-e', '.[torch]'], 60 * 60_000)
+    if (torchIndex) await pipStep(torchIndex, ['torch', 'torchvision'])
+    // Without a mirror set here, pip's own configuration decides the index.
+    await pipStep(settings.pipIndex ?? undefined, ['-e', '.[torch]'])
   } finally {
     if (controller) owned.delete(controller)
     forgetGbcStatus()
@@ -227,7 +251,7 @@ export function installGbc(): Promise<GbcStatus> {
       }
       if (controller.signal.aborted) throw new Error('安装已停止')
       setupProgress({ phase: 'packages' })
-      const { status } = await installGbcEnv(version.id, controller.signal)
+      const { status } = await installGbcEnv(version.id, controller.signal, (download) => setupProgress({ phase: 'packages', download }))
       setupProgress({ phase: 'done' })
       return status
     } catch (error) {

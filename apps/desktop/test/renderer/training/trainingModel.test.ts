@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { TrainingReadiness } from '@shared/training'
 import { baseModelTasks, checkRows, homeCard, homeView, projectView, savedLora, splitHome } from '@renderer/pages/training/trainingModel'
 import { catalogFixture, downloadFixture } from '../../mocks/backend/fixtures'
 import {
@@ -105,6 +106,24 @@ describe('checkRows: the first-use check', () => {
     const trainer = rows.find((row) => row.id === 'trainer')!
     expect(trainer.value).toBe('Kohaku Trainer · 正在安装训练环境')
     expect(trainer.pill).toEqual({ tone: 'accent', text: '安装中' })
+    expect(trainer.progress).toBeNull()
+    expect(trainer.detail).toBeUndefined()
+  })
+
+  it('shows the environment download: the package, its size and how far, then the install', () => {
+    const preparing = (packages: TrainingReadiness['prepare']['packages']): TrainingReadiness => ({
+      ...trainingNotPreparedFixture(),
+      prepare: { running: true, step: 'environment', error: null, packages },
+    })
+    const trainer = (readiness: TrainingReadiness) => checkRows(readiness).find((row) => row.id === 'trainer')!
+    const downloading = trainer(preparing({ stage: 'download', package: 'torch', bytes: 2 * 1024 ** 3, percent: 42, downloaded: 3 }))
+    expect(downloading.progress).toBe(42)
+    expect(downloading.detail).toBe('正在下载 torch · 2.0 GB · 已下载 3 个包')
+    // uv tells no percentage: the bar moves without an amount.
+    expect(trainer(preparing({ stage: 'download', package: 'torch', bytes: null, percent: null, downloaded: 0 })).progress).toBeNull()
+    const installing = trainer(preparing({ stage: 'install', package: null, bytes: null, percent: null, downloaded: 30 }))
+    expect(installing.progress).toBeNull()
+    expect(installing.detail).toBe('正在安装下载好的包 · 已下载 30 个包')
   })
 
   it('marks a card that cannot train', () => {
