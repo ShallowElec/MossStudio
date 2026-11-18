@@ -32,6 +32,7 @@ Developer documentation for MossStudio: an Electron + React + TypeScript desktop
 | Engines and GPUs: CUDA packages, 兼容模式 (Vulkan), AMD 原生 (HIP), tiers, remote hosts | [reference/engines.md](reference/engines.md) |
 | Models: catalog, bundles, component files, directories, LoRA | [reference/models.md](reference/models.md) |
 | Training (训练): a training's files and states, channels, how a run is composed, samples, the saved LoRA, screens | [reference/training.md](reference/training.md) |
+| KohakuGBC: what upstream offers now, what is already wired, and the plan for a Studio 解析 entry and dataset labelling | [records/2026-11-18-gbc-survey-and-plan.md](records/2026-11-18-gbc-survey-and-plan.md), [records/2026-11-18-gbc-implementation-plan.md](records/2026-11-18-gbc-implementation-plan.md) |
 
 ## I want to look up...
 
