@@ -1,5 +1,5 @@
 import { ChevronRight, Copy, Image as ImageIcon, MoreHorizontal, Palette, PenLine, SlidersHorizontal } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { ImageResizeMode, ProjectCanvas, ProjectLayer } from '@shared/types'
 import { Button, IconButton, Pill, cn } from '../../components/ui'
 import { MenuGap, MenuItem, Popover } from '../../components/common/Popover'
@@ -19,6 +19,7 @@ import { RegionEditor, RegionLayer, useRegionDraw, type BoardTool } from './Regi
 import { newRegion } from './canvases'
 import type { StripItem } from './runs'
 import { StartPicture } from './StartPicture'
+import { sameData } from './sameData'
 
 export interface CardMask {
   interactive: boolean
@@ -42,6 +43,9 @@ export interface CardStrip {
 /** An entry of a card's ⋯ menu (and its right-click menu). */
 export type CardMenuAction = BoardMenuEntry
 
+/** What the ⋯ menu shows of an entry; choosing one calls `onMenuSelect` with its label. */
+export type CardMenuEntry = Omit<Extract<BoardMenuEntry, { label: string }>, 'onSelect'> | { gap: true }
+
 export interface CanvasCardProps {
   canvas: ProjectCanvas
   view: CardJobView
@@ -53,8 +57,6 @@ export interface CanvasCardProps {
   planned?: readonly ProjectLayer[]
   /** The region whose words are being typed on its box. */
   editingRegionId?: string | null
-  /** Keeps on-card controls (the field on a box) at screen size: 1 / zoom. */
-  screenScale: number
   rerun: RerunCheck
   /** The linked start picture, drawn as the backdrop of a layout canvas. */
   initPicture?: { path: string; resize?: ImageResizeMode; size: Size | null } | null
@@ -71,8 +73,12 @@ export interface CanvasCardProps {
   jobId?: string
   /** A 风格 card: how many 画面 use it. */
   styleUsers?: number
-  /** Entries of the ⋯ menu, the same as its right-click menu: 用作起始图, 复制, 删除 and so on. */
-  menuActions?: readonly CardMenuAction[]
+  /**
+   * Entries of the ⋯ menu, the same as its right-click menu: 用作起始图, 复制, 删除 and so on.
+   * Data only, so the memoized card compares it by value; `onMenuSelect` runs the entry with that label.
+   */
+  menu?: readonly CardMenuEntry[]
+  onMenuSelect?: (label: string) => void
   /**
    * While a wire is out and this card can take it: the inputs it could fill,
    * one socket each on the left edge, top to bottom; `active` is the one the
@@ -213,7 +219,7 @@ const SOCKET_ICONS: Record<LinkRole, typeof ImageIcon> = {
  * (regions, live progress, results or an imported image), and the results
  * row below. The output port on the right edge starts a wire.
  */
-export function CanvasCard(props: CanvasCardProps): React.JSX.Element {
+function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
   const { canvas, view, selected } = props
   // A 画面 acts on the job of the run it shows.
   const jobId = props.jobId ?? canvas.jobId
@@ -322,7 +328,7 @@ export function CanvasCard(props: CanvasCardProps): React.JSX.Element {
           >
             {(close) => (
               <>
-                {tidyEntries(props.menuActions ?? []).map((action, index) =>
+                {tidyEntries(props.menu ?? []).map((action, index) =>
                   'gap' in action ? (
                     <MenuGap key={`gap-${index}`} />
                   ) : (
@@ -334,7 +340,7 @@ export function CanvasCard(props: CanvasCardProps): React.JSX.Element {
                       hint={action.hint}
                       onSelect={() => {
                         close()
-                        action.onSelect()
+                        props.onMenuSelect?.(action.label)
                       }}
                     >
                       {action.label}
@@ -484,11 +490,11 @@ export function CanvasCard(props: CanvasCardProps): React.JSX.Element {
         <RegionEditor
           key={editingRegion.id}
           layer={editingRegion}
-          // Under its box, at screen size.
+          // Under its box, at screen size (the board sets the variable to 1 / zoom).
           style={{
             left: (editingRegion.bbox[0] / canvas.width) * width,
             top: CARD_HEADER + (editingRegion.bbox[3] / canvas.height) * bodyHeight + 6,
-            transform: `scale(${props.screenScale})`,
+            transform: 'scale(var(--board-unscale, 1))',
           }}
           onChange={(next) => props.onChangeLayers((layers) => layers.map((layer) => (layer.id === next.id ? next : layer)))}
           onDone={props.onEditDone}
@@ -770,3 +776,16 @@ export function CanvasCard(props: CanvasCardProps): React.JSX.Element {
     </article>
   )
 }
+
+/**
+ * Cards re-render only when what they show changes, not on every board render
+ * (pan, zoom, a hovered neighbour). The board hands them callbacks that keep
+ * their identity (see useStableCallbacks), and data is compared by value.
+ */
+export function sameCardProps(before: CanvasCardProps, after: CanvasCardProps): boolean {
+  const keys = Object.keys(before) as (keyof CanvasCardProps)[]
+  if (keys.length !== Object.keys(after).length) return false
+  return keys.every((key) => sameData(before[key], after[key]))
+}
+
+export const CanvasCard = memo(CanvasCardView, sameCardProps)

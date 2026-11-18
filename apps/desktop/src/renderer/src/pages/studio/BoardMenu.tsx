@@ -17,8 +17,8 @@ export type BoardMenuEntry =
 const MENU_WIDTH = 200
 
 /** Keeps the useful entries: no gap at either end or next to another gap. */
-export function tidyEntries(entries: readonly BoardMenuEntry[]): BoardMenuEntry[] {
-  const out: BoardMenuEntry[] = []
+export function tidyEntries<T extends object>(entries: readonly (T | { gap: true })[]): (T | { gap: true })[] {
+  const out: (T | { gap: true })[] = []
   for (const entry of entries) {
     if ('gap' in entry && (!out.length || 'gap' in out[out.length - 1]!)) continue
     out.push(entry)

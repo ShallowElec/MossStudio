@@ -384,9 +384,9 @@ describe('studio board', () => {
     await page.mouse.move(header.x - 40, header.y)
     await page.mouse.down()
     await page.mouse.move(header.x - 40, header.y + 60, { steps: 4 })
-    // Mid-drag, the wire already follows.
+    // Mid-drag, the wire already follows (drag steps render once per frame).
+    await expect.poll(() => wire.getAttribute('d')).not.toBe(before)
     const during = await wire.getAttribute('d')
-    expect(during).not.toBe(before)
     await page.mouse.move(header.x - 40, header.y + 140, { steps: 4 })
     await page.mouse.up()
     const after = await wire.getAttribute('d')
@@ -422,6 +422,58 @@ describe('studio board', () => {
     const moved = await center(page, 'article[data-canvas-card="img-1"] [data-card-body]')
     await page.mouse.click(moved.x, moved.y)
     await expect.poll(() => page.evaluate(() => window.__mock.state.projects[0]?.selectedCanvasId), { timeout: 10_000 }).toBe('img-1')
+  })
+
+  it("keeps a dragged 画面's tools on it, and writes the place once it is let go", async () => {
+    const page = await openBoard(app)
+    const tools = page.getByRole('toolbar', { name: '画面工具' })
+    const toolsBefore = (await tools.boundingBox())!
+    const savedY = (): Promise<number | undefined> =>
+      page.evaluate(() => window.__mock.state.projects[0]?.canvases.find((canvas) => canvas.id === 'canvas-1')?.y)
+    const before = (await savedY())!
+    const picture = await center(page, 'article[data-canvas-card="canvas-1"] header')
+    await page.mouse.move(picture.x + 40, picture.y)
+    await page.mouse.down()
+    await page.mouse.move(picture.x + 40, picture.y + 90, { steps: 6 })
+    // Mid-drag the tools ride along with the card.
+    await expect.poll(async () => (await tools.boundingBox())!.y - toolsBefore.y).toBeGreaterThan(60)
+    // The project is written when the card is let go, not on every step.
+    expect(await savedY()).toBe(before)
+    await page.mouse.up()
+    await expect.poll(async () => (await savedY())!, { timeout: 10_000 }).toBeGreaterThan(before + 40)
+  })
+
+  it('pans by dragging the empty board and zooms with the wheel; new cards land where the click was', async () => {
+    const page = await openBoard(app)
+    const card = page.locator('article[data-canvas-card="canvas-1"]')
+    const start = (await card.boundingBox())!
+    const board = (await page.locator('[data-board]').boundingBox())!
+    const from = { x: board.x + board.width - 60, y: board.y + board.height - 60 }
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x - 120, from.y - 80, { steps: 5 })
+    // The board follows the pointer while it is still held.
+    const during = (await card.boundingBox())!
+    expect(Math.round(during.x - start.x)).toBe(-120)
+    expect(Math.round(during.y - start.y)).toBe(-80)
+    await page.mouse.up()
+    await settle(page)
+    const after = (await card.boundingBox())!
+    expect(Math.round(after.x - start.x)).toBe(-120)
+
+    const zoom = page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: /^\d+%$/ })
+    const zoomBefore = await zoom.textContent()
+    await page.mouse.move(board.x + board.width / 2, board.y + board.height / 2)
+    for (let tick = 0; tick < 3; tick += 1) await page.mouse.wheel(0, 120)
+    await expect.poll(() => zoom.textContent()).not.toBe(zoomBefore)
+
+    // The pan and zoom are where the board places new cards.
+    const at = await openBlankMenu(page, { right: 360, top: 140 })
+    await page.getByRole('menuitem', { name: '新建画面' }).click()
+    await expect.poll(() => page.locator('article[data-canvas-kind="layout"]').count()).toBe(2)
+    const created = (await page.locator('article[data-canvas-kind="layout"][aria-current="true"]').boundingBox())!
+    expect(Math.abs(created.x - at.x)).toBeLessThan(4)
+    expect(Math.abs(created.y - at.y)).toBeLessThan(4)
   })
 
   it("pulls a wire from anywhere along a picture's right edge", async () => {

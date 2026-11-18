@@ -62,6 +62,7 @@ import {
   type StripItem,
 } from './runs'
 import { useRunDrag } from './useRunDrag'
+import { useStableCallbacks } from './useStableCallbacks'
 import { boardPorts, type Point } from './wires'
 import { OutputImage } from './OutputImage'
 
@@ -152,6 +153,10 @@ export interface BoardProps {
 /** Things to try on a new board's first 画面. */
 const FIRST_IDEAS = ['海边的灯塔，黄昏，暖色调', '窗台上睡觉的橘猫，午后阳光', '雨夜的霓虹街道，电影感'] as const
 
+function worldTransform(view: View): string {
+  return `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom})`
+}
+
 function isTyping(target: EventTarget | null): boolean {
   return Boolean((target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]'))
 }
@@ -160,8 +165,24 @@ function isTyping(target: EventTarget | null): boolean {
 export function Board(props: BoardProps): React.JSX.Element {
   const viewport = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ zoom: 1, pan: { x: FIT_PADDING.side, y: FIT_PADDING.top } })
+  /**
+   * The view on screen. While the board is dragged it runs ahead of `view`:
+   * each move only sets the transform of `world`, and `view` takes the result
+   * when the drag ends, so a pan re-renders nothing.
+   */
   const viewRef = useRef(view)
-  viewRef.current = view
+  const world = useRef<HTMLDivElement>(null)
+  const showView = (next: View): void => {
+    viewRef.current = next
+    if (world.current) world.current.style.transform = worldTransform(next)
+  }
+  const changeView = useCallback((update: View | ((current: View) => View)) => {
+    const next = typeof update === 'function' ? update(viewRef.current) : update
+    // Written straight away too: React skips the style when it equals the last one it rendered, which a pan may have moved past.
+    viewRef.current = next
+    if (world.current) world.current.style.transform = worldTransform(next)
+    setView(next)
+  }, [])
   const [panning, setPanning] = useState(false)
   const pan = useRef<{ pointerId: number; x: number; y: number; origin: View['pan'] } | null>(null)
   const [brush, setBrush] = useState<MaskBrush>({ mode: 'paint', size: BRUSH_DEFAULT })
@@ -178,7 +199,13 @@ export function Board(props: BoardProps): React.JSX.Element {
   )
   // Results folded into a 画面's filmstrip are not cards on the board.
   const folded = useMemo(() => foldedRunIds(props.canvases), [props.canvases])
-  const cards = useMemo(() => boardCanvases(props.canvases, folded), [props.canvases, folded])
+  /** A card being dragged: drawn where the pointer has it, and written to the project once, when it is let go. */
+  const [dragAt, setDragAt] = useState<{ id: string; x: number; y: number } | null>(null)
+  const onBoard = useMemo(() => boardCanvases(props.canvases, folded), [props.canvases, folded])
+  const cards = useMemo(
+    () => (dragAt ? onBoard.map((canvas) => (canvas.id === dragAt.id ? { ...canvas, x: dragAt.x, y: dragAt.y } : canvas)) : onBoard),
+    [onBoard, dragAt],
+  )
 
   const [hoveredWire, setHoveredWire] = useState<string | null>(null)
   /** The box whose field is open; `fresh` while it is the one just drawn. */
@@ -209,9 +236,27 @@ export function Board(props: BoardProps): React.JSX.Element {
   latest.current = props
   const zoomRef = useRef(view.zoom)
   zoomRef.current = view.zoom
-  const moveRef = useRef(props.onMoveCanvas)
-  moveRef.current = props.onMoveCanvas
-  const cardDrag = useCardDrag({ zoom: zoomRef, onMove: moveRef })
+  // A drag step renders the whole board (wires follow the card), so steps within one frame render once.
+  const dragFrame = useRef({ frame: 0, at: null as { id: string; x: number; y: number } | null })
+  const cardMoveRef = useRef((id: string, x: number, y: number) => {
+    const pending = dragFrame.current
+    pending.at = { id, x, y }
+    if (pending.frame) return
+    pending.frame = requestAnimationFrame(() => {
+      pending.frame = 0
+      setDragAt(pending.at)
+    })
+  })
+  const cardDropRef = useRef((id: string, x: number, y: number) => {
+    cancelAnimationFrame(dragFrame.current.frame)
+    dragFrame.current = { frame: 0, at: null }
+    setDragAt(null)
+    latest.current.onMoveCanvas(id, x, y)
+  })
+  const cardDrag = useCardDrag({ zoom: zoomRef, onMove: cardMoveRef, onDrop: cardDropRef })
+  const callbacks = useStableCallbacks()
+  const bind = callbacks.bind
+  useEffect(() => callbacks.retain(onBoard.map((canvas) => canvas.id)), [callbacks, onBoard])
   // Reading order on the board; frozen while a card is dragged, because moving
   // its element in the DOM would end the drag (pointer capture is lost).
   const order = useRef<string[]>([])
@@ -274,24 +319,27 @@ export function Board(props: BoardProps): React.JSX.Element {
     const choice = list.find((canvas) => canvas.id === latest.current.selectedCanvasId) ?? { width: 1024, height: 1024 }
     const spot = nextFreeSpot(list, choice)
     const extra = { x: spot.x, y: spot.y, w: cardWidth(choice), h: CARD_HEADER + cardBodyHeight(choice) }
-    setView(fitView(size, boardBounds(list, extra), FIT_PADDING))
-  }, [])
+    changeView(fitView(size, boardBounds(list, extra), FIT_PADDING))
+  }, [changeView])
 
-  const reveal = useCallback((canvasId: string) => {
-    const list = latest.current.canvases
-    const found = list.find((item) => item.id === canvasId)
-    // A run in a filmstrip shows on its 画面.
-    const canvas = found && foldedRunIds(list).has(found.id) ? list.find((item) => item.id === found.sourceCanvasId) : found
-    const size = viewportSize()
-    if (!canvas || !size.width) return
-    const rect = cardRect(canvas)
-    const current = viewRef.current
-    const left = rect.x * current.zoom + current.pan.x
-    const top = rect.y * current.zoom + current.pan.y
-    const visible =
-      left >= 0 && top >= FIT_PADDING.top - 24 && left + rect.w * current.zoom <= size.width && top + rect.h * current.zoom <= size.height
-    if (!visible) setView(centerOn(size, rect, current.zoom))
-  }, [])
+  const reveal = useCallback(
+    (canvasId: string) => {
+      const list = latest.current.canvases
+      const found = list.find((item) => item.id === canvasId)
+      // A run in a filmstrip shows on its 画面.
+      const canvas = found && foldedRunIds(list).has(found.id) ? list.find((item) => item.id === found.sourceCanvasId) : found
+      const size = viewportSize()
+      if (!canvas || !size.width) return
+      const rect = cardRect(canvas)
+      const current = viewRef.current
+      const left = rect.x * current.zoom + current.pan.x
+      const top = rect.y * current.zoom + current.pan.y
+      const visible =
+        left >= 0 && top >= FIT_PADDING.top - 24 && left + rect.w * current.zoom <= size.width && top + rect.h * current.zoom <= size.height
+      if (!visible) changeView(centerOn(size, rect, current.zoom))
+    },
+    [changeView],
+  )
 
   const keepInView = useCallback((canvasId: string) => {
     const canvas = latest.current.canvases.find((item) => item.id === canvasId)
@@ -317,19 +365,36 @@ export function Board(props: BoardProps): React.JSX.Element {
     fit()
   }, [props.projectKey, props.canvases.length, fit])
 
-  // Wheel zooms around the pointer.
+  // Wheel zooms around the pointer. Ticks within one frame add up and render once:
+  // a trackpad or a fast wheel sends several per frame.
   useEffect(() => {
     const element = viewport.current
     if (!element) return
+    let frame = 0
+    let factor = 1
+    let at = { x: 0, y: 0 }
     const onWheel = (event: WheelEvent): void => {
       event.preventDefault()
       if (pan.current) return
       const rect = element.getBoundingClientRect()
-      setView((current) => zoomAround(current, event.clientX - rect.left, event.clientY - rect.top, Math.exp(-event.deltaY * 0.0015)))
+      factor *= Math.exp(-event.deltaY * 0.0015)
+      at = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        const by = factor
+        factor = 1
+        // A pan that started since keeps its own origin; zooming under it would make the board jump.
+        if (pan.current) return
+        changeView((current) => zoomAround(current, at.x, at.y, by))
+      })
     }
     element.addEventListener('wheel', onWheel, { passive: false })
-    return () => element.removeEventListener('wheel', onWheel)
-  }, [])
+    return () => {
+      element.removeEventListener('wheel', onWheel)
+      cancelAnimationFrame(frame)
+    }
+  }, [changeView])
 
   // The 遮罩 tool only works on a canvas with a start picture.
   useEffect(() => {
@@ -338,7 +403,7 @@ export function Board(props: BoardProps): React.JSX.Element {
 
   const zoomBy = (factor: number): void => {
     const size = viewportSize()
-    setView((current) => zoomAround(current, size.width / 2, size.height / 2, factor))
+    changeView((current) => zoomAround(current, size.width / 2, size.height / 2, factor))
   }
 
   const endPan = (): void => {
@@ -346,6 +411,7 @@ export function Board(props: BoardProps): React.JSX.Element {
     if (!gesture) return
     pan.current = null
     setPanning(false)
+    setView(viewRef.current)
     if (viewport.current?.hasPointerCapture(gesture.pointerId)) viewport.current.releasePointerCapture(gesture.pointerId)
   }
   useEffect(() => {
@@ -383,10 +449,10 @@ export function Board(props: BoardProps): React.JSX.Element {
       endPan()
       return
     }
-    setView((current) => ({
-      ...current,
+    showView({
+      ...viewRef.current,
       pan: { x: gesture.origin.x + event.clientX - gesture.x, y: gesture.origin.y + event.clientY - gesture.y },
-    }))
+    })
   }
 
   const startCardDrag = (canvas: ProjectCanvas, event: React.PointerEvent<HTMLElement>): void => {
@@ -600,6 +666,7 @@ export function Board(props: BoardProps): React.JSX.Element {
           },
         }
       : null
+  const selectedDrawn = selected ? (cards.find((canvas) => canvas.id === selected.id) ?? selected) : null
   // An empty project: one blank 画面, with the ways to start from a picture under it.
   const only = cards.length === 1 ? cards[0]! : null
   const startFor =
@@ -655,8 +722,11 @@ export function Board(props: BoardProps): React.JSX.Element {
       ) : null}
 
       <div
+        ref={world}
         className="absolute left-0 top-0 origin-top-left"
-        style={{ transform: `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom})` }}
+        // Read from the ref: during a pan it is ahead of `view` (see viewRef).
+        // --board-unscale keeps on-card controls at screen size without re-rendering the cards on zoom.
+        style={{ transform: worldTransform(viewRef.current), '--board-unscale': 1 / Math.max(0.01, view.zoom) } as React.CSSProperties}
       >
         <WireLayer
           wires={wires}
@@ -679,18 +749,69 @@ export function Board(props: BoardProps): React.JSX.Element {
           const item = film ? film.items[film.shown] : undefined
           const shownRun = (item && film?.runs.find((run) => run.id === item.runId)) || canvas
           const views = new Map<string, CardJobView>(film?.runs.map((run) => [run.id, viewOf(run)]) ?? [])
+          const jobId = shownRun.jobId
+          // The card keeps the same functions across renders; each calls this render's closure (see useStableCallbacks).
+          const on = bind(canvas.id, {
+            hover: (hovering: boolean) => setHoveredCard((current) => (hovering ? canvas.id : current === canvas.id ? null : current)),
+            menuSelect: (label: string) => {
+              const entry = cardMenu(canvas, shownRun, item).find((option) => !('gap' in option) && option.label === label)
+              if (entry && !('gap' in entry) && !entry.disabled) entry.onSelect()
+            },
+            stripShow: (index: number) => showRef.current(canvas.id, film!.items[index]!),
+            stripOpen: (index: number) => props.onOpenViewer(film!.items[index]!.runId, film!.items[index]!.output),
+            stripPointerDown: (index: number, event: React.PointerEvent<HTMLButtonElement>) =>
+              runDrag.start(canvas.id, film!.items[index]!, event),
+            saveMask: (png: Uint8Array | null) => props.onSaveMask(canvas.id, png),
+            changeDescription: (text: string) => props.onChangeDescription(canvas.id, text),
+            stopParse: () => props.onStopParse(canvas.id),
+            portDown: (event: React.PointerEvent<HTMLElement>) => connect.start(canvas, event),
+            select: () => {
+              if (cardDrag.isDragTail()) return
+              if (canvas.id !== props.selectedCanvasId) props.onSelectCanvas(canvas.id)
+            },
+            selectRegion: (id: string | null) => props.onSelectRegion(id),
+            changeLayers: (update: (layers: ProjectLayer[]) => ProjectLayer[]) => props.onChangeLayers(canvas.id, update),
+            regionDrawn: (id: string) => {
+              props.onSelectRegion(id)
+              setEditingRegion({ canvasId: canvas.id, id, fresh: true })
+            },
+            editRegion: (id: string) => {
+              props.onSelectRegion(id)
+              setEditingRegion({ canvasId: canvas.id, id, fresh: false })
+            },
+            editDone: (cancel: boolean) => {
+              const editing = editingRegion
+              setEditingRegion(null)
+              if (!cancel || !editing?.fresh) return
+              // Esc on a box just drawn and still empty takes it back.
+              const layer = canvas.layers.find((entry) => entry.id === editing.id)
+              if (layer && !layer.caption.trim() && !layer.text?.trim()) {
+                props.onChangeLayers(canvas.id, (layers) => layers.filter((entry) => entry.id !== editing.id))
+                props.onSelectRegion(null)
+              }
+            },
+            dragStart: (event: React.PointerEvent<HTMLElement>) => startCardDrag(canvas, event),
+            openViewer: (index: number) => {
+              // Letting go of a moved card is not a click on its picture.
+              if (!cardDrag.isDragTail()) props.onOpenViewer(shownRun.id, index)
+            },
+            rerun: (seed: 'new' | 'same') => props.onRerun(canvas.id, seed),
+            cancel: () => {
+              if (jobId) props.onCancel(jobId)
+            },
+            showActivity: () => props.onShowActivity(jobId),
+          })
           const strip: CardStrip | null =
             film && item
               ? {
                   items: film.items,
                   shown: film.shown,
                   views,
-                  onShow: (index) => showRef.current(canvas.id, film.items[index]!),
-                  onOpen: (index) => props.onOpenViewer(film.items[index]!.runId, film.items[index]!.output),
-                  onPointerDown: (index, event) => runDrag.start(canvas.id, film.items[index]!, event),
+                  onShow: on.stripShow,
+                  onOpen: on.stripOpen,
+                  onPointerDown: on.stripPointerDown,
                 }
               : null
-          const jobId = shownRun.jobId
           const busy = props.busyIds.has(canvas.id)
           const isSelected = canvas.id === props.selectedCanvasId
           const init = canvas.kind === 'layout' ? canvas.inputs?.init : undefined
@@ -704,20 +825,24 @@ export function Board(props: BoardProps): React.JSX.Element {
           return (
             <CanvasCard
               key={canvas.id}
-              onHoverChange={(on: boolean) => setHoveredCard((current) => (on ? canvas.id : current === canvas.id ? null : current))}
+              onHoverChange={on.hover}
               inert={inert}
               canvas={canvas}
               view={views.get(shownRun.id) ?? viewOf(shownRun)}
               strip={strip}
               jobId={jobId}
-              menuActions={cardMenu(canvas, shownRun, item)}
+              menu={cardMenu(canvas, shownRun, item).map((entry) => {
+                if ('gap' in entry) return entry
+                const { onSelect: _onSelect, ...shown } = entry
+                return shown
+              })}
+              onMenuSelect={on.menuSelect}
               selected={isSelected}
               dragging={cardDrag.draggingId === canvas.id}
               tool={props.tool}
               selectedRegionId={props.selectedRegionId}
               editingRegionId={editingRegion?.canvasId === canvas.id ? editingRegion.id : null}
               planned={isSelected && plan.length ? plan : undefined}
-              screenScale={1 / Math.max(0.01, view.zoom)}
               rerun={rerunEligibility(canvas, { busy, submitting: props.submitting, update: props.update })}
               initPicture={initPath ? { path: initPath, resize: init?.resize, size: startPictureSize(canvas, props.canvases) } : null}
               mask={
@@ -726,7 +851,7 @@ export function Board(props: BoardProps): React.JSX.Element {
                       interactive: props.tool === 'mask' && mask.enabled,
                       brush,
                       command: maskCommand,
-                      onSave: (png) => props.onSaveMask(canvas.id, png),
+                      onSave: on.saveMask,
                     }
                   : null
               }
@@ -740,7 +865,7 @@ export function Board(props: BoardProps): React.JSX.Element {
                   : undefined
               }
               model={canvas.kind === 'layout' ? (props.describeModel?.(canvas) ?? null) : null}
-              onChangeDescription={(text) => props.onChangeDescription(canvas.id, text)}
+              onChangeDescription={on.changeDescription}
               ideas={firstCanvas(canvas) && !(isSelected && plan.length) ? FIRST_IDEAS : undefined}
               dropZones={
                 offer
@@ -757,45 +882,21 @@ export function Board(props: BoardProps): React.JSX.Element {
                   : undefined
               }
               parsing={props.parsing[canvas.id]}
-              onStopParse={() => props.onStopParse(canvas.id)}
+              onStopParse={on.stopParse}
               connecting={Boolean(draft && canvas.id !== draft.sourceId)}
               wireOut={draft?.sourceId === canvas.id}
-              onPortDown={(event) => connect.start(canvas, event)}
-              onSelect={() => {
-                if (cardDrag.isDragTail()) return
-                if (canvas.id !== props.selectedCanvasId) props.onSelectCanvas(canvas.id)
-              }}
-              onSelectRegion={props.onSelectRegion}
-              onChangeLayers={(update) => props.onChangeLayers(canvas.id, update)}
-              onRegionDrawn={(id) => {
-                props.onSelectRegion(id)
-                setEditingRegion({ canvasId: canvas.id, id, fresh: true })
-              }}
-              onEditRegion={(id) => {
-                props.onSelectRegion(id)
-                setEditingRegion({ canvasId: canvas.id, id, fresh: false })
-              }}
-              onEditDone={(cancel) => {
-                const editing = editingRegion
-                setEditingRegion(null)
-                if (!cancel || !editing?.fresh) return
-                // Esc on a box just drawn and still empty takes it back.
-                const layer = canvas.layers.find((item) => item.id === editing.id)
-                if (layer && !layer.caption.trim() && !layer.text?.trim()) {
-                  props.onChangeLayers(canvas.id, (layers) => layers.filter((item) => item.id !== editing.id))
-                  props.onSelectRegion(null)
-                }
-              }}
-              onDragStart={(event) => startCardDrag(canvas, event)}
-              onOpenViewer={(index) => {
-                // Letting go of a moved card is not a click on its picture.
-                if (!cardDrag.isDragTail()) props.onOpenViewer(shownRun.id, index)
-              }}
-              onRerun={(seed) => props.onRerun(canvas.id, seed)}
-              onCancel={() => {
-                if (jobId) props.onCancel(jobId)
-              }}
-              onShowActivity={() => props.onShowActivity(jobId)}
+              onPortDown={on.portDown}
+              onSelect={on.select}
+              onSelectRegion={on.selectRegion}
+              onChangeLayers={on.changeLayers}
+              onRegionDrawn={on.regionDrawn}
+              onEditRegion={on.editRegion}
+              onEditDone={on.editDone}
+              onDragStart={on.dragStart}
+              onOpenViewer={on.openViewer}
+              onRerun={on.rerun}
+              onCancel={on.cancel}
+              onShowActivity={on.showActivity}
             />
           )
         })}
@@ -805,7 +906,8 @@ export function Board(props: BoardProps): React.JSX.Element {
           <div
             className="absolute left-0 top-0 z-[7] origin-top-left"
             style={{
-              transform: `translate(${selected.x}px, ${selected.y}px) scale(${1 / Math.max(0.01, view.zoom)}) translate(0, calc(-100% - 6px))`,
+              // Where the card is drawn, which leads the project while it is dragged.
+              transform: `translate(${selectedDrawn!.x}px, ${selectedDrawn!.y}px) scale(${1 / Math.max(0.01, view.zoom)}) translate(0, calc(-100% - 6px))`,
             }}
           >
             <CardToolbar
