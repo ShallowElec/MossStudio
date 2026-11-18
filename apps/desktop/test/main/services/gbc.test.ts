@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunOptions, RunResult } from '@main/lib/run'
 import type { GbcGraph, GbcParseProgress } from '@shared/gbc'
@@ -25,6 +25,8 @@ const state = {
   ],
   emitted: [] as Array<[string, unknown]>,
   configs: [] as string[],
+  args: [] as string[][],
+  versions: [] as Array<{ id: string; path: string }>,
   behaviour: (async () => ({})) as Behaviour,
 }
 
@@ -59,6 +61,7 @@ vi.mock('@main/lib/run', async (importOriginal) => ({
   // No NVIDIA here: GBC runs on the CPU.
   run: async () => ({ code: 1, stdout: '', stderr: '', timedOut: false }),
   runStream: async (_command: string, args: string[], options: RunOptions, onLine: (line: string) => void) => {
+    state.args.push(args)
     state.configs.push(readFileSync(args[1]!, 'utf8'))
     const result = await state.behaviour(args, options, onLine)
     return { code: 0, stdout: '', stderr: '', timedOut: false, ...result }
@@ -74,7 +77,11 @@ vi.mock('@main/services/ai', () => ({
     return provider ? { kind: provider.kind, baseUrl: provider.baseUrl, model: provider.model, apiKey: 'sk-test' } : null
   },
 }))
-vi.mock('@main/services/gbcGit', () => ({ listGbcVersions: async () => [], listGbcBranches: vi.fn(), createGbcVersion: vi.fn() }))
+vi.mock('@main/services/gbcGit', () => ({
+  listGbcVersions: async () => state.versions,
+  listGbcBranches: vi.fn(),
+  createGbcVersion: vi.fn(),
+}))
 vi.mock('@main/services/runtimes', () => ({ pickPython: vi.fn(), resolveTorchIndex: vi.fn() }))
 
 const load = () => import('@main/services/gbc')
@@ -91,6 +98,8 @@ beforeEach(() => {
   state.settings = settingsFixture({ gbcEnabled: true, gbcDetector: 'sam3' })
   state.emitted = []
   state.configs = []
+  state.args = []
+  state.versions = []
   state.behaviour = writes(graph)
 })
 
@@ -200,5 +209,44 @@ describe('parseProgressLine', () => {
     expect(parseProgressLine('Downloading (…)okenizer.json')).toEqual({ phase: 'download' })
     expect(parseProgressLine('vlm  12%|█  | 3/25')).toBeNull()
     expect(parseProgressLine('admitted 1 job')).toBeNull()
+  })
+})
+
+describe('gbcConfigLayers', () => {
+  const version = (options: { preset?: string; nest?: boolean } = {}): string => {
+    const base = join(root(), 'gbc-version')
+    mkdirSync(join(base, 'configs', 'controls'), { recursive: true })
+    if (options.preset) writeFileSync(join(base, 'configs', 'controls', `${options.preset}.py`), 'controls = {}\n')
+    if (options.nest) {
+      mkdirSync(join(base, 'configs', 'programs'), { recursive: true })
+      writeFileSync(join(base, 'configs', 'programs', 'gbc_nest.py'), 'program = "nest"\n')
+    }
+    return base
+  }
+
+  it('adds an existing control preset, skips a missing one, and refuses a version without GBC-Nest', async () => {
+    const { gbcConfigLayers } = await load()
+    const base = version({ preset: 'mid' })
+    expect(gbcConfigLayers(base, { preset: 'mid' })).toEqual([join(base, 'configs', 'controls', 'mid.py')])
+    expect(gbcConfigLayers(base, { preset: 'large' })).toEqual([])
+    expect(gbcConfigLayers(null, { preset: 'mid', program: 'nest' })).toEqual([])
+    expect(() => gbcConfigLayers(base, { program: 'nest' })).toThrow('GBC-Nest')
+  })
+
+  it('runs the installed version with the preset and GBC-Nest after the generated machine', async () => {
+    const base = version({ preset: 'mid', nest: true })
+    state.versions = [{ id: 'v1', path: base }]
+    state.behaviour = async (args) => {
+      writeFileSync(sinkOf(args[1]!), `${JSON.stringify(graph)}\n`)
+      return {}
+    }
+    const { runGbc } = await load()
+    await runGbc({ files: [picture()], providerId: 'claude', detector: 'owlv2', versionId: 'v1', preset: 'mid', program: 'nest' })
+    expect(state.args.at(-1)).toEqual([
+      'run',
+      expect.any(String),
+      join(base, 'configs', 'controls', 'mid.py'),
+      join(base, 'configs', 'programs', 'gbc_nest.py'),
+    ])
   })
 })

@@ -1,7 +1,7 @@
 import { ImagePlus, Square, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Events, Ipc } from '@shared/channels'
-import type { GbcLanguage, GbcPicture, GbcSetupProgress } from '@shared/gbc'
+import type { GbcLanguage, GbcPicture, GbcPreset, GbcProgram, GbcSetupProgress } from '@shared/gbc'
 import type { ProjectCanvas } from '@shared/types'
 import { Button, FieldLabel, Segmented, Select, Spinner, Textarea, useToast } from '../../components/ui'
 import { Notice } from '../../components/common/Notice'
@@ -47,6 +47,8 @@ export function GbcPanel({
   const [providerId, setProviderId] = useState('')
   const [detector, setDetector] = useState<'owlv2' | 'sam3'>('owlv2')
   const [language, setLanguage] = useState<GbcLanguage>('auto')
+  const [preset, setPreset] = useState<GbcPreset>('mid')
+  const [program, setProgram] = useState<GbcProgram>('standard')
   const [caption, setCaption] = useState('')
   const [installing, setInstalling] = useState(false)
   const [setupPhase, setSetupPhase] = useState<GbcSetupProgress['phase'] | null>(null)
@@ -93,7 +95,7 @@ export function GbcPanel({
     if (!source || !providerId) return
     setCaption('')
     void job
-      .run({ path: source.path, providerId, detector, language, destination: 'studio', fresh })
+      .run({ path: source.path, providerId, detector, language, preset, program, destination: 'studio', fresh })
       .catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
   }
 
@@ -258,6 +260,17 @@ export function GbcPanel({
                 { value: 'en', label: 'English' },
               ]}
             />
+          </div>
+          <div className="flex gap-2">
+            <Select aria-label="解析规模" value={preset} onChange={(event) => setPreset(event.target.value as GbcPreset)}>
+              <option value="small">规模：小</option>
+              <option value="mid">规模：中</option>
+              <option value="large">规模：大</option>
+            </Select>
+            <Select aria-label="解析程序" value={program} onChange={(event) => setProgram(event.target.value as GbcProgram)}>
+              <option value="standard">程序：标准</option>
+              <option value="nest">程序：分格（GBC-Nest）</option>
+            </Select>
           </div>
         </section>
 

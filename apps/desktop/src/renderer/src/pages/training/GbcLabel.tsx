@@ -75,6 +75,8 @@ export function GbcLabel({
         providerId,
         detector: settings?.gbcDetector ?? 'owlv2',
         language: settings?.gbcLanguage ?? 'auto',
+        preset: 'mid',
+        program: 'standard',
         destination: 'training',
         trainingId,
       })

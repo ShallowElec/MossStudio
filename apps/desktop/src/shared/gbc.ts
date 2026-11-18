@@ -27,12 +27,20 @@ export interface GbcGraph {
   edges?: unknown[]
 }
 
+export type GbcPreset = 'small' | 'mid' | 'large'
+
+export type GbcProgram = 'standard' | 'nest'
+
 export interface GbcRunInput {
   folder?: string
   files?: string[]
   providerId: string
   detector: 'owlv2' | 'sam3'
   versionId?: string
+  /** Shipped control preset merged after the machine: smaller or larger graphs. */
+  preset?: GbcPreset
+  /** `nest` adds GBC-Nest, which reads panels and people better than the plain program. */
+  program?: GbcProgram
   sidecarJson?: boolean
   sidecarTxt?: boolean
 }

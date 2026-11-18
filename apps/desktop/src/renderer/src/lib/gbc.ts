@@ -7,6 +7,8 @@ import {
   type GbcDestination,
   type GbcJobSnapshot,
   type GbcLanguage,
+  type GbcPreset,
+  type GbcProgram,
   type GbcSetupProgress,
   type GbcStatus,
 } from '@shared/gbc'
@@ -73,6 +75,8 @@ export interface GbcJobStart {
   providerId: string
   detector: 'owlv2' | 'sam3'
   language?: GbcLanguage
+  preset?: GbcPreset
+  program?: GbcProgram
   destination?: GbcDestination
   fresh?: boolean
   trainingId?: string
@@ -108,6 +112,8 @@ export function useGbcJob(): {
       providerId: input.providerId,
       detector: input.detector,
       language: input.language,
+      preset: input.preset,
+      program: input.program,
       destination: input.destination,
       fresh: input.fresh,
       trainingId: input.trainingId,

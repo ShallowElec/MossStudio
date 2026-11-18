@@ -14,6 +14,8 @@ import {
   type GbcJobPicture,
   type GbcJobSnapshot,
   type GbcLanguage,
+  type GbcPreset,
+  type GbcProgram,
   type GbcParseProgress,
   type GbcParseResult,
   type GbcPicture,
@@ -284,6 +286,27 @@ export class GbcStopped extends Error {
   }
 }
 
+/**
+ * Extra config layers after the generated machine: a shipped control preset,
+ * then GBC-Nest. They live in the installed version's clone; without one there
+ * is nothing to merge, and Nest says so instead of silently running the plain
+ * program.
+ */
+export function gbcConfigLayers(versionPath: string | null, options: { preset?: GbcPreset; program?: GbcProgram }): string[] {
+  if (!versionPath) return []
+  const layers: string[] = []
+  if (options.preset) {
+    const preset = join(versionPath, 'configs', 'controls', `${options.preset}.py`)
+    if (existsSync(preset)) layers.push(preset)
+  }
+  if (options.program === 'nest') {
+    const nest = join(versionPath, 'configs', 'programs', 'gbc_nest.py')
+    if (!existsSync(nest)) throw new Error('这个 KohakuGBC 版本没有 GBC-Nest（configs/programs/gbc_nest.py）')
+    layers.push(nest)
+  }
+  return layers
+}
+
 export interface GbcRunControl {
   signal?: AbortSignal
   /** Every output line, progress bars included (they redraw with a carriage return). */
@@ -322,6 +345,7 @@ export async function runGbc(input: GbcRunInput, control: GbcRunControl = {}): P
   const configPath = join(out, 'machine.py')
   await writeFile(configPath, configFor(input, provider, out, keyEnv, device, sourceSpec), 'utf8')
   const version = input.versionId ? (await listGbcVersions(getSettings())).find((item) => item.id === input.versionId) : null
+  const layers = gbcConfigLayers(version?.path ?? null, input)
   const bundled = version ? versionBinary(version) : ''
   const command = bundled && existsSync(bundled) ? bundled : process.env['CLOVER_GBC_BIN'] || 'gbc'
   const controller = ownedController()
@@ -332,7 +356,7 @@ export async function runGbc(input: GbcRunInput, control: GbcRunControl = {}): P
   try {
     result = await runStream(
       command,
-      ['run', configPath],
+      ['run', configPath, ...layers],
       {
         cwd: version?.path ?? out,
         env: { [keyEnv]: provider.apiKey, PYTHONUNBUFFERED: '1' },
@@ -710,6 +734,6 @@ export async function startGbcJob(input: GbcJobInput): Promise<{ jobId: string; 
   jobs.set(jobId, { snapshot, controller: new AbortController() })
   trimJobs()
   emit(Events.gbcJob, { ...snapshot })
-  void runJob(jobId, files, input, language)
+  void runJob(jobId, files, { ...input, versionId: input.versionId ?? getSettings().gbcVersionId ?? undefined }, language)
   return { jobId, total: files.length }
 }

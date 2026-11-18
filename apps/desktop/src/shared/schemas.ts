@@ -710,6 +710,8 @@ export const schemas = {
       versionId: z.string().max(160).nullish(),
       language: z.enum(['auto', 'zh', 'en']).optional(),
       destination: z.enum(['studio', 'training']).optional(),
+      preset: z.enum(['small', 'mid', 'large']).optional(),
+      program: z.enum(['standard', 'nest']).optional(),
       trainingId: z.string().min(1).max(80).optional(),
       fresh: z.boolean().optional(),
     })
