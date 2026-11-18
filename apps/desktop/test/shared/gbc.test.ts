@@ -7,6 +7,7 @@ import {
   pictureFromGraph,
   regionsFromGraph,
   resolveGbcLanguage,
+  trainingCaption,
   type GbcGraph,
   type GbcVertex,
 } from '@shared/gbc'
@@ -173,5 +174,30 @@ describe('pictureFromGraph', () => {
     expect(picture.summary).toBe('a room')
     expect(picture.short).toBe('a room')
     expect(picture.regions).toEqual([])
+  })
+})
+
+describe('trainingCaption', () => {
+  it('takes the short caption, strips the "this image shows" opener and keeps one sentence', () => {
+    expect(trainingCaption({ short: 'This image shows an orange cat asleep on a sunny sill.', summary: '' })).toBe(
+      'an orange cat asleep on a sunny sill.',
+    )
+    expect(
+      trainingCaption({
+        short: 'The picture depicts a girl in a red coat. Snow falls on the street behind her.',
+        summary: '',
+      }),
+    ).toBe('a girl in a red coat.')
+  })
+
+  it('leaves Chinese alone, trims whitespace, falls back to the summary and gives nothing for empty words', () => {
+    expect(trainingCaption({ short: '一只橘猫睡在窗台上', summary: '' })).toBe('一只橘猫睡在窗台上')
+    expect(trainingCaption({ short: '  a  cat  ', summary: '' })).toBe('a cat')
+    expect(trainingCaption({ short: '', summary: 'a room with a lamp' })).toBe('a room with a lamp')
+    expect(trainingCaption({ short: '   ', summary: '' })).toBe('')
+  })
+
+  it('never grows past 200 characters', () => {
+    expect(trainingCaption({ short: 'x'.repeat(400), summary: '' })).toHaveLength(200)
   })
 })

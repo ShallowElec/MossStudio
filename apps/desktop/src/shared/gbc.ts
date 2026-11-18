@@ -229,3 +229,15 @@ export function gbcBlocker(
   if (!status?.available) return '看图还没装好'
   return null
 }
+
+/**
+ * A training caption from what GBC wrote: the short caption, one sentence, with
+ * the "this image shows" opener removed. Empty when the graph gave no words.
+ */
+export function trainingCaption(picture: Pick<GbcPicture, 'short' | 'summary'>): string {
+  const raw = (picture.short.trim() || picture.summary.trim()).replace(/\s+/g, ' ')
+  if (!raw) return ''
+  const stripped = raw.replace(/^(this|the)\s+(image|picture|photo|illustration|drawing)\s+(shows|depicts|features|is of)\s*[:,]?\s*/i, '')
+  const first = stripped.split(/(?<=[.。!?！？])\s+/)[0] ?? stripped
+  return first.trim().slice(0, 200).trim()
+}

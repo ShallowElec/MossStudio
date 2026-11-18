@@ -702,6 +702,9 @@ export async function startGbcJob(input: GbcJobInput): Promise<{ jobId: string; 
   }
   if (!files.length) throw new Error('这个目录里没有图片')
   const language = resolveGbcLanguage(input.language ?? getSettings().gbcLanguage, input.destination ?? 'studio')
+  // One run at a time: two would fight over the same card and the same models.
+  const active = [...jobs.values()].find((state) => state.snapshot.phase === 'starting' || state.snapshot.phase === 'running')
+  if (active) throw new Error('已经有一个解析在跑，先等它完成或停止')
   const jobId = `gbc-${randomUUID().slice(0, 8)}`
   const snapshot: GbcJobSnapshot = { jobId, phase: 'starting', total: files.length, done: 0, pictures: [], warnings: [] }
   jobs.set(jobId, { snapshot, controller: new AbortController() })

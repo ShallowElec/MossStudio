@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { GbcJobPicture } from '@shared/gbc'
+import { trainingCaption, type GbcJobPicture } from '@shared/gbc'
 import type { DatasetImage } from '@shared/training'
 import { Button, ConfirmDialog, Modal, Segmented, Spinner, Textarea, useToast } from '../../components/ui'
 import { Notice } from '../../components/common/Notice'
@@ -56,7 +56,7 @@ export function GbcLabel({
 
   useEffect(() => {
     const current = queue?.[index]
-    if (current) setDraft(current.picture.short || current.picture.summary)
+    if (current) setDraft(trainingCaption(current.picture))
   }, [queue, index])
 
   const current = queue?.[index] ?? null
@@ -103,7 +103,7 @@ export function GbcLabel({
     let written = 0
     for (const entry of queue.slice(index)) {
       const match = images.find((item) => item.path === entry.path)
-      const caption = entry.picture.short || entry.picture.summary
+      const caption = trainingCaption(entry.picture)
       if (match && caption.trim()) {
         onLabel(match.name, caption.trim())
         written += 1
