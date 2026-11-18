@@ -417,6 +417,18 @@ export function StudioPage(): React.JSX.Element {
     requestAnimationFrame(() => board.current?.reveal(filled.id))
   }
 
+  /** 作为参考图: imports the picture beside the board and links it to the selected 画面. */
+  const useParsedAsReference = (path: string): void => {
+    if (!selected || selected.kind !== 'layout') {
+      toast.push('先选中一个画面，再把这张图作为参考', 'error')
+      return
+    }
+    void inputImport.addPaths(selected.id, 'reference', undefined, [path]).then(
+      () => toast.push('已作为参考图', 'success'),
+      (error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'),
+    )
+  }
+
   /** 放大: a 放大 node fed by a card's picture, to its right (or where a wire was dropped). */
   const upscaleFrom = (sourceId: string, at?: { x: number; y: number }): void => {
     const list = project.canvasesRef.current
@@ -1012,7 +1024,12 @@ export function StudioPage(): React.JSX.Element {
           width={widths.right}
           onWidthChange={(right) => setWidths((value) => ({ ...value, right }))}
         >
-          <GbcPanel canvases={project.canvases} onMakeCanvas={makeCanvasFromParse} onClose={() => setGbcOpen(false)} />
+          <GbcPanel
+            canvases={project.canvases}
+            onMakeCanvas={makeCanvasFromParse}
+            onUseAsReference={selected?.kind === 'layout' ? useParsedAsReference : undefined}
+            onClose={() => setGbcOpen(false)}
+          />
         </StudioSidebar>
       ) : null}
 

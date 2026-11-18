@@ -28,10 +28,13 @@ interface Source {
 export function GbcPanel({
   canvases,
   onMakeCanvas,
+  onUseAsReference,
   onClose,
 }: {
   canvases: readonly ProjectCanvas[]
   onMakeCanvas: (picture: GbcPicture, source: Source) => void
+  /** Links the picture into the selected 画面 as a vision reference; absent when none is selected. */
+  onUseAsReference?: (path: string) => void
   onClose: () => void
 }): React.JSX.Element {
   const settings = useApp((state) => state.settings)
@@ -83,11 +86,11 @@ export function GbcPanel({
   const running = job.busy
   const canRun = Boolean(source) && Boolean(providerId) && !running && !gbc.blocker && gbc.status?.available !== false
 
-  function start(): void {
+  function start(fresh = false): void {
     if (!source || !providerId) return
     setCaption('')
     void job
-      .run({ path: source.path, providerId, detector, language, destination: 'studio' })
+      .run({ path: source.path, providerId, detector, language, destination: 'studio', fresh })
       .catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
   }
 
@@ -266,7 +269,7 @@ export function GbcPanel({
               </Button>
             </>
           ) : (
-            <Button tone="primary" size="sm" data-gbc-run disabled={!canRun} onClick={start}>
+            <Button tone="primary" size="sm" data-gbc-run disabled={!canRun} onClick={() => start()}>
               解析
             </Button>
           )}
@@ -301,6 +304,14 @@ export function GbcPanel({
                 }}
               >
                 复制提示词
+              </Button>
+              {onUseAsReference && source ? (
+                <Button size="sm" onClick={() => onUseAsReference(source.path)}>
+                  作为参考图
+                </Button>
+              ) : null}
+              <Button size="sm" tone="ghost" disabled={running || !source} onClick={() => start(true)}>
+                重新读
               </Button>
             </div>
             <p className="text-caption text-ink-2">{picture.regions.length} 个区域</p>
