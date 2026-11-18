@@ -338,6 +338,7 @@ export function Editor({
         </Button>
       </aside>
       <Pictures
+        trainingId={initial.id}
         dataset={dataset}
         captioning={captioning}
         notice={

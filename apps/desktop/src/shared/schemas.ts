@@ -710,6 +710,7 @@ export const schemas = {
       versionId: z.string().max(160).nullish(),
       language: z.enum(['auto', 'zh', 'en']).optional(),
       destination: z.enum(['studio', 'training']).optional(),
+      trainingId: z.string().min(1).max(80).optional(),
       fresh: z.boolean().optional(),
     })
     .refine((value) => Boolean(value.folder?.trim() || value.files?.length), { message: '需要选择图片目录或图片文件' }),

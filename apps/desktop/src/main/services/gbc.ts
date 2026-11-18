@@ -504,6 +504,8 @@ export interface GbcJobInput extends GbcRunInput {
   language?: GbcLanguage
   /** Ignore the cache and read every picture again. */
   fresh?: boolean
+  /** A training's id: each picture's graph is stored under `training/<id>/gbc`. */
+  trainingId?: string
 }
 
 const JOBS_KEPT = 8
@@ -658,6 +660,19 @@ async function runJob(jobId: string, files: string[], input: GbcJobInput, langua
             snapshot.warnings = [...snapshot.warnings, `${image.name}：中文翻译没成功，保留了英文`]
         }
         await writeCached(key, final)
+        if (input.trainingId) {
+          try {
+            const dir = join(paths.trainingProject(input.trainingId), 'gbc')
+            await mkdir(dir, { recursive: true })
+            await writeFile(
+              join(dir, `${image.name.replace(/\.[^.]+$/, '')}.json`),
+              JSON.stringify({ path: image.path, key, picture: final }, null, 2),
+              'utf8',
+            )
+          } catch {
+            snapshot.warnings = [...snapshot.warnings, `${image.name}：图谱没存下来`]
+          }
+        }
         pictures.push({ path: image.path, key, picture: final })
       }
     }

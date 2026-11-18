@@ -75,6 +75,7 @@ export interface GbcJobStart {
   language?: GbcLanguage
   destination?: GbcDestination
   fresh?: boolean
+  trainingId?: string
 }
 
 /**
@@ -109,6 +110,7 @@ export function useGbcJob(): {
       language: input.language,
       destination: input.destination,
       fresh: input.fresh,
+      trainingId: input.trainingId,
     })
     jobId.current = started.jobId
     // The job may finish before its first event reaches this panel; ask once.

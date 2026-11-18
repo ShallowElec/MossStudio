@@ -5,6 +5,7 @@ import { cloverUrl } from '../../lib/clover'
 import { dimensions } from '../../lib/format'
 import { Popover, MenuItem } from '../../components/common/Popover'
 import { Button, EmptyState, IconButton, LoadingRow, Pill, Segmented, Spinner, Textarea, cn } from '../../components/ui'
+import { GbcLabel } from './GbcLabel'
 import { filterPictures, problemBadge, problemChips, problemPill, type PictureFilter } from './editorModel'
 import { readPreference, writePreference } from './useTraining'
 
@@ -102,6 +103,7 @@ function ListRow({
  * pictures, a grid to look at or a list to describe each one.
  */
 export function Pictures({
+  trainingId,
   dataset,
   captioning,
   notice,
@@ -111,6 +113,7 @@ export function Pictures({
   onCaption,
   onAutoCaption,
 }: {
+  trainingId: string
   dataset: TrainingDataset | null
   captioning: boolean
   notice: React.ReactNode
@@ -186,6 +189,9 @@ export function Pictures({
             {captioning ? <Spinner /> : <Sparkles className="size-4" strokeWidth={1.6} aria-hidden="true" />}
             自动写描述
           </Button>
+        ) : null}
+        {dataset?.images.length ? (
+          <GbcLabel trainingId={trainingId} images={dataset.images} onLabel={(name, caption) => onCaption(name, caption)} />
         ) : null}
         {addMenu}
         <Segmented<PictureView>
