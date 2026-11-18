@@ -260,6 +260,47 @@ describe('training: runs and results', () => {
   })
 })
 
+describe('training: GBC 打标', () => {
+  const app = useApp()
+
+  it('suggests captions for the pictures without one, and writes only what is accepted', async () => {
+    const page = await app.open({
+      scenario: 'trainings',
+      route: '/training/tp-aming',
+      defer: true,
+      settings: { trainingEnabled: true, gbcEnabled: true },
+    })
+    await page.evaluate(() => {
+      const { gbcStatusFixture, aiProviderFixture } = window.__mock.fixtures
+      window.__mock.state.gbc.status = gbcStatusFixture(true)
+      window.__mock.state.aiProviders = [aiProviderFixture({ id: 'claude', kind: 'anthropic', name: 'Claude' })]
+    })
+    await app.start()
+
+    const label = page.getByRole('button', { name: /GBC 打标/ })
+    await label.waitFor()
+    // The fixture has six pictures without a description; six is under the cost confirmation.
+    expect(await label.textContent()).toContain('6')
+    await label.click()
+
+    const dialog = page.getByRole('dialog')
+    await dialog.waitFor()
+    await expect.poll(() => dialog.getByText('第 1 / 6 张').isVisible()).toBe(true)
+    // The suggestion is the graph's short caption, with no "this image shows" opener.
+    expect(await dialog.getByLabel('建议的描述').inputValue()).toBe('一只橘猫睡在窗台上')
+    await dialog.getByRole('button', { name: '接受并继续' }).click()
+    await expect
+      .poll(() => app.calls<{ id: string; name: string; caption: string }>('training:caption-set'))
+      .toEqual([{ id: 'tp-aming', name: '05-1536x2048.png', caption: '一只橘猫睡在窗台上' }])
+    await expect.poll(() => dialog.getByText('第 2 / 6 张').isVisible()).toBe(true)
+
+    // 跳过 writes nothing and moves on.
+    await dialog.getByRole('button', { name: '跳过' }).click()
+    await expect.poll(() => dialog.getByText('第 3 / 6 张').isVisible()).toBe(true)
+    expect(await app.calls('training:caption-set')).toHaveLength(1)
+  })
+})
+
 describe('settings › 训练', () => {
   const app = useApp()
 
