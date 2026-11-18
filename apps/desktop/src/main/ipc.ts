@@ -50,7 +50,19 @@ import {
   renameConversation,
   saveProvider,
 } from './services/ai'
-import { cancelParse, forgetGbcStatus, gbcStatus, installGbc, installGbcEnv, listGbcImages, parseRegions, runGbc } from './services/gbc'
+import {
+  cancelGbcJob,
+  cancelParse,
+  forgetGbcStatus,
+  gbcJobSnapshot,
+  gbcStatus,
+  installGbc,
+  installGbcEnv,
+  listGbcImages,
+  parseRegions,
+  runGbc,
+  startGbcJob,
+} from './services/gbc'
 import { nativeImage } from 'electron'
 import { createGbcVersion, listGbcBranches, listGbcCommits, listGbcVersions, removeGbcVersion } from './services/gbcGit'
 import { closeSshTerminal, inputSshTerminal, listSshTerminals, openSshTerminal } from './services/sshSessions'
@@ -294,6 +306,20 @@ export function registerIpc(): void {
   })
 
   handle(Ipc.gbcRun, schemas.gbcRun, (input) => runGbc(input))
+
+  handle(Ipc.gbcJobStart, schemas.gbcJobStart, (input) =>
+    startGbcJob({
+      ...input,
+      versionId: input.versionId ?? undefined,
+    }),
+  )
+
+  handle(Ipc.gbcJobSnapshot, schemas.gbcJobQuery, ({ jobId }) => gbcJobSnapshot(jobId))
+
+  handle(Ipc.gbcJobCancel, schemas.gbcJobQuery, ({ jobId }) => {
+    cancelGbcJob(jobId)
+    return { canceled: true }
+  })
 
   handle(Ipc.gbcBranches, null, () => listGbcBranches(getSettings()))
 

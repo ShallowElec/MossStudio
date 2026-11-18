@@ -386,6 +386,7 @@ export const schemas = {
       gbcProviderId: z.string().min(1).max(120).nullable(),
       gbcVersionId: z.string().min(1).max(160).nullable(),
       gbcDetector: z.enum(['owlv2', 'sam3']),
+      gbcLanguage: z.enum(['auto', 'zh', 'en']),
       engineAutoUpdate: z.boolean(),
     })
     .partial(),
@@ -699,6 +700,20 @@ export const schemas = {
       sidecarTxt: z.boolean().optional(),
     })
     .refine((value) => Boolean(value.folder?.trim() || value.files?.length), { message: '需要选择图片目录或图片文件' }),
+
+  gbcJobStart: z
+    .object({
+      folder: z.string().max(4096).optional(),
+      files: z.array(z.string().max(4096)).max(2000).optional(),
+      providerId: z.string().min(1).max(120),
+      detector: z.enum(['owlv2', 'sam3']).default('owlv2'),
+      versionId: z.string().max(160).nullish(),
+      language: z.enum(['auto', 'zh', 'en']).optional(),
+      destination: z.enum(['studio', 'training']).optional(),
+      fresh: z.boolean().optional(),
+    })
+    .refine((value) => Boolean(value.folder?.trim() || value.files?.length), { message: '需要选择图片目录或图片文件' }),
+  gbcJobQuery: z.object({ jobId: z.string().min(1).max(80) }),
 
   aiChat: z
     .object({

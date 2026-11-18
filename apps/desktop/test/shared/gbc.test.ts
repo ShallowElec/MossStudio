@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { GBC_MAX_REGIONS, PARSE_CHECKING, gbcBlocker, gbcCanUse, regionsFromGraph, type GbcGraph, type GbcVertex } from '@shared/gbc'
+import {
+  GBC_MAX_REGIONS,
+  PARSE_CHECKING,
+  gbcBlocker,
+  gbcCanUse,
+  pictureFromGraph,
+  regionsFromGraph,
+  resolveGbcLanguage,
+  type GbcGraph,
+  type GbcVertex,
+} from '@shared/gbc'
 
 const box = (left: number, top: number, right: number, bottom: number): GbcVertex['bbox'] => ({
   left,
@@ -136,5 +146,32 @@ describe('gbcBlocker', () => {
     expect(gbcBlocker({ available: false }, [claude])).toBe('看图还没装好')
     expect(gbcBlocker(null, [claude])).toBe('看图还没装好')
     expect(gbcBlocker({ available: true }, [claude])).toBeNull()
+  })
+})
+
+describe('resolveGbcLanguage', () => {
+  it('auto follows where the text goes: English for a 画面, Chinese for a caption', () => {
+    expect(resolveGbcLanguage('auto', 'studio')).toBe('en')
+    expect(resolveGbcLanguage('auto', 'training')).toBe('zh')
+    expect(resolveGbcLanguage(undefined, 'training')).toBe('zh')
+    expect(resolveGbcLanguage('zh', 'studio')).toBe('zh')
+    expect(resolveGbcLanguage('en', 'training')).toBe('en')
+  })
+})
+
+describe('pictureFromGraph', () => {
+  it('keeps the detailed caption for the 画面, the short one for a training caption, and the raw graph', () => {
+    const picture = pictureFromGraph(graph)
+    expect(picture.summary).toBe('An orange cat sleeps on a sunny window sill beside a white mug.')
+    expect(picture.short).toBe('A cat asleep on a sill.')
+    expect(picture.regions.map((region) => region.caption)).toEqual(['a sleeping orange cat', 'a white mug'])
+    expect(picture.graph).toBe(graph)
+  })
+
+  it('falls back to the detailed caption when the graph has no short one', () => {
+    const picture = pictureFromGraph({ vertices: [{ vertex_id: 'i', label: 'image', descs: [{ text: 'a room', label: 'detail' }] }] })
+    expect(picture.summary).toBe('a room')
+    expect(picture.short).toBe('a room')
+    expect(picture.regions).toEqual([])
   })
 })

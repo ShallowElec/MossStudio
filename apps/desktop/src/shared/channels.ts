@@ -155,6 +155,11 @@ export const Ipc = {
   gbcCancel: 'gbc:cancel',
   /** 安装 in 设置 › 功能 → GbcStatus; steps as `Events.gbcSetup`. */
   gbcSetup: 'gbc:setup',
+  /** 解析 a batch → `{ jobId, total }`; progress and the result as `Events.gbcJob`. */
+  gbcJobStart: 'gbc:job-start',
+  /** The same job's current state, e.g. after the panel reopened. */
+  gbcJobSnapshot: 'gbc:job-snapshot',
+  gbcJobCancel: 'gbc:job-cancel',
   announcementsDismiss: 'announcements:dismiss',
   gitBranches: 'git:branches',
   gitCommits: 'git:commits',
@@ -299,6 +304,8 @@ export const Events = {
   gbcParse: 'event:gbc-parse',
   /** GbcSetupProgress */
   gbcSetup: 'event:gbc-setup',
+  /** GbcJobSnapshot, emitted on every change */
+  gbcJob: 'event:gbc-job',
   aiToolCall: 'event:ai-tool-call',
   /** SetupProgress while installing. */
   installProgress: 'event:install-progress',

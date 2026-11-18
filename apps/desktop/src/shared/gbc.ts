@@ -155,6 +155,61 @@ export function regionsFromGraph(graph: GbcGraph): GbcParseResult {
 /** What the menu says while GBC is still being checked; the entry is off until then. */
 export const PARSE_CHECKING = '正在检查'
 
+/** Output language of the text GBC produces. `auto` follows where the result goes. */
+export type GbcLanguage = 'auto' | 'zh' | 'en'
+
+/** Where a parse result is going; it decides what `auto` means. */
+export type GbcDestination = 'studio' | 'training'
+
+/** `auto` is English for a 画面 and Chinese for a training caption. */
+export function resolveGbcLanguage(language: GbcLanguage | undefined, destination: GbcDestination): 'zh' | 'en' {
+  if (language === 'zh' || language === 'en') return language
+  return destination === 'training' ? 'zh' : 'en'
+}
+
+/**
+ * One picture's graph as the panels read it. `summary` is the detailed image
+ * caption a 画面 description wants; `short` is the one-sentence caption a
+ * training caption wants; both come from the graph, never from the VLM twice.
+ */
+export interface GbcPicture {
+  summary: string
+  short: string
+  regions: GbcRegion[]
+  graph?: GbcGraph
+}
+
+export function pictureFromGraph(graph: GbcGraph): GbcPicture {
+  const image = (graph.vertices ?? []).find((vertex) => vertex.label === 'image')
+  const parsed = regionsFromGraph(graph)
+  return {
+    summary: parsed.summary,
+    short: image ? caption(image, /short/) || parsed.summary : parsed.summary,
+    regions: parsed.regions,
+    graph,
+  }
+}
+
+/** One picture a job read, with the file it came from. */
+export interface GbcJobPicture {
+  path: string
+  key: string
+  picture: GbcPicture
+}
+
+/** A 解析 job as the panels see it, both in progress events and when asked for later. */
+export interface GbcJobSnapshot {
+  jobId: string
+  phase: 'starting' | 'running' | 'done' | 'failed' | 'canceled'
+  /** Pictures the job was asked to read, cache hits included. */
+  total: number
+  /** Pictures already read, cache hits included. */
+  done: number
+  error?: string
+  pictures: GbcJobPicture[]
+  warnings: string[]
+}
+
 /** The 助手 models GBC can read pictures with: an OpenAI-compatible or Anthropic API with a key. */
 export function gbcCanUse(provider: { kind: string; hasKey: boolean }): boolean {
   return provider.hasKey && (provider.kind === 'openai' || provider.kind === 'anthropic')

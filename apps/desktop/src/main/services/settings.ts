@@ -66,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   gbcProviderId: null,
   gbcVersionId: null,
   gbcDetector: 'owlv2',
+  gbcLanguage: 'auto',
   engineAutoUpdate: true,
 }
 
@@ -129,6 +130,7 @@ export function getSettings(): Settings {
     ) {
       cache.mossInferRefreshEvery = DEFAULT_SETTINGS.mossInferRefreshEvery
     }
+    if (!['auto', 'zh', 'en'].includes(cache.gbcLanguage as string)) cache.gbcLanguage = DEFAULT_SETTINGS.gbcLanguage
   } catch {
     cache = { ...DEFAULT_SETTINGS }
   }

@@ -5,7 +5,7 @@ import { ADAPTER_STRENGTH_DEFAULT, normalizeCanvasAdapters } from '@shared/adapt
 import { cliGpuUuids, generationGpus } from '@shared/bundleFit'
 import { activeCanvasBranchIds } from '@shared/canvasJobBranch'
 import { Events, Ipc } from '@shared/channels'
-import { Sparkles } from 'lucide-react'
+import { ScanLine, Sparkles } from 'lucide-react'
 import { Button, ConfirmDialog, useToast } from '../../components/ui'
 import { TitlebarPortal } from '../../components/shell/Titlebar'
 import { AdapterPicker } from '../../components/studio/AdapterPicker'
@@ -21,6 +21,8 @@ import {
   addRegion,
   canvasFromPicture,
   canvasFromReuse,
+  createLayoutCanvas,
+  defaultSettings,
   editLayer,
   removedWith,
   resizeCanvas,
@@ -37,6 +39,9 @@ import { ParamsPanel } from './ParamsPanel'
 import { ProjectSwitcher } from './ProjectSwitcher'
 import { canvasDescription, compileCanvasPrompt, withDescription } from './prompt'
 import type { BoardTool } from './RegionLayer'
+import { GbcPanel } from './GbcPanel'
+import { sizeLike, withParsedRegions } from './pictureRegions'
+import type { GbcPicture } from '@shared/gbc'
 import { deriveReadiness, resolveBundle, type Blocker } from './readiness'
 import { usePreparation } from '../../lib/usePreparation'
 import { useBoardAssets } from './useBoardAssets'
@@ -150,6 +155,8 @@ export function StudioPage(): React.JSX.Element {
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null)
   /** 助手 opens beside the board from the title bar; closed, the board takes the room. */
   const [assistantOpen, setAssistantOpen] = useState(false)
+  /** 解析 opens beside the board; it and 助手 share the right side. */
+  const [gbcOpen, setGbcOpen] = useState(false)
   const [widths, setWidths] = useState(initialWidths)
   const [viewer, setViewer] = useState<{ canvasId: string; index: number } | null>(null)
   const [deleting, setDeleting] = useState<ProjectCanvas | null>(null)
@@ -394,6 +401,21 @@ export function StudioPage(): React.JSX.Element {
     settingsFrom([...project.canvasesRef.current].reverse().find((canvas) => canvas.kind === 'layout' || canvas.kind === 'result'))
 
   const regions = usePictureRegions(project, { latestSettings, reveal: (canvasId) => board.current?.reveal(canvasId) })
+
+  /** 解析 made a picture's prompt and boxes into a new 画面 beside the board's cards. */
+  const makeCanvasFromParse = (
+    picture: GbcPicture,
+    source: { path: string; title: string; size?: { width: number; height: number } },
+  ): void => {
+    const settings = selected?.kind === 'layout' ? settingsFrom(selected) : defaultSettings()
+    const shaped = source.size ? { ...settings, ...sizeLike(source.size, settings) } : settings
+    const created = createLayoutCanvas(project.canvasesRef.current, shaped)
+    const titled = { ...created, title: source.title || created.title }
+    const filled = withParsedRegions(titled, { summary: picture.summary, regions: picture.regions })
+    project.setCanvases((previous) => [...previous, filled])
+    project.select(filled.id)
+    requestAnimationFrame(() => board.current?.reveal(filled.id))
+  }
 
   /** 放大: a 放大 node fed by a card's picture, to its right (or where a wire was dropped). */
   const upscaleFrom = (sourceId: string, at?: { x: number; y: number }): void => {
@@ -781,12 +803,31 @@ export function StudioPage(): React.JSX.Element {
       {shown && project.loaded ? (
         <TitlebarPortal>
           <ProjectSwitcher project={project} />
+          {settings?.gbcEnabled ? (
+            <Button
+              tone={gbcOpen ? 'secondary' : 'ghost'}
+              size="xs"
+              aria-pressed={gbcOpen}
+              data-gbc-toggle
+              onClick={() => {
+                setGbcOpen((open) => !open)
+                setAssistantOpen(false)
+              }}
+              className="no-drag ml-1"
+            >
+              <ScanLine className="size-3.5" aria-hidden="true" strokeWidth={1.6} />
+              解析
+            </Button>
+          ) : null}
           <Button
             tone={assistantOpen ? 'secondary' : 'ghost'}
             size="xs"
             aria-pressed={assistantOpen}
             data-assistant-toggle
-            onClick={() => setAssistantOpen((open) => !open)}
+            onClick={() => {
+              setAssistantOpen((open) => !open)
+              setGbcOpen(false)
+            }}
             className="no-drag ml-1"
           >
             <Sparkles className="size-3.5" aria-hidden="true" strokeWidth={1.6} />
@@ -951,7 +992,7 @@ export function StudioPage(): React.JSX.Element {
       </main>
 
       {/* Stays mounted while closed, so a running conversation survives. */}
-      <div hidden={!assistantOpen} className="contents">
+      <div hidden={!assistantOpen || gbcOpen} className="contents">
         <StudioSidebar
           side="right"
           label="助手"
@@ -963,6 +1004,21 @@ export function StudioPage(): React.JSX.Element {
           </div>
         </StudioSidebar>
       </div>
+
+      {gbcOpen ? (
+        <StudioSidebar
+          side="right"
+          label="解析"
+          width={widths.right}
+          onWidthChange={(right) => setWidths((value) => ({ ...value, right }))}
+        >
+          <GbcPanel
+            canvases={project.canvases}
+            onMakeCanvas={makeCanvasFromParse}
+            onClose={() => setGbcOpen(false)}
+          />
+        </StudioSidebar>
+      ) : null}
 
       <GalleryPicker
         open={galleryTarget !== null}

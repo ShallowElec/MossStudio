@@ -106,6 +106,7 @@ export function settingsFixture(patch: Partial<Settings> = {}): Settings {
     gbcProviderId: null,
     gbcVersionId: null,
     gbcDetector: 'owlv2',
+    gbcLanguage: 'auto',
     engineAutoUpdate: true,
     ...patch,
   }

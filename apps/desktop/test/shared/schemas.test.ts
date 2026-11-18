@@ -636,6 +636,19 @@ const cases = {
 
   gbcInstallEnv: { valid: { versionId: 'v1' }, rejects: { 'empty version': { versionId: '' } } },
 
+  gbcJobStart: {
+    valid: { providerId: 'p1', files: ['/a.png'] },
+    output: { providerId: 'p1', files: ['/a.png'], detector: 'owlv2' },
+    accepts: { 'language and destination': { providerId: 'p1', folder: '/imgs', language: 'zh', destination: 'training', fresh: true } },
+    rejects: {
+      'neither folder nor files': { providerId: 'p1' },
+      'no provider': { files: ['/a.png'] },
+      'unknown language': { providerId: 'p1', files: ['/a.png'], language: 'fr' },
+    },
+  },
+
+  gbcJobQuery: { valid: { jobId: 'job-1' }, rejects: { 'empty job id': { jobId: '' } } },
+
   gbcRun: {
     valid: { providerId: 'p1', folder: '/imgs' },
     output: { providerId: 'p1', folder: '/imgs', detector: 'owlv2' },

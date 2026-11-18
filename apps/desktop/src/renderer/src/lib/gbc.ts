@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Events, Ipc } from '@shared/channels'
 import type { AiProviderInfo } from '@shared/ai'
-import { gbcBlocker, gbcCanUse, type GbcSetupProgress, type GbcStatus } from '@shared/gbc'
+import {
+  gbcBlocker,
+  gbcCanUse,
+  type GbcDestination,
+  type GbcJobSnapshot,
+  type GbcLanguage,
+  type GbcSetupProgress,
+  type GbcStatus,
+} from '@shared/gbc'
 import { call, onEvent } from './api'
 
 export interface GbcState {
@@ -56,4 +64,66 @@ export function useGbcState(enabled: boolean, versionId: string | null): GbcStat
   }, [enabled, refresh])
 
   return { status, providers, blocker: gbcBlocker(status, providers), refresh }
+}
+
+export interface GbcJobStart {
+  path?: string
+  files?: string[]
+  folder?: string
+  providerId: string
+  detector: 'owlv2' | 'sam3'
+  language?: GbcLanguage
+  destination?: GbcDestination
+  fresh?: boolean
+}
+
+/**
+ * One 解析 job at a time: start it, follow its events, ask for its state when a
+ * panel reopens. The job lives in the main process, so a closed panel does not
+ * stop it; only 停止 does.
+ */
+export function useGbcJob(): {
+  job: GbcJobSnapshot | null
+  busy: boolean
+  run: (input: GbcJobStart) => Promise<void>
+  cancel: () => void
+  clear: () => void
+} {
+  const [job, setJob] = useState<GbcJobSnapshot | null>(null)
+  const jobId = useRef<string | null>(null)
+
+  useEffect(
+    () =>
+      onEvent<GbcJobSnapshot>(Events.gbcJob, (next) => {
+        if (jobId.current && next.jobId === jobId.current) setJob(next)
+      }),
+    [],
+  )
+
+  const run = useCallback(async (input: GbcJobStart): Promise<void> => {
+    const started = await call<{ jobId: string; total: number }>(Ipc.gbcJobStart, {
+      files: input.files ?? (input.path ? [input.path] : undefined),
+      folder: input.folder,
+      providerId: input.providerId,
+      detector: input.detector,
+      language: input.language,
+      destination: input.destination,
+      fresh: input.fresh,
+    })
+    jobId.current = started.jobId
+    // The job may finish before its first event reaches this panel; ask once.
+    const current = await call<GbcJobSnapshot | null>(Ipc.gbcJobSnapshot, { jobId: started.jobId }).catch(() => null)
+    setJob(current ?? { jobId: started.jobId, phase: 'starting', total: started.total, done: 0, pictures: [], warnings: [] })
+  }, [])
+
+  const cancel = useCallback((): void => {
+    if (jobId.current) void call(Ipc.gbcJobCancel, { jobId: jobId.current }).catch(() => undefined)
+  }, [])
+
+  const clear = useCallback((): void => {
+    jobId.current = null
+    setJob(null)
+  }, [])
+
+  return { job, busy: job?.phase === 'starting' || job?.phase === 'running', run, cancel, clear }
 }

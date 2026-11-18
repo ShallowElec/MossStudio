@@ -1,4 +1,5 @@
 import type { EngineMachine, EnginePlan } from './engineChoice'
+import type { GbcLanguage } from './gbc'
 
 export type CheckStatus = 'ok' | 'warn' | 'error' | 'unknown'
 
@@ -213,6 +214,8 @@ export interface Settings {
   gbcVersionId: string | null
   /** How GBC finds objects: OWLv2 for photos, SAM 3 for illustrations. */
   gbcDetector: 'owlv2' | 'sam3'
+  /** The language GBC's text comes back in; auto follows the destination. */
+  gbcLanguage: GbcLanguage
   /** Keep the inference engine on the latest release of its channel automatically. */
   engineAutoUpdate: boolean
 }

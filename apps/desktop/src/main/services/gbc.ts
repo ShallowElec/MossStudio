@@ -1,15 +1,22 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { Events } from '@shared/channels'
 import {
   gbcCanUse,
+  pictureFromGraph,
   regionsFromGraph,
+  resolveGbcLanguage,
   type GbcCheck,
+  type GbcDestination,
   type GbcGraph,
+  type GbcJobPicture,
+  type GbcJobSnapshot,
+  type GbcLanguage,
   type GbcParseProgress,
   type GbcParseResult,
+  type GbcPicture,
   type GbcRunInput,
   type GbcRunResult,
   type GbcSetupProgress,
@@ -19,7 +26,7 @@ import type { Settings } from '@shared/types'
 import { emit } from '../lib/events'
 import { paths } from '../lib/paths'
 import { firstLine, run, runStream, tail } from '../lib/run'
-import { getProviderSecret, listProviders } from './ai'
+import { complete, getProviderSecret, listProviders } from './ai'
 import { createGbcVersion, listGbcBranches, listGbcVersions } from './gbcGit'
 import { pickPython, resolveTorchIndex } from './runtimes'
 import { getSettings, updateSettings } from './settings'
@@ -281,6 +288,8 @@ export interface GbcRunControl {
   signal?: AbortSignal
   /** Every output line, progress bars included (they redraw with a carriage return). */
   onLine?: (line: string) => void
+  /** Folder name under `gbc/runs`; the job needs it to watch the output while it runs. */
+  id?: string
 }
 
 export async function runGbc(input: GbcRunInput, control: GbcRunControl = {}): Promise<GbcRunResult> {
@@ -292,7 +301,7 @@ export async function runGbc(input: GbcRunInput, control: GbcRunControl = {}): P
   if (!provider.apiKey) throw new Error('看图的模型还没有填 API Key')
   const gpu = (await run('nvidia-smi', ['-L'], { timeoutMs: 5000 })).code === 0
   const device = gpu ? 'cuda:0' : 'cpu'
-  const id = `gbc-${randomUUID().slice(0, 8)}`
+  const id = control.id ?? `gbc-${randomUUID().slice(0, 8)}`
   const out = join(paths.root(), 'gbc', 'runs', id)
   await mkdir(out, { recursive: true })
   const keyEnv = 'MOSSTUDIO_GBC_API_KEY'
@@ -483,4 +492,206 @@ export async function parseRegions(runId: string, path: string): Promise<GbcPars
 /** 停止 on a 画面 that is still being read. */
 export function cancelParse(runId: string): void {
   parses.get(runId)?.abort()
+}
+
+/* ------------------------------------------------------------------ */
+/* 解析 jobs: one run per batch, cache first, progress while it reads  */
+/* ------------------------------------------------------------------ */
+
+export interface GbcJobInput extends GbcRunInput {
+  /** What the text is for; decides what the 自动 language setting means. */
+  destination?: GbcDestination
+  language?: GbcLanguage
+  /** Ignore the cache and read every picture again. */
+  fresh?: boolean
+}
+
+const JOBS_KEPT = 8
+const jobs = new Map<string, { snapshot: GbcJobSnapshot; controller: AbortController }>()
+
+/** Where a job's raw output lives; it stays after the job for inspection. */
+export function gbcRunDir(jobId: string): string {
+  return join(paths.root(), 'gbc', 'runs', jobId)
+}
+
+function gbcCacheDir(): string {
+  return join(paths.cache(), 'gbc')
+}
+
+function fileHash(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+/** Same picture, version, detector, provider and language: the same result. */
+function cacheKey(path: string, input: GbcJobInput, language: 'zh' | 'en'): string {
+  return createHash('sha256')
+    .update([fileHash(path), input.versionId ?? '', input.detector, input.providerId, language].join('|'))
+    .digest('hex')
+}
+
+async function readCached(key: string): Promise<GbcPicture | null> {
+  try {
+    const parsed = JSON.parse(await readFile(join(gbcCacheDir(), `${key}.json`), 'utf8')) as GbcPicture
+    return parsed && typeof parsed.summary === 'string' && Array.isArray(parsed.regions) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+async function writeCached(key: string, picture: GbcPicture): Promise<void> {
+  try {
+    await mkdir(gbcCacheDir(), { recursive: true })
+    await writeFile(join(gbcCacheDir(), `${key}.json`), JSON.stringify(picture), 'utf8')
+  } catch {
+    // A cache that cannot be written must not fail the run.
+  }
+}
+
+const CJK = /[\u4e00-\u9fff]/
+
+/** True when the text is there and is not Chinese yet. */
+function wantsChinese(text: string): boolean {
+  return Boolean(text.trim()) && !CJK.test(text)
+}
+
+/**
+ * The provider writes English captions; 中文 mode asks the same provider for
+ * Chinese in one call per picture. A failure keeps the English and says so.
+ */
+async function translatePicture(picture: GbcPicture, providerId: string): Promise<GbcPicture | null> {
+  const strings = [picture.summary, picture.short, ...picture.regions.map((region) => region.caption)]
+  if (!strings.some(wantsChinese)) return null
+  const system =
+    'You translate English image captions into Simplified Chinese. Keep object names literal and short. Reply with a JSON array of strings only, the same length and order.'
+  const prompt = `Translate each string into Simplified Chinese. Reply as one JSON array.\n${JSON.stringify(strings)}`
+  try {
+    const raw = await complete({ providerId, system, prompt })
+    const text = raw
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/```$/, '')
+    const values = JSON.parse(text) as unknown
+    if (!Array.isArray(values) || values.length !== strings.length) return null
+    const translated = values.map((value) => (typeof value === 'string' ? value.trim() : ''))
+    if (translated.some((value, index) => strings[index] && !value)) return null
+    return {
+      ...picture,
+      summary: translated[0] || picture.summary,
+      short: translated[1] || picture.short,
+      regions: picture.regions.map((region, index) => ({ ...region, caption: translated[index + 2] || region.caption })),
+    }
+  } catch {
+    return null
+  }
+}
+
+function graphLines(dir: string): number {
+  try {
+    return readFileSync(join(dir, 'graphs.jsonl'), 'utf8').split('\n').filter(Boolean).length
+  } catch {
+    return 0
+  }
+}
+
+function trimJobs(): void {
+  while (jobs.size > JOBS_KEPT) {
+    const finished = [...jobs.entries()].find(
+      ([, state]) => state.snapshot.phase === 'done' || state.snapshot.phase === 'failed' || state.snapshot.phase === 'canceled',
+    )
+    if (!finished) return
+    jobs.delete(finished[0])
+  }
+}
+
+/** The job's state for a panel that re-rendered or reopened; null for an unknown id. */
+export function gbcJobSnapshot(jobId: string): GbcJobSnapshot | null {
+  return jobs.get(jobId)?.snapshot ?? null
+}
+
+/** 停止 on a running job; the pictures it already read stay on disk. */
+export function cancelGbcJob(jobId: string): void {
+  jobs.get(jobId)?.controller.abort()
+}
+
+async function runJob(jobId: string, files: string[], input: GbcJobInput, language: 'zh' | 'en'): Promise<void> {
+  const state = jobs.get(jobId)
+  if (!state) return
+  const { snapshot, controller } = state
+  const update = (patch: Partial<GbcJobSnapshot>): void => {
+    Object.assign(snapshot, patch)
+    emit(Events.gbcJob, { ...snapshot })
+  }
+  try {
+    const pictures: GbcJobPicture[] = []
+    const pending: Array<{ path: string; key: string }> = []
+    for (const path of files) {
+      const key = cacheKey(path, input, language)
+      const hit = input.fresh ? null : await readCached(key)
+      if (hit) pictures.push({ path, key, picture: hit })
+      else pending.push({ path, key })
+    }
+    snapshot.pictures = [...pictures]
+    snapshot.done = pictures.length
+    update({ phase: 'running' })
+
+    if (pending.length) {
+      const runDir = gbcRunDir(jobId)
+      const timer = setInterval(() => {
+        const done = pictures.length + graphLines(runDir)
+        if (done !== snapshot.done) update({ done: Math.min(done, snapshot.total) })
+      }, 2000)
+      let result: GbcRunResult
+      try {
+        result = await runGbc({ ...input, files: pending.map((item) => item.path) }, { signal: controller.signal, id: jobId })
+      } finally {
+        clearInterval(timer)
+      }
+      const byPath = new Map(pending.map((item) => [item.path, item.key]))
+      for (const image of result.images) {
+        const key = byPath.get(image.path) ?? cacheKey(image.path, input, language)
+        const picture = image.graph ? pictureFromGraph(image.graph) : { summary: image.summary, short: image.summary, regions: [] }
+        let final = picture
+        if (language === 'zh') {
+          const translated = await translatePicture(picture, input.providerId)
+          if (translated) final = translated
+          else if (wantsChinese(picture.summary) || wantsChinese(picture.short))
+            snapshot.warnings = [...snapshot.warnings, `${image.name}：中文翻译没成功，保留了英文`]
+        }
+        await writeCached(key, final)
+        pictures.push({ path: image.path, key, picture: final })
+      }
+    }
+    update({ phase: 'done', done: pictures.length, pictures })
+  } catch (error) {
+    if (error instanceof GbcStopped) {
+      update({ phase: 'canceled' })
+      return
+    }
+    update({ phase: 'failed', error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+/**
+ * 解析 one or many pictures. Resolves as soon as the job exists; progress and
+ * the result arrive on `Events.gbcJob`, and `gbcJobSnapshot` has them later.
+ */
+export async function startGbcJob(input: GbcJobInput): Promise<{ jobId: string; total: number }> {
+  const provider = getProviderSecret(input.providerId)
+  if (!provider) throw new Error('先给助手加一个能用的模型')
+  if (!provider.apiKey) throw new Error('看图的模型还没有填 API Key')
+  const files = [...(input.files ?? [])].filter((path) => path.trim())
+  if (!files.length) {
+    const folder = input.folder?.trim() ?? ''
+    if (!folder || !existsSync(folder)) throw new Error('GBC 图片目录/文件不存在')
+    files.push(...(await listGbcImages(folder)).images.map((image) => image.path))
+  }
+  if (!files.length) throw new Error('这个目录里没有图片')
+  const language = resolveGbcLanguage(input.language ?? getSettings().gbcLanguage, input.destination ?? 'studio')
+  const jobId = `gbc-${randomUUID().slice(0, 8)}`
+  const snapshot: GbcJobSnapshot = { jobId, phase: 'starting', total: files.length, done: 0, pictures: [], warnings: [] }
+  jobs.set(jobId, { snapshot, controller: new AbortController() })
+  trimJobs()
+  emit(Events.gbcJob, { ...snapshot })
+  void runJob(jobId, files, input, language)
+  return { jobId, total: files.length }
 }
