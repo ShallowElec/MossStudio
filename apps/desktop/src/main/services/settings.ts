@@ -9,6 +9,7 @@ import { isInside, paths, setEngineRoot } from '../lib/paths'
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   uiAnimation: 'system',
+  uiScale: 'auto',
   language: 'zh-CN',
   networkMode: 'auto',
   gitMirror: null,

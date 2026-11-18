@@ -1,7 +1,9 @@
 import { app, BrowserWindow, nativeTheme, shell } from 'electron'
 import { join } from 'node:path'
 import { Events } from '@shared/channels'
+import { uiZoomFactor, type UiScale } from '@shared/uiScale'
 import { applyAppDetails } from './install/identity'
+import { getSettings } from './services/settings'
 
 export type WindowKind = 'studio'
 
@@ -38,10 +40,40 @@ nativeTheme.on('updated', () => {
     if (win.isDestroyed()) continue
     win.setBackgroundColor(colors.background)
     if (process.platform === 'win32') {
-      win.setTitleBarOverlay({ color: '#00000000', symbolColor: colors.symbol, height: TITLEBAR_HEIGHT })
+      win.setTitleBarOverlay({ color: '#00000000', symbolColor: colors.symbol, height: titleBarHeight(win) })
     }
   }
 })
+
+/** 界面大小, read from settings when the first window opens. */
+let uiScale: UiScale | null = null
+const zooms = new WeakMap<BrowserWindow, number>()
+
+/** The renderer's title bar is 40 CSS px; zoomed, it is taller on screen, and the native buttons must sit in it. */
+function titleBarHeight(win: BrowserWindow): number {
+  return Math.round(TITLEBAR_HEIGHT * (zooms.get(win) ?? 1))
+}
+
+/** Zooms a window for 界面大小 at its present size; a resize may change it (自动). */
+function zoomToSize(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  uiScale ??= getSettings().uiScale
+  const factor = uiZoomFactor(uiScale, win.getContentBounds())
+  if (zooms.get(win) === factor) return
+  zooms.set(win, factor)
+  win.webContents.setZoomFactor(factor)
+  if (process.platform === 'win32') {
+    win.setTitleBarOverlay({ color: '#00000000', symbolColor: currentChrome().symbol, height: titleBarHeight(win) })
+  }
+  // The traffic lights are 14 px tall; keep them centred in the taller bar.
+  if (process.platform === 'darwin') win.setWindowButtonPosition({ x: 16, y: Math.round(titleBarHeight(win) / 2 - 7) })
+}
+
+/** 界面大小 changed in 设置: every open window takes it now. */
+export function applyUiScale(scale: UiScale): void {
+  uiScale = scale
+  for (const win of windows.values()) zoomToSize(win)
+}
 
 export function createAppWindow(kind: WindowKind, show = true): BrowserWindow {
   const existing = windows.get(kind)
@@ -121,6 +153,13 @@ export function createAppWindow(kind: WindowKind, show = true): BrowserWindow {
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: meta.route })
   }
+
+  win.on('resize', () => zoomToSize(win))
+  // A page load starts at the default zoom.
+  win.webContents.on('did-finish-load', () => {
+    zooms.delete(win)
+    zoomToSize(win)
+  })
 
   const sendMaximized = (): void => {
     if (!win.isDestroyed()) win.webContents.send(Events.windowState, { maximized: win.isMaximized() })

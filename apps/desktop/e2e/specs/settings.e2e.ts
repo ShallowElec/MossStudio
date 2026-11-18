@@ -60,6 +60,15 @@ describe('settings', () => {
     await page.emulateMedia({ colorScheme: null })
   })
 
+  it('offers 界面大小, 自动 by default, and saves a fixed size', async () => {
+    const page = await app.open({ route: '/settings/general' })
+    const picker = page.getByRole('group', { name: '界面大小' })
+    expect(await picker.getByRole('button', { name: '自动' }).getAttribute('aria-pressed')).toBe('true')
+    await picker.getByRole('button', { name: '125%' }).click()
+    await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ uiScale: '125' })
+    await expect.poll(() => picker.getByRole('button', { name: '125%' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('turning 训练 on adds it to the rail; off removes it', async () => {
     const page = await app.open({ route: '/settings/features' })
     const rail = page.getByRole('navigation', { name: '主导航' })

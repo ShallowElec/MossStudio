@@ -35,6 +35,20 @@ export function GeneralSection(): React.JSX.Element {
               ]}
             />
           </Row>
+          <Row title="界面大小" description="自动会随窗口放大文字和按钮。">
+            <Segmented<Settings['uiScale']>
+              label="界面大小"
+              value={settings.uiScale}
+              onChange={(uiScale) => void save({ uiScale })}
+              options={[
+                { value: 'auto', label: '自动' },
+                { value: '100', label: '100%' },
+                { value: '110', label: '110%' },
+                { value: '125', label: '125%' },
+                { value: '150', label: '150%' },
+              ]}
+            />
+          </Row>
           <Row title="语言" description="目前只提供简体中文界面。">
             <span className="text-ui text-ink-2">简体中文</span>
           </Row>

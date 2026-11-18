@@ -1,3 +1,4 @@
+import { UI_SCALES } from './uiScale'
 import { z } from 'zod'
 import { agentCardAnswerSchema } from './agent/cards'
 import { UPDATE_CHANNELS } from './install'
@@ -324,6 +325,7 @@ export const schemas = {
     .object({
       theme: z.enum(['system', 'light', 'dark']),
       uiAnimation: z.enum(['system', 'on', 'off']),
+      uiScale: z.enum(UI_SCALES),
       language: z.enum(['zh-CN', 'en']),
       networkMode: z.enum(['auto', 'direct', 'mirror']),
       gitMirror: z.string().max(2048).nullable(),

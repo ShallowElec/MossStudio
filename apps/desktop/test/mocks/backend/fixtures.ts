@@ -55,6 +55,7 @@ export function settingsFixture(patch: Partial<Settings> = {}): Settings {
   return {
     theme: 'system',
     uiAnimation: 'system',
+    uiScale: 'auto',
     language: 'zh-CN',
     networkMode: 'auto',
     gitMirror: null,

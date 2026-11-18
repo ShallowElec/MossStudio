@@ -1,3 +1,4 @@
+import type { UiScale } from './uiScale'
 import type { EngineMachine, EnginePlan } from './engineChoice'
 import type { GbcLanguage } from './gbc'
 
@@ -145,6 +146,8 @@ export interface ModelScanResult {
 export interface Settings {
   theme: 'system' | 'light' | 'dark'
   uiAnimation: 'system' | 'on' | 'off'
+  /** 界面大小: 自动 grows text and controls with the window (see uiScale.ts). */
+  uiScale: UiScale
   language: 'zh-CN' | 'en'
   networkMode: 'auto' | 'direct' | 'mirror'
   gitMirror: string | null

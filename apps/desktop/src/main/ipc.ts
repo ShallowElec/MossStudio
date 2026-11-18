@@ -92,7 +92,7 @@ import { codedError, errorCode } from './lib/codedError'
 import { getEngineFeatures } from './services/engineFeatures'
 import { importImageBytes, importImageFile, pruneProjectMasks, saveMask } from './services/studioAssets'
 import { addControlAdapter, listControlAdapters, removeControlAdapter } from './services/controlAdapters'
-import { applyThemeSource, controlWindow, openWindow } from './windows'
+import { applyThemeSource, applyUiScale, controlWindow, openWindow } from './windows'
 import { getGpuInventory, listDevices, refreshGpuInventory } from './services/devices'
 import { getOnboardingStatus } from './services/onboarding'
 import {
@@ -550,6 +550,7 @@ export function registerIpc(): void {
     // A GPU switched to another engine frees its old moss-server's memory now, not at its next job.
     releaseAfterSettingsChange(before, settings)
     if (before.theme !== settings.theme) applyThemeSource(settings.theme)
+    if (before.uiScale !== settings.uiScale) applyUiScale(settings.uiScale)
     if (!before.engineAutoUpdate && settings.engineAutoUpdate) clearEngineAutoUpdateHold()
     invalidateEngineReadiness()
     ensureDirs(settings.modelsRoot, settings.modelDirectories)
