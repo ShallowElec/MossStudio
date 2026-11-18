@@ -29,8 +29,8 @@
 ---
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/studio-dark.png">
-  <img alt="MossStudio 的创作画板：选中的「画面」上画了物体和文字区域，下方是这张画面生成过的图片" src="docs/assets/readme/studio-light.png" width="100%">
+ <img width="2398" height="1378" alt="e82e86e397d250889ec63fd2d6379d84" src="https://github.com/user-attachments/assets/ec30f726-c90a-4429-a11c-dcdeab82e28b" />
+
 </picture>
 
 ## 这是什么
