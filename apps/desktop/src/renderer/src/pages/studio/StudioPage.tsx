@@ -1012,11 +1012,7 @@ export function StudioPage(): React.JSX.Element {
           width={widths.right}
           onWidthChange={(right) => setWidths((value) => ({ ...value, right }))}
         >
-          <GbcPanel
-            canvases={project.canvases}
-            onMakeCanvas={makeCanvasFromParse}
-            onClose={() => setGbcOpen(false)}
-          />
+          <GbcPanel canvases={project.canvases} onMakeCanvas={makeCanvasFromParse} onClose={() => setGbcOpen(false)} />
         </StudioSidebar>
       ) : null}
 
