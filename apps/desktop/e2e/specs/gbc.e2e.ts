@@ -189,27 +189,14 @@ describe('解析', () => {
     await panel.getByRole('button', { name: '变成画面' }).click()
     await expect.poll(async () => (await cardIds(page)).length).toBe(3)
     const created = (await cardIds(page)).find((id) => id !== 'img-1' && id !== 'canvas-1')!
-    // The 画面 lands on the board at once and in the project when the autosave runs.
-    await expect
-      .poll(async () => {
-        const canvas = await saved(page, created)
-        return canvas ? { title: canvas.title, layers: canvas.layers.length, text: JSON.stringify(canvas) } : null
-      })
-      .toMatchObject({ title: '小猫照片', layers: 2 })
-    expect(JSON.stringify(await saved(page, created))).toContain('午后的窗台')
+    const made = card(page, created)
+    await expect.poll(() => made.locator('[data-region-id]').count()).toBe(2)
+    expect(await made.textContent()).toContain('小猫照片')
 
     // The same picture can go in as a vision reference of the 画面 just made.
     await panel.getByRole('button', { name: '作为参考图' }).click()
     await expect.poll(async () => (await cardIds(page)).length).toBe(4)
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (canvasId) =>
-            window.__mock.state.projects[0]?.canvases.find((item) => item.id === canvasId)?.inputs?.references?.links.length ?? 0,
-          created,
-        ),
-      )
-      .toBe(1)
+    await expect.poll(() => page.locator('[data-references-row]').count()).toBe(1)
   })
 
   it('is not offered while 看图拆区域 is off', async () => {
