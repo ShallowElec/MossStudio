@@ -35,7 +35,7 @@ The tree is in reading order: a split's `first` is read first, so the leaves in 
 - `panelQuads` gives each panel's quadrilateral, with `bleed: true` as printed.
 - `frameHandles` and `dragGutter` move a gutter and keep its slant. Both sides keep room for their panels.
 - `splitFrame`, `mergeFrame` (only two panels cut by the same split) and `setBleed` change one panel's frame.
-- `PAGE_TEMPLATES` are eight ready-made trees. The storyboard picks from them, and 套用版式 applies one.
+- `PAGE_TEMPLATES` are eight ready-made trees. 套用版式 applies one, and the storyboard falls back to them (section 3).
 - `panelGenerationSize` gives the size a panel is drawn at: the shape of its frame's bounding box as printed, about one megapixel, on the 16 px grid, each edge between 512 and 2048.
 
 `shared/manga/gacha.ts` is 抽卡:
@@ -58,10 +58,11 @@ The geometry, styles, scoring and shot rules follow the 漫画分镜工作台 of
 
 ## 3. Storyboard and memory
 
-`storyboardRequest` (`shared/manga/storyboard.ts`) gives the model the series, the character sheet, the story so far and the outline. It also lists the only layout ids, shots and balloon kinds the model may use. The model must answer one JSON object. `parseStoryboard` maps the answer onto the series:
+`storyboardRequest` (`shared/manga/storyboard.ts`) gives the model the series, the character sheet, the story so far and the outline. It also lists the only layout styles (`LAYOUT_STYLES`: dialogue, standard, action, splash), template ids, shots and balloon kinds the model may use. The model must answer one JSON object. `parseStoryboard` maps the answer onto the series:
 
 - names map to characters, and outfits are matched by name;
-- a template whose panel count does not match is replaced, and a page with too many panels is split;
+- a page with a `style` gets the best-scoring frames `drawLayouts` draws in that style for its panel count, seeded by the page id, so an action page can come with slanted and bleeding panels;
+- a page without a known style takes its `layout` template; one whose panel count does not match is replaced, and a page with too many panels is split;
 - `angle` is kept when it is one of `ANGLES` and not eye level;
 - unknown characters are dropped, and balloons are placed from the reading side (`defaultBalloonPlaces`).
 

@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Page } from 'playwright-core'
+import { templateForCount } from '@shared/manga/layouts'
 import { useApp } from '../support/app'
 
 const JOBS = 'http:POST /api/engine-jobs'
@@ -12,7 +13,7 @@ const JOBS = 'http:POST /api/engine-jobs'
 const STORYBOARD = JSON.stringify({
   pages: [
     {
-      layout: 'two-rows',
+      style: 'action',
       panels: [
         {
           scene: '旧港口，雾很浓',
@@ -81,11 +82,22 @@ describe('manga', () => {
 
     const [request] = await app.calls<{ system: string; prompt: string }>('ai:complete')
     expect(request!.system).toContain('只输出一个 JSON 对象')
+    expect(request!.system).toContain('action（动作）')
     expect(request!.prompt).toContain('- 阿秋')
     expect(request!.prompt).toContain('阿秋深夜去旧港口调查')
     expect(await panels(page).first().getByLabel('画面描述').inputValue()).toBe('旧港口，雾很浓')
     expect(await panels(page).nth(1).getByLabel('台词').inputValue()).toBe('谁在那里？')
     expect(await page.getByRole('img', { name: '第 1 页预览' }).isVisible()).toBe(true)
+    // The page asked for 动作, so its frames were drawn for its two panels instead of taken from a template.
+    await expect.poll(() => page.evaluate(() => window.__mock.state.manga[0]?.chapters[0]?.pages[0]?.frames)).toBeDefined()
+    const frames = await page.evaluate(() => window.__mock.state.manga[0]!.chapters[0]!.pages[0]!.frames)
+    expect(frames).not.toEqual(templateForCount(2).frames)
+    expect(
+      await page
+        .getByRole('group', { name: '第 1 页的分格' })
+        .getByRole('button', { name: /^第 \d 格$/ })
+        .count(),
+    ).toBe(2)
 
     // The storyboard is saved with the character mapped by name.
     await expect

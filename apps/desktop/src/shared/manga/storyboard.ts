@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { defaultBalloonPlaces } from './balloons'
+import { LAYOUT_STYLES, LAYOUT_STYLE_LABEL, drawLayouts, type LayoutStyleId } from './gacha'
 import { MAX_PANELS_PER_PAGE, PAGE_TEMPLATES, leafCount, templateById, templateForCount } from './layouts'
 import { extractJson, storyMemory, type MemoryRequest } from './memory'
 import {
@@ -53,14 +54,16 @@ export function storyboardRequest(
   chapter: MangaChapter,
   options: StoryboardOptions,
 ): MemoryRequest {
+  const styles = STYLE_IDS.map((id) => `${id}（${LAYOUT_STYLE_LABEL[id]}）`).join('、')
   const layouts = PAGE_TEMPLATES.map((template) => `${template.id}（${leafCount(template.frames)} 格，${template.label}）`).join('、')
   const memory = storyMemory(series, chapter.id)
   return {
     system: [
       '你是漫画分镜师。把一话的剧情拆成页和格，每格是一张要画的图。',
       '只输出一个 JSON 对象，不要输出其他文字，格式：',
-      '{"pages": [{"layout": "版式 id", "panels": [{"scene": "画面描述", "shot": "镜头", "angle": "角度", "cast": [{"name": "人物名", "outfit": "服装名", "expression": "表情", "pose": "动作"}], "dialogue": [{"speaker": "人物名", "kind": "类型", "text": "台词"}]}]}]}',
-      `版式 id 只能是：${layouts}。每页的格数要和版式一致。`,
+      '{"pages": [{"style": "分格风格", "panels": [{"scene": "画面描述", "shot": "镜头", "angle": "角度", "cast": [{"name": "人物名", "outfit": "服装名", "expression": "表情", "pose": "动作"}], "dialogue": [{"speaker": "人物名", "kind": "类型", "text": "台词"}]}]}]}',
+      `分格风格 style 只能是：${styles}。按这一页的节奏选：说话为主用 dialogue，打斗、追逐、冲击用 action，开场或高潮的大场面用 splash，其余用 standard。程序会按格数和风格排出分格，动作和扉页会有斜格和出血。`,
+      `也可以不写 style，改写固定版式 layout，只能是：${layouts}，这时每页的格数要和版式一致。`,
       `镜头 shot 只能是：${SHOTS.join('、')}（远景、全景、中景、近景、特写）。`,
       `角度 angle 只能是：${ANGLES.join('、')}（平视、俯视、仰视、侧面、背影、过肩），平视可以不写。`,
       `对白类型 kind 只能是：${BALLOON_KINDS.join('、')}（对白、心声、喊叫、旁白）；旁白不写 speaker。`,
@@ -86,7 +89,8 @@ const answerSchema = z.object({
   pages: z
     .array(
       z.object({
-        layout: loose,
+        layout: loose.optional(),
+        style: loose.optional(),
         panels: z
           .array(
             z.object({
@@ -109,6 +113,13 @@ export interface ParsedStoryboard {
   pages: MangaPage[]
   /** What was changed or dropped while mapping, in plain words. */
   warnings: string[]
+}
+
+const STYLE_IDS = Object.keys(LAYOUT_STYLES) as LayoutStyleId[]
+
+/** The best-scoring frames of `style` for `panels` panels, drawn from `seed`; undefined when none fits. */
+function drawnFrames(style: LayoutStyleId, panels: number, seed: string) {
+  return drawLayouts({ seed, scope: 'storyboard', style: LAYOUT_STYLES[style], panels, count: 8 }).found[0]?.frames
 }
 
 const normalizeName = (name: string): string => name.replace(/\s+/g, '').toLowerCase()
@@ -138,9 +149,13 @@ export function parseStoryboard(
     for (let start = 0; start < rawPage.panels.length; start += MAX_PANELS_PER_PAGE) {
       const rawPanels = rawPage.panels.slice(start, start + MAX_PANELS_PER_PAGE)
       if (start > 0) warnings.add('有一页的格子太多，已拆成两页')
-      const asked = templateById(rawPage.layout)
-      const template = asked && leafCount(asked.frames) === rawPanels.length ? asked : templateForCount(rawPanels.length)
-      if (rawPage.layout && asked && leafCount(asked.frames) !== rawPanels.length) warnings.add('有的页格数和版式不一致，已换成合适的版式')
+      const pageId = makeId('page')
+      const style = STYLE_IDS.find((id) => id === rawPage.style?.trim())
+      const drawn = style ? drawnFrames(style, rawPanels.length, pageId) : undefined
+      const asked = templateById(rawPage.layout ?? '')
+      const fits = asked && leafCount(asked.frames) === rawPanels.length
+      if (!drawn && rawPage.layout && asked && !fits) warnings.add('有的页格数和版式不一致，已换成合适的版式')
+      const frames = drawn ?? (fits ? asked : templateForCount(rawPanels.length)).frames
 
       const panels = rawPanels.map((raw): MangaPanel => {
         const panel = emptyPanel(makeId('panel'))
@@ -187,8 +202,8 @@ export function parseStoryboard(
         if (!panel.scene) warnings.add('有的格子没有画面描述，请补上')
         return panel
       })
-      while (panels.length < leafCount(template.frames)) panels.push(emptyPanel(makeId('panel')))
-      pages.push({ id: makeId('page'), frames: template.frames, panels })
+      while (panels.length < leafCount(frames)) panels.push(emptyPanel(makeId('panel')))
+      pages.push({ id: pageId, frames, panels })
     }
   }
   if (pages.length > LIMITS.pages) {
