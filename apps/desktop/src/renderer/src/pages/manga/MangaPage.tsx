@@ -82,18 +82,7 @@ function SeriesHome({ onOpen }: { onOpen: (id: string) => void }): React.JSX.Ele
               onClick={() => onOpen(item.id)}
               className="flex min-w-0 flex-col gap-2 rounded-xl bg-panel p-2 text-left transition-colors hover:bg-well"
             >
-              {item.cover ? (
-                <img
-                  src={cloverUrl(item.cover)}
-                  alt=""
-                  draggable={false}
-                  className="aspect-square w-full rounded-md bg-[var(--image-placeholder)] object-cover"
-                />
-              ) : (
-                <span className="flex aspect-square w-full items-center justify-center rounded-md bg-well text-ink-2">
-                  <BookOpen className="size-6" strokeWidth={1.6} aria-hidden="true" />
-                </span>
-              )}
+              <SeriesCover key={item.cover} path={item.cover} />
               <span className="flex items-center gap-1.5 px-1">
                 <span className="min-w-0 flex-1 truncate text-control text-ink">{item.title}</span>
                 <Pill tone={item.panels && item.approved === item.panels ? 'ok' : 'neutral'}>
@@ -119,6 +108,24 @@ function SeriesHome({ onOpen }: { onOpen: (id: string) => void }): React.JSX.Ele
         />
       )}
     </PageScroll>
+  )
+}
+
+/** A series' cover, or its placeholder when it has none or the picture cannot be read (deleted from 作品). */
+function SeriesCover({ path }: { path: string | null }): React.JSX.Element {
+  const [failed, setFailed] = useState(false)
+  return path && !failed ? (
+    <img
+      src={cloverUrl(path)}
+      alt=""
+      draggable={false}
+      onError={() => setFailed(true)}
+      className="aspect-square w-full rounded-md bg-[var(--image-placeholder)] object-cover"
+    />
+  ) : (
+    <span className="flex aspect-square w-full items-center justify-center rounded-md bg-well text-ink-2" data-cover-missing="">
+      <BookOpen className="size-6" strokeWidth={1.6} aria-hidden="true" />
+    </span>
   )
 }
 

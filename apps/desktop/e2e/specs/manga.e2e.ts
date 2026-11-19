@@ -364,6 +364,23 @@ describe('manga', () => {
     expect(await picker.evaluate((select: HTMLSelectElement) => select.selectedOptions[0]?.textContent)).toBe(labels[angle])
   })
 
+  it('shows a placeholder on a series card whose cover picture is gone, not a broken picture', async () => {
+    const page = await openSeries(() => {
+      const { mangaSeriesFixture, mangaCharacterFixture } = window.__mock.fixtures
+      const gone = mangaSeriesFixture({
+        id: 'manga-2',
+        title: '图被删了',
+        characters: [mangaCharacterFixture({ references: [{ path: '/fixture/missing/aki.png', width: 768, height: 1024 }] })],
+      })
+      window.__mock.state.manga = [mangaSeriesFixture(), gone]
+      localStorage.removeItem('mossstudio.manga.open')
+    })
+    const gone = page.locator('[data-manga-series="manga-2"]')
+    await gone.locator('[data-cover-missing]').waitFor()
+    expect(await gone.locator('img').count()).toBe(0)
+    expect(await page.locator('[data-manga-series="manga-1"] img').count()).toBe(1)
+  })
+
   it('drops a gutter dragged with the mouse where the pointer let go, with the window zoomed by 界面大小 too', async () => {
     const page = await openSeries(() => {
       window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
