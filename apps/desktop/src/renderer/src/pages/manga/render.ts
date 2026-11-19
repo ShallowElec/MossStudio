@@ -1,5 +1,14 @@
-import { layoutBalloon, shoutOutline } from '@shared/manga/balloons'
-import { PAGE_HEIGHT, PAGE_WIDTH, boundsOf, innerRect, panelQuads, type Quad } from '@shared/manga/layouts'
+import { layoutBalloon, shoutOutline, type BalloonBox, type Measure } from '@shared/manga/balloons'
+import {
+  PAGE_HEIGHT,
+  PAGE_WIDTH,
+  boundsOf,
+  innerRect,
+  panelQuads,
+  type Quad,
+  type ReadingDirection,
+  type Rect,
+} from '@shared/manga/layouts'
 import { panelPicture, type MangaBalloon, type MangaPage, type MangaSeries } from '@shared/manga/model'
 import { cloverUrl } from '../../lib/clover'
 
@@ -54,6 +63,41 @@ function balloonPath(ctx: CanvasRenderingContext2D, kind: MangaBalloon['kind'], 
   } else {
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
   }
+}
+
+let measuring: CanvasRenderingContext2D | null = null
+
+/** Text widths at `fontSize`, measured as `drawPage` measures them, without a page to draw on. */
+function canvasMeasure(fontSize: number): Measure {
+  measuring ??= document.createElement('canvas').getContext('2d')
+  const ctx = measuring
+  if (!ctx) return (text) => text.length * fontSize
+  ctx.font = `${fontSize}px ${FONT}`
+  return (text) => ctx.measureText(text).width
+}
+
+/** A lettered balloon where `drawPage` puts it: `inner` is the part of its frame balloons stay in, `box` is within it. */
+export interface PlacedBalloon {
+  panel: number
+  line: MangaBalloon
+  inner: Rect
+  box: BalloonBox
+}
+
+export function placedBalloons(
+  page: MangaPage,
+  direction: ReadingDirection,
+  measureAt: (fontSize: number) => Measure = canvasMeasure,
+): PlacedBalloon[] {
+  const frames = panelQuads(page.frames, direction)
+  return page.panels.flatMap((panel, index) => {
+    const frame = frames[index]
+    if (!frame) return []
+    const inner = innerRect(frame)
+    return panel.dialogue
+      .filter((line) => line.text.trim())
+      .map((line) => ({ panel: index, line, inner, box: layoutBalloon(line, inner.w, inner.h, measureAt) }))
+  })
 }
 
 function drawBalloon(ctx: CanvasRenderingContext2D, balloon: MangaBalloon, x: number, y: number, w: number, h: number): void {

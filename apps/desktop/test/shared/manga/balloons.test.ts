@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { defaultBalloonPlaces, layoutBalloon, nearestSpot, shoutOutline, wrapText } from '@shared/manga/balloons'
+import { anchorAlong, defaultBalloonPlaces, layoutBalloon, nearestSpot, placeAlong, shoutOutline, wrapText } from '@shared/manga/balloons'
 
 /** Every character is 10 px wide. */
 const measure = (text: string): number => text.length * 10
@@ -69,5 +69,18 @@ describe('balloon placement', () => {
     const points = shoutOutline(0, 0, 10, 10, 4)
     expect(points).toHaveLength(8)
     expect(points[0]![0]).toBeCloseTo(11.8)
+  })
+})
+
+describe('dragging a balloon', () => {
+  it('turns a centre back into the anchor that puts the balloon there, within its margins, and keeps one that fills the side', () => {
+    for (const anchor of [0, 0.25, 0.5, 0.731, 1]) {
+      expect(anchorAlong(placeAlong(anchor, 600, 80, 24), 600, 80, 24, 0.5)).toBeCloseTo(anchor, 3)
+    }
+    // Past the edges, the anchor stops at 0 or 1, so the balloon keeps its margin.
+    expect(anchorAlong(-500, 600, 80, 24, 0.5)).toBe(0)
+    expect(anchorAlong(5000, 600, 80, 24, 0.5)).toBe(1)
+    // A balloon as wide as its panel cannot move sideways.
+    expect(anchorAlong(100, 200, 100, 24, 0.3)).toBe(0.3)
   })
 })

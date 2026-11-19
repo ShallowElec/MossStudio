@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drawPage, missingPictures, type PictureCache } from '@renderer/pages/manga/render'
+import { drawPage, missingPictures, placedBalloons, type PictureCache } from '@renderer/pages/manga/render'
 import { BLEED_OVERRUN, PAGE_HEIGHT, PAGE_MARGIN, PAGE_WIDTH, panel, split } from '@shared/manga/layouts'
 import { mangaSeriesFixture } from '../../mocks/backend/manga'
 
@@ -71,5 +71,39 @@ describe('drawPage lettering', () => {
       expect(cx! + rx!).toBeLessThanOrEqual(PAGE_WIDTH - PAGE_MARGIN)
       expect(cy! + ry!).toBeLessThanOrEqual(PAGE_HEIGHT - PAGE_MARGIN)
     }
+  })
+
+  it('places the balloons the editor drags exactly where the page draws them, and skips empty lines', () => {
+    const page = mangaSeriesFixture().chapters[0]!.pages[0]!
+    page.frames = split('y', 0.4, panel(true), split('x', 0.5, panel(), panel()), 0.1)
+    page.panels[0]!.dialogue = [
+      { id: 'a', kind: 'speech', text: '我来看看。', x: 0.3, y: 0.7 },
+      { id: 'empty', kind: 'speech', text: '  ', x: 0, y: 0 },
+    ]
+    page.panels[1]!.dialogue = []
+    page.panels[2]!.dialogue = [{ id: 'b', kind: 'shout', text: '灯塔有人！', x: 0, y: 1 }]
+    const ellipses: number[][] = []
+    const ctx = new Proxy({} as CanvasRenderingContext2D, {
+      get: (_, key: string) =>
+        key === 'measureText'
+          ? (text: string) => ({ width: text.length * 40 })
+          : key === 'ellipse'
+            ? (...args: number[]) => ellipses.push(args)
+            : () => undefined,
+      set: () => true,
+    })
+    drawPage(ctx, { readingDirection: 'rtl', style: {} }, page, new Map())
+    const placed = placedBalloons(page, 'rtl', () => (text) => text.length * 40)
+    expect(placed.map((item) => [item.panel, item.line.id])).toEqual([
+      [0, 'a'],
+      [2, 'b'],
+    ])
+    // The speech balloon is the first ellipse drawn; a shout is drawn as a path.
+    const [cx, cy, rx, ry] = ellipses[0]!
+    const { inner, box } = placed[0]!
+    expect(inner.x + box.cx).toBeCloseTo(cx!)
+    expect(inner.y + box.cy).toBeCloseTo(cy!)
+    expect(box.rx).toBeCloseTo(rx!)
+    expect(box.ry).toBeCloseTo(ry!)
   })
 })
