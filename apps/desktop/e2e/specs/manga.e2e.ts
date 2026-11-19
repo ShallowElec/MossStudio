@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Page } from 'playwright-core'
+import { PAGE_HEIGHT } from '@shared/manga/layouts'
 import { useApp } from '../support/app'
 
 const JOBS = 'http:POST /api/engine-jobs'
@@ -263,14 +264,22 @@ describe('manga', () => {
     await page.getByRole('tab', { name: '设定' }).click()
     await page.evaluate(() => window.__mock.fail(window.__mock.Ipc.mangaSave, { code: 'E_WRITE', message: '磁盘已满' }))
     await page.getByRole('switch', { name: '成品为纯黑白' }).click()
-    await page.getByRole('button', { name: '返回漫画列表' }).click()
+    await page.getByRole('button', { name: '全部漫画' }).click()
     await page.getByText('没有保存成功：磁盘已满').waitFor()
     await expect.poll(() => page.getByRole('switch', { name: '成品为纯黑白' }).getAttribute('aria-checked')).toBe('true')
 
     await page.evaluate(() => window.__mock.fail(window.__mock.Ipc.mangaSave, {}, { times: 0 }))
-    await page.getByRole('button', { name: '返回漫画列表' }).click()
+    await page.getByRole('button', { name: '全部漫画' }).click()
     await page.getByRole('button', { name: '新建漫画' }).waitFor()
     expect(await page.evaluate(() => window.__mock.state.manga[0]?.style.monochrome)).toBe(true)
+
+    // The list shows each series as a card with its cover; a card opens its series.
+    const card = page.locator('[data-manga-series="manga-1"]')
+    expect(await card.getAttribute('aria-label')).toBe('雨夜侦探')
+    expect(await card.innerText()).toContain('0 / 3 格')
+    expect(await card.locator('img').getAttribute('src')).toContain('aki.png')
+    await card.click()
+    await page.getByRole('heading', { name: '雨夜侦探' }).waitFor()
   })
 
   it('stops adding lines and characters at the limits, and refuses to export a page whose picture is gone', async () => {
@@ -353,6 +362,41 @@ describe('manga', () => {
     const labels = { eye: '平视', high: '俯视', low: '仰视', side: '侧面', back: '背影', over: '过肩' }
     const picker = panel(page, 'panel-1').getByRole('combobox', { name: '角度' })
     expect(await picker.evaluate((select: HTMLSelectElement) => select.selectedOptions[0]?.textContent)).toBe(labels[angle])
+  })
+
+  it('drops a gutter dragged with the mouse where the pointer let go, with the window zoomed by 界面大小 too', async () => {
+    const page = await openSeries(() => {
+      window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    const frames = page.getByRole('group', { name: '第 1 页的分格' })
+    await frames.waitFor()
+    try {
+      for (const [zoom, target] of [
+        [1, 900],
+        [1.5, 1200],
+      ] as const) {
+        await app.electron.evaluate(
+          ({ BrowserWindow }, factor) => BrowserWindow.getAllWindows()[0]!.webContents.setZoomFactor(factor),
+          zoom,
+        )
+        await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBeCloseTo(zoom, 2)
+        await frames.scrollIntoViewIfNeeded()
+        const box = (await frames.boundingBox())!
+        const scale = box.height / PAGE_HEIGHT
+        const across = frames.getByRole('slider', { name: '横向格线' })
+        const from = Number(await across.getAttribute('aria-valuenow'))
+        const x = box.x + box.width / 4
+        await page.mouse.move(x, box.y + from * scale)
+        await page.mouse.down()
+        await page.mouse.move(x, box.y + target * scale, { steps: 8 })
+        await page.mouse.up()
+        // Within two screen pixels of the pointer.
+        await expect.poll(async () => Math.abs(Number(await across.getAttribute('aria-valuenow')) - target)).toBeLessThanOrEqual(2 / scale)
+      }
+    } finally {
+      await app.electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.setZoomFactor(1))
+    }
   })
 
   it('does not offer to cut a panel that is already as narrow as a panel may be', async () => {

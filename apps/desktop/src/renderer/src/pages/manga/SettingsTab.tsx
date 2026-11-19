@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { MangaSeries } from '@shared/manga/model'
 import { Notice } from '../../components/common/Notice'
-import { Button, ConfirmDialog, Field, Input, Section, Segmented, Select, Switch, Textarea } from '../../components/ui'
+import { Button, ConfirmDialog, Field, Group, Input, Row, Section, Segmented, Select, Switch, Textarea } from '../../components/ui'
 import { useApp } from '../../store'
 import { QUALITY_PRESETS, qualityFor, samplingForBundle } from '../studio/defaults'
 import { installedBundles, resolveBundle } from '../studio/readiness'
@@ -50,6 +50,7 @@ export function SettingsTab({
         </Field>
         <Field label="阅读方向">
           <Segmented
+            className="self-start"
             label="阅读方向"
             value={series.readingDirection}
             onChange={(readingDirection) => update((current) => ({ ...current, readingDirection }))}
@@ -68,17 +69,15 @@ export function SettingsTab({
         <Field label="不想出现的内容">
           <Textarea rows={2} value={style.negative} onChange={(event) => setStyle({ negative: event.target.value })} />
         </Field>
-        <label className="flex items-center justify-between gap-4 rounded-lg bg-panel px-4 py-3">
-          <span className="flex flex-col gap-0.5">
-            <span className="text-control text-ink">成品为纯黑白</span>
-            <span className="text-caption text-ink-2">引擎偶尔会画出彩色，打开后预览和导出的页面一律转成黑白。</span>
-          </span>
-          <Switch
-            aria-label="成品为纯黑白"
-            checked={Boolean(style.monochrome)}
-            onCheckedChange={(monochrome) => setStyle({ monochrome })}
-          />
-        </label>
+        <Group>
+          <Row title="成品为纯黑白" description="引擎偶尔会画出彩色，打开后预览和导出的页面一律转成黑白。">
+            <Switch
+              aria-label="成品为纯黑白"
+              checked={Boolean(style.monochrome)}
+              onCheckedChange={(monochrome) => setStyle({ monochrome })}
+            />
+          </Row>
+        </Group>
         <AdapterEditor label="画风 LoRA" adapters={style.adapters} onChange={(adapters) => setStyle({ adapters })} />
         <div className="grid grid-cols-2 gap-4">
           <Field label="模型">
@@ -141,14 +140,13 @@ export function SettingsTab({
         )}
       </Section>
 
-      <Section title="删除这部漫画">
-        <div className="flex items-center justify-between gap-4 rounded-xl bg-panel px-4 py-3">
-          <p className="text-ui text-ink-2">删除后，人物卡、章节和参考图都会一起删除，无法恢复。已经生成的图片仍保留在「作品」里。</p>
+      <Group>
+        <Row title="删除这部漫画" description="人物卡、章节和参考图会一起删除，无法恢复。已经生成的图片仍保留在「作品」里。">
           <Button tone="ghost-danger" onClick={() => setConfirming(true)}>
             <Trash2 className="size-4" strokeWidth={1.6} /> 删除
           </Button>
-        </div>
-      </Section>
+        </Row>
+      </Group>
       <ConfirmDialog
         open={confirming}
         title={`删除「${series.title}」？`}

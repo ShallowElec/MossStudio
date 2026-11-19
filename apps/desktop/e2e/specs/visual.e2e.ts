@@ -205,6 +205,15 @@ const STOPS: Stop[] = [
     },
   },
   { page: 'manga', state: 'empty', open: { scenario: 'ready', route: '/manga' }, seed: clearManga },
+  {
+    page: 'manga',
+    state: 'list',
+    open: { scenario: 'ready', route: '/manga' },
+    seed: async (page) => {
+      await seedManga(page)
+      await clearManga(page)
+    },
+  },
   { page: 'manga', state: 'chapter', open: { scenario: 'ready', route: '/manga' }, seed: seedManga },
   {
     page: 'manga',

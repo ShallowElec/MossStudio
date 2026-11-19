@@ -60,7 +60,7 @@ export function PanelCard({
       data-state={panel.state}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-ui font-semibold text-ink-2">{label}</span>
+        <h3 className="truncate text-control text-ink">{label}</h3>
         <Pill tone={PANEL_STATE_TONE[panel.state]}>{PANEL_STATE_LABEL[panel.state]}</Pill>
       </div>
 
