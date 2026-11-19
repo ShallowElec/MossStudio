@@ -151,15 +151,31 @@ export function layoutBalloon(
   const padY = ellipse ? fontSize * 1.0 : fontSize * 0.5
   const rx = Math.min(panelW / 2, (ellipse ? (textW / 2) * Math.SQRT2 : textW / 2) + padX / 2)
   const ry = Math.min(panelH / 2, (ellipse ? (textH / 2) * Math.SQRT2 : textH / 2) + padY / 2)
-  const margin = Math.round(fontSize * 0.6)
-  const place = (anchor: number, size: number, radius: number): number => {
-    const free = Math.max(0, size - 2 * radius - 2 * margin)
-    const at = margin + radius + Math.min(1, Math.max(0, anchor)) * free
-    return Math.min(size - radius, Math.max(radius, at))
-  }
-  const cx = place(balloon.x, panelW, rx)
-  const cy = place(balloon.y, panelH, ry)
+  const cx = placeAlong(balloon.x, panelW, rx, fontSize)
+  const cy = placeAlong(balloon.y, panelH, ry, fontSize)
   return { lines, cx, cy, rx, ry, fontSize, lineHeight }
+}
+
+/** The gap a balloon keeps from the edges of its panel. */
+const balloonMargin = (fontSize: number): number => Math.round(fontSize * 0.6)
+
+/** Where along one side of `size` pixels a balloon of half-size `radius` sits for `anchor` (0 to 1): its centre. */
+export function placeAlong(anchor: number, size: number, radius: number, fontSize: number): number {
+  const margin = balloonMargin(fontSize)
+  const free = Math.max(0, size - 2 * radius - 2 * margin)
+  const at = margin + radius + Math.min(1, Math.max(0, anchor)) * free
+  return Math.min(size - radius, Math.max(radius, at))
+}
+
+/**
+ * The anchor that puts a balloon's centre as near `centre` as it can go, the reverse of `placeAlong`. A balloon that
+ * fills the side has nowhere to move and keeps `current`.
+ */
+export function anchorAlong(centre: number, size: number, radius: number, fontSize: number, current: number): number {
+  const margin = balloonMargin(fontSize)
+  const free = size - 2 * radius - 2 * margin
+  if (free <= 0) return current
+  return Math.round(Math.min(1, Math.max(0, (centre - margin - radius) / free)) * 1000) / 1000
 }
 
 /** Points of a shout balloon's spiky outline around the ellipse (rx, ry). */

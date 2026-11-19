@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Page } from 'playwright-core'
-import { PAGE_HEIGHT } from '@shared/manga/layouts'
+import { PAGE_HEIGHT, templateForCount } from '@shared/manga/layouts'
 import { useApp } from '../support/app'
 
 const JOBS = 'http:POST /api/engine-jobs'
@@ -13,7 +13,7 @@ const JOBS = 'http:POST /api/engine-jobs'
 const STORYBOARD = JSON.stringify({
   pages: [
     {
-      layout: 'two-rows',
+      style: 'action',
       panels: [
         {
           scene: '旧港口，雾很浓',
@@ -95,12 +95,23 @@ describe('manga', () => {
 
     const [request] = await app.calls<{ system: string; prompt: string }>('ai:complete')
     expect(request!.system).toContain('只输出一个 JSON 对象')
+    expect(request!.system).toContain('action（动作）')
     expect(request!.prompt).toContain('- 阿秋')
     expect(request!.prompt).toContain('阿秋深夜去旧港口调查')
     expect(request!.prompt).toContain('第 1 话，大约 2 页。')
     expect(await panels(page).first().getByLabel('画面描述').inputValue()).toBe('旧港口，雾很浓')
     expect(await panels(page).nth(1).getByLabel('台词').inputValue()).toBe('谁在那里？')
     expect(await page.getByRole('img', { name: '第 1 页预览' }).isVisible()).toBe(true)
+    // The page asked for 动作, so its frames were drawn for its two panels instead of taken from a template.
+    await expect.poll(() => page.evaluate(() => window.__mock.state.manga[0]?.chapters[0]?.pages[0]?.frames)).toBeDefined()
+    const frames = await page.evaluate(() => window.__mock.state.manga[0]!.chapters[0]!.pages[0]!.frames)
+    expect(frames).not.toEqual(templateForCount(2).frames)
+    expect(
+      await page
+        .getByRole('group', { name: '第 1 页的分格' })
+        .getByRole('button', { name: /^第 \d 格$/ })
+        .count(),
+    ).toBe(2)
 
     // The storyboard is saved with the character mapped by name.
     await expect
@@ -337,7 +348,7 @@ describe('manga', () => {
     const frames = page.getByRole('group', { name: '第 1 页的分格' })
     await frames.waitFor()
 
-    await frames.getByRole('button', { name: '第 2 格' }).click()
+    await frames.getByRole('button', { name: '第 2 格', exact: true }).click()
     const tools = page.getByRole('group', { name: '第 2 格的分格' })
     expect(await tools.getByRole('button', { name: '合并' }).isDisabled()).toBe(true)
     await tools.getByRole('button', { name: '上下拆开' }).click()
@@ -349,7 +360,7 @@ describe('manga', () => {
     await expect.poll(ids).toEqual(['panel-1', 'panel-2', 'panel-3'])
 
     // The first panel spans the top of the page, so it can bleed.
-    await frames.getByRole('button', { name: '第 1 格' }).click()
+    await frames.getByRole('button', { name: '第 1 格', exact: true }).click()
     await page.getByRole('switch', { name: '第 1 格出血' }).click()
     await expect.poll(async () => (await stored()).frames).toMatchObject({ first: { kind: 'panel', bleed: true } })
 
@@ -376,6 +387,38 @@ describe('manga', () => {
     const labels = { eye: '平视', high: '俯视', low: '仰视', side: '侧面', back: '背影', over: '过肩' }
     const picker = panel(page, 'panel-1').getByRole('combobox', { name: '角度' })
     expect(await picker.evaluate((select: HTMLSelectElement) => select.selectedOptions[0]?.textContent)).toBe(labels[angle])
+  })
+
+  it('drags a balloon on the page to another place in its panel, and moves it with the arrow keys', async () => {
+    const page = await openSeries(() => {
+      window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    const frames = page.getByRole('group', { name: '第 1 页的分格' })
+    await frames.waitFor()
+    const line = () => page.evaluate(() => window.__mock.state.manga[0]!.chapters[0]!.pages[0]!.panels[0]!.dialogue[0]!)
+    const spot = panel(page, 'panel-1').getByRole('combobox', { name: '气泡位置' })
+    const spotLabel = () => spot.evaluate((select: HTMLSelectElement) => select.selectedOptions[0]?.textContent)
+    expect(await spotLabel()).toBe('右上')
+
+    // Take hold off-centre and drag far past the panel's bottom-left corner: it stops inside, at the corner.
+    const balloon = frames.getByRole('button', { name: '第 1 格的气泡：那天，雨一直没停。' })
+    const box = (await balloon.boundingBox())!
+    const start = { x: box.x + box.width * 0.7, y: box.y + box.height * 0.4 }
+    const target = (await frames.getByRole('button', { name: '第 1 格', exact: true }).boundingBox())!
+    await page.mouse.move(start.x, start.y)
+    await page.mouse.down()
+    await page.mouse.move(target.x - 200, target.y + target.height + 200, { steps: 10 })
+    await page.mouse.up()
+    await expect.poll(line).toMatchObject({ x: 0, y: 1 })
+    expect(await spotLabel()).toBe('左下')
+
+    await balloon.focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(line).toMatchObject({ x: 0.1, y: 0.9 })
+    // Dragging a balloon does not pick its panel.
+    expect(await page.getByRole('group', { name: '第 1 格的分格' }).count()).toBe(0)
   })
 
   it('shows a placeholder on a series card whose cover picture is gone, not a broken picture', async () => {
@@ -443,7 +486,7 @@ describe('manga', () => {
     // Right to left: the second panel is the right one of the lower row; move the gutter right until it stops.
     await frames.getByRole('slider', { name: '竖向格线' }).focus()
     for (let i = 0; i < 45; i += 1) await page.keyboard.press('ArrowRight')
-    await frames.getByRole('button', { name: '第 2 格' }).click()
+    await frames.getByRole('button', { name: '第 2 格', exact: true }).click()
     const tools = page.getByRole('group', { name: '第 2 格的分格' })
     const across = tools.getByRole('button', { name: '左右拆开' })
     expect(await across.isDisabled()).toBe(true)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { templateById } from '@shared/manga/layouts'
+import { LAYOUT_STYLE_LABEL } from '@shared/manga/gacha'
+import { PAGE_TEMPLATES, framesFit, leafCount, templateById, type FrameNode } from '@shared/manga/layouts'
 import { mangaPageSchema } from '@shared/manga/model'
 import { parseStoryboard, storyboardRequest } from '@shared/manga/storyboard'
 import { mangaSeriesFixture } from '../../mocks/backend/manga'
@@ -18,6 +19,8 @@ describe('storyboardRequest', () => {
     const request = storyboardRequest(withPrevious, chapter, { pages: 6 })
     expect(request.system).toContain('只输出一个 JSON 对象')
     expect(request.system).toContain('grid-four（4 格，田字四格）')
+    expect(request.system).toContain('action（动作）')
+    expect(request.system).toContain('"style": "分格风格"')
     expect(request.system).toContain('从右到左')
     expect(request.user).toContain('- 阿秋（主角）')
     expect(request.user).toContain('服装：校服、风衣')
@@ -89,6 +92,57 @@ describe('parseStoryboard', () => {
     expect(first.cast).toEqual([])
     expect(first.dialogue[0]).toMatchObject({ kind: 'speech', speakerId: 'char-aki' })
     expect(pages[0]!.panels[1]!.cast[0]).not.toHaveProperty('outfitId')
+  })
+
+  it('draws each page in the style it asks for, with as many panels as it has, slanted and bleeding for action', () => {
+    const page = (style: string, count: number) => ({
+      style,
+      panels: Array.from({ length: count }, (_, at) => ({ scene: `第 ${at + 1} 格`, shot: 'medium' })),
+    })
+    const slanted = (node: FrameNode): boolean =>
+      node.kind === 'split' && (Boolean(node.slant) || slanted(node.first) || slanted(node.second))
+    const bleeding = (node: FrameNode): boolean =>
+      node.kind === 'panel' ? Boolean(node.bleed) : bleeding(node.first) || bleeding(node.second)
+    const isTemplate = (frames: FrameNode) => PAGE_TEMPLATES.some((template) => JSON.stringify(template.frames) === JSON.stringify(frames))
+
+    const actionPages = Array.from({ length: 6 }, () => page('action', 4))
+    const { pages, warnings } = parseStoryboard(
+      JSON.stringify({ pages: [...actionPages, page('dialogue', 5), page(' splash ', 2)] }),
+      series,
+      counter(),
+    )
+    expect(warnings).toEqual([])
+    for (const drawn of pages) {
+      expect(framesFit(drawn.frames)).toBe(true)
+      expect(isTemplate(drawn.frames)).toBe(false)
+      expect(leafCount(drawn.frames)).toBe(drawn.panels.length)
+    }
+    expect(pages.map((item) => item.panels.length)).toEqual([4, 4, 4, 4, 4, 4, 5, 2])
+    const action = pages.slice(0, 6).map((item) => item.frames)
+    expect(action.some(slanted)).toBe(true)
+    expect(action.some(bleeding)).toBe(true)
+    // Dialogue pages are drawn straight and inside the margins.
+    expect(slanted(pages[6]!.frames) || bleeding(pages[6]!.frames)).toBe(false)
+    // The same answer and ids give the same pages.
+    expect(parseStoryboard(JSON.stringify({ pages: actionPages }), series, counter()).pages[0]!.frames).toEqual(pages[0]!.frames)
+  })
+
+  it('keeps a fixed layout when the style is one it does not know, and draws six panels in every style', () => {
+    const many = Array.from({ length: 6 }, (_, at) => ({ scene: `第 ${at + 1} 格`, shot: 'wide' }))
+    const unknown = parseStoryboard(
+      JSON.stringify({ pages: [{ style: 'fancy', layout: 'two-rows', panels: many.slice(0, 2) }] }),
+      series,
+      counter(),
+    )
+    expect(unknown.warnings).toEqual([])
+    expect(unknown.pages[0]!.frames).toEqual(templateById('two-rows')!.frames)
+
+    for (const style of Object.keys(LAYOUT_STYLE_LABEL)) {
+      const { pages, warnings } = parseStoryboard(JSON.stringify({ pages: [{ style, panels: many }] }), series, counter())
+      expect(warnings, style).toEqual([])
+      expect(leafCount(pages[0]!.frames), style).toBe(6)
+      expect(framesFit(pages[0]!.frames), style).toBe(true)
+    }
   })
 
   it('fails with a plain message when the answer is not a storyboard', () => {
