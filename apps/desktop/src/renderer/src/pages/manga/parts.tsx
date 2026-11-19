@@ -8,10 +8,50 @@ import type { MemoryRequest } from '@shared/manga/memory'
 import type { MangaAdapter, MangaPage, MangaSeries } from '@shared/manga/model'
 import { call } from '../../lib/api'
 import { strength } from '../../lib/format'
-import { FieldLabel, IconButton, Select, cn } from '../../components/ui'
+import { FieldLabel, IconButton, Input, Select, cn } from '../../components/ui'
 import { useApp } from '../../store'
 import { SliderField } from '../studio/InputControls'
 import { drawPage, loadPagePictures, type PageLook, type PictureCache } from './render'
+
+/**
+ * A whole number between `min` and `max`. The text may be cleared while typing:
+ * the value only changes when the text is a number again, and the box shows the
+ * value once it loses focus. Clamping on every keystroke turned a cleared box
+ * into 1, so typing 2 there gave 12.
+ */
+export function CountInput({
+  value,
+  min,
+  max,
+  onChange,
+  ...props
+}: Omit<React.ComponentProps<'input'>, 'value' | 'onChange' | 'min' | 'max' | 'type'> & {
+  value: number
+  min: number
+  max: number
+  onChange: (value: number) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <Input
+      {...props}
+      type="number"
+      min={min}
+      max={max}
+      value={draft ?? String(value)}
+      onChange={(event) => {
+        const text = event.target.value
+        setDraft(text)
+        const number = Number(text)
+        if (text.trim() && Number.isFinite(number)) onChange(Math.max(min, Math.min(max, Math.round(number))))
+      }}
+      onBlur={(event) => {
+        setDraft(null)
+        props.onBlur?.(event)
+      }}
+    />
+  )
+}
 
 /** The LoRA rows of the 画风 or a character: each with its weight, plus a picker of installed ones. */
 export function AdapterEditor({

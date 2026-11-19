@@ -77,6 +77,19 @@ describe('manga', () => {
 
     await page.getByRole('tab', { name: /章节/ }).click()
     await page.getByLabel('大纲', { exact: true }).fill('阿秋深夜去旧港口调查，察觉有人跟踪。')
+    // A number box can be cleared and typed again: clearing it must not leave a 1 in front of the new number.
+    for (const [label, typed] of [
+      ['大约几页', '2'],
+      ['话数', '1'],
+    ] as const) {
+      const box = page.getByLabel(label, { exact: true })
+      await box.press('Control+A')
+      await box.press('Backspace')
+      await box.pressSequentially(typed)
+      expect(await box.inputValue()).toBe(typed)
+      await box.blur()
+      expect(await box.inputValue()).toBe(typed)
+    }
     await page.getByRole('button', { name: '生成分镜' }).click()
     await expect.poll(() => panels(page).count()).toBe(2)
 
@@ -84,6 +97,7 @@ describe('manga', () => {
     expect(request!.system).toContain('只输出一个 JSON 对象')
     expect(request!.prompt).toContain('- 阿秋')
     expect(request!.prompt).toContain('阿秋深夜去旧港口调查')
+    expect(request!.prompt).toContain('第 1 话，大约 2 页。')
     expect(await panels(page).first().getByLabel('画面描述').inputValue()).toBe('旧港口，雾很浓')
     expect(await panels(page).nth(1).getByLabel('台词').inputValue()).toBe('谁在那里？')
     expect(await page.getByRole('img', { name: '第 1 页预览' }).isVisible()).toBe(true)

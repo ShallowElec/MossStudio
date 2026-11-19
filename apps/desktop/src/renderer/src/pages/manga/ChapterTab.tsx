@@ -24,7 +24,7 @@ import {
 import { PanelCard } from './PanelCard'
 import { approveAll, chapterLabel, exportBlockers, newChapter, newPage, nextChapterNumber, updateChapter, updatePage } from './logic'
 import { PageLayout } from './PageLayout'
-import { askModel, useProviders } from './parts'
+import { CountInput, askModel, useProviders } from './parts'
 import { renderPagePng, type PictureCache } from './render'
 import type { SeriesUpdate } from './useSeries'
 
@@ -164,14 +164,11 @@ function ChapterEditor({
       >
         <div className="flex gap-4">
           <Field label="话数" className="w-20">
-            <Input
-              type="number"
+            <CountInput
               min={1}
+              max={9999}
               value={chapter.number}
-              onChange={(event) => {
-                const number = Math.max(1, Math.min(9999, Math.round(Number(event.target.value) || 1)))
-                setChapter((current) => ({ ...current, number }))
-              }}
+              onChange={(number) => setChapter((current) => ({ ...current, number }))}
             />
           </Field>
           <Field label="标题" className="flex-1">
@@ -191,13 +188,7 @@ function ChapterEditor({
         </Field>
         <div className="flex items-end gap-2">
           <Field label="大约几页" className="w-24">
-            <Input
-              type="number"
-              min={1}
-              max={40}
-              value={pageCount}
-              onChange={(event) => setPageCount(Math.max(1, Math.min(40, Number(event.target.value) || 1)))}
-            />
+            <CountInput min={1} max={40} value={pageCount} onChange={setPageCount} />
           </Field>
           <Button
             tone={chapter.pages.length ? 'secondary' : 'primary'}
