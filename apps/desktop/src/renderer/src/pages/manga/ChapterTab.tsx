@@ -267,26 +267,29 @@ function ChapterEditor({
             </IconButton>
           }
         >
-          <div className="flex items-start gap-4">
-            <div className="sticky top-0 w-72 shrink-0">
-              <PageLayout
-                series={series}
-                page={page}
-                label={`第 ${pageIndex + 1} 页`}
-                onChange={(change) => update((current) => updatePage(current, chapter.id, page.id, change))}
-              />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-3">
-              {page.panels.map((panel, panelIndex) => (
-                <PanelCard
-                  key={panel.id}
+          {/* Side by side when there is room for a panel card next to the page; under 界面大小's zoom, cards go below it. */}
+          <div className="@container">
+            <div className="flex flex-col items-start gap-4 @[48rem]:flex-row">
+              <div className="w-72 shrink-0 @[48rem]:sticky @[48rem]:top-0">
+                <PageLayout
                   series={series}
-                  panel={panel}
-                  label={`第 ${pageIndex + 1} 页第 ${panelIndex + 1} 格`}
-                  onChange={(change) => update((current) => updatePanel(current, chapter.id, panel.id, change))}
-                  onDraw={() => update((current) => enqueue(current, chapter.id, [panel.id]))}
+                  page={page}
+                  label={`第 ${pageIndex + 1} 页`}
+                  onChange={(change) => update((current) => updatePage(current, chapter.id, page.id, change))}
                 />
-              ))}
+              </div>
+              <div className="flex w-full min-w-0 flex-1 flex-col gap-3">
+                {page.panels.map((panel, panelIndex) => (
+                  <PanelCard
+                    key={panel.id}
+                    series={series}
+                    panel={panel}
+                    label={`第 ${pageIndex + 1} 页第 ${panelIndex + 1} 格`}
+                    onChange={(change) => update((current) => updatePanel(current, chapter.id, panel.id, change))}
+                    onDraw={() => update((current) => enqueue(current, chapter.id, [panel.id]))}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </Section>

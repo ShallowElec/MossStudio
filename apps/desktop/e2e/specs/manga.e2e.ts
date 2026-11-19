@@ -381,7 +381,7 @@ describe('manga', () => {
     expect(await page.locator('[data-manga-series="manga-1"] img').count()).toBe(1)
   })
 
-  it('drops a gutter dragged with the mouse where the pointer let go, with the window zoomed by 界面大小 too', async () => {
+  it('drops a gutter dragged with the mouse where the pointer let go, and keeps panel cards usable, with the window zoomed by 界面大小 too', async () => {
     const page = await openSeries(() => {
       window.__mock.state.manga = [window.__mock.fixtures.mangaSeriesFixture()]
       localStorage.setItem('mossstudio.manga.open', 'manga-1')
@@ -408,6 +408,9 @@ describe('manga', () => {
         await page.mouse.down()
         await page.mouse.move(x, box.y + target * scale, { steps: 8 })
         await page.mouse.up()
+        // A panel card keeps room to write in: next to the page at 100 %, below it when zoomed.
+        const describe = panel(page, 'panel-1').getByLabel('画面描述')
+        expect(await describe.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(240)
         // Within two screen pixels of the pointer.
         await expect.poll(async () => Math.abs(Number(await across.getAttribute('aria-valuenow')) - target)).toBeLessThanOrEqual(2 / scale)
       }
