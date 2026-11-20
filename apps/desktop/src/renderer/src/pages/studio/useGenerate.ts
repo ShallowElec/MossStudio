@@ -57,7 +57,7 @@ export function useGenerate(options: {
   generate: (
     canvasId?: string,
     seed?: SeedMode,
-    options?: { smaller?: boolean },
+    runOptions?: { smaller?: boolean },
   ) => Promise<{ queued: boolean; canvasId?: string; jobId?: string; error?: string }>
 } {
   const [submitting, setSubmitting] = useState(false)
@@ -66,7 +66,7 @@ export function useGenerate(options: {
   const latest = useRef(options)
   latest.current = options
 
-  const generate = useCallback(async (canvasId?: string, seedMode: SeedMode = 'auto', options: { smaller?: boolean } = {}) => {
+  const generate = useCallback(async (canvasId?: string, seedMode: SeedMode = 'auto', runOptions: { smaller?: boolean } = {}) => {
     const { project, catalog, preferredBundleId, remoteHost, controlAdapters = [], controlAdaptersLoaded, notify } = latest.current
     const fail = (message: string): { queued: false; error: string } => {
       notify(message, 'error')
@@ -99,7 +99,7 @@ export function useGenerate(options: {
     let canvases = project.canvasesRef.current
     let found = canvases.find((canvas) => canvas.id === requested.id)
     if (!found) return stop('这个画面已经删除了')
-    if (options.smaller) {
+    if (runOptions.smaller) {
       // The 画面 itself gets the smaller size, so the next run fits too and 尺寸 shows it.
       const smaller = smallerCanvas(found)
       if (!smaller) return stop('已经是最小的尺寸了')

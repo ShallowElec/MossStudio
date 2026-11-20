@@ -99,7 +99,7 @@ describe('loading', () => {
     )
     const list = (await load()).listDiagnostics()
     // The fallback E_MODULE rule has no placeholder, so its fixed title replaces the stale template.
-    expect(list[0]).toMatchObject({ title: '运行环境缺少组件', explain: expect.not.stringContaining('{1}') })
+    expect(list[0]).toMatchObject({ title: '训练环境缺少组件', explain: expect.not.stringContaining('{1}') })
     expect(list[1]!.title).toBe('keep {1}')
   })
 

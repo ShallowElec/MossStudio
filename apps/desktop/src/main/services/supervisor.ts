@@ -483,7 +483,8 @@ function handleRunnerEvent(job: JobRecord, runningJob: RunningJob, payload: stri
       }
     pushDiagnostic(toDiagnostic(rule, String(event['traceback'] ?? message), job.id))
     // The card and 活动 word the failure by its code; the engine's own text stays readable under 查看详情.
-    appendLog(job, 'stderr', message, runningJob)
+    // A CLI engine's message is built from stderr lines that are in the log already.
+    if (!runningJob.cli) appendLog(job, 'stderr', message, runningJob)
     update(job, {
       state: 'failed',
       error: { code, message },

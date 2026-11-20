@@ -125,16 +125,19 @@ const FALLBACK: RawRule[] = [
     match: '(out of memory|OutOfMemoryError)',
     severity: 'error',
     title: '显存不够',
-    explain: '这张图太大，显卡的显存放不下。把尺寸改小一点再试。',
+    explain: '显卡的显存放不下这次要算的东西。生成时把尺寸改小一点；训练时把「显存」选小一档。',
     solutions: [{ label: '查看日志', action: 'open_log' }],
   },
   {
     id: 'E_MODULE',
     match: "ModuleNotFoundError: No module named '([^']+)'",
     severity: 'error',
-    title: '运行环境缺少组件',
-    explain: '运行环境没有装完整，通常是安装中途断了。重新安装一次运行环境再试。',
-    solutions: [{ label: '查看日志', action: 'open_log' }],
+    title: '训练环境缺少组件',
+    explain: '训练环境没有装完整，通常是安装中途断了。到「设置 › 训练」重新安装训练环境再试。',
+    solutions: [
+      { label: '重新安装训练环境', action: 'open_settings', params: { tab: 'training' } },
+      { label: '查看日志', action: 'open_log' },
+    ],
   },
   {
     id: 'E_NET',
