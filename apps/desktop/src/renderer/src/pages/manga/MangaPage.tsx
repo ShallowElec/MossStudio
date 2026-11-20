@@ -1,12 +1,12 @@
-import { ArrowLeft, BookOpen, Plus } from 'lucide-react'
+import { BookOpen, ChevronLeft, Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Ipc } from '@shared/channels'
 import { chapterProgress } from '@shared/manga/queue'
 import type { MangaSeries } from '@shared/manga/model'
 import { call } from '../../lib/api'
-import { relative } from '../../lib/format'
+import { cloverUrl } from '../../lib/clover'
 import { Notice } from '../../components/common/Notice'
-import { Button, EmptyState, Group, IconButton, LoadingRow, PageHeader, PageScroll, Pill, Row, Tabs, useToast } from '../../components/ui'
+import { Button, EmptyState, LoadingRow, PageHeader, PageScroll, Pill, Tabs, useToast } from '../../components/ui'
 import { CharactersTab } from './CharactersTab'
 import { ChapterTab } from './ChapterTab'
 import { MemoryTab } from './MemoryTab'
@@ -72,22 +72,29 @@ function SeriesHome({ onOpen }: { onOpen: (id: string) => void }): React.JSX.Ele
       ) : !loaded ? (
         <LoadingRow />
       ) : items.length ? (
-        <Group>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
           {items.map((item) => (
-            <Row
+            <button
               key={item.id}
-              title={item.title}
-              description={item.logline || `${item.chapterCount} 话 · ${item.characterCount} 个人物`}
-              leading={<BookOpen className="size-4 text-ink-2" strokeWidth={1.6} />}
+              type="button"
+              data-manga-series={item.id}
+              aria-label={item.title}
               onClick={() => onOpen(item.id)}
+              className="flex min-w-0 flex-col gap-2 rounded-xl bg-panel p-2 text-left transition-colors hover:bg-well"
             >
-              <span className="text-caption text-ink-2">{relative(item.updatedAt)}</span>
-              <Pill tone={item.panels && item.approved === item.panels ? 'ok' : 'neutral'}>
-                {item.approved} / {item.panels} 格
-              </Pill>
-            </Row>
+              <SeriesCover key={item.cover} path={item.cover} />
+              <span className="flex items-center gap-1.5 px-1">
+                <span className="min-w-0 flex-1 truncate text-control text-ink">{item.title}</span>
+                <Pill tone={item.panels && item.approved === item.panels ? 'ok' : 'neutral'}>
+                  {item.approved} / {item.panels} 格
+                </Pill>
+              </span>
+              <span className="truncate px-1 pb-1 text-caption text-ink-2" title={item.logline || undefined}>
+                {item.chapterCount} 话 · {item.characterCount} 个人物
+              </span>
+            </button>
           ))}
-        </Group>
+        </div>
       ) : (
         <EmptyState
           icon={<BookOpen className="size-8" strokeWidth={1.6} />}
@@ -101,6 +108,24 @@ function SeriesHome({ onOpen }: { onOpen: (id: string) => void }): React.JSX.Ele
         />
       )}
     </PageScroll>
+  )
+}
+
+/** A series' cover, or its placeholder when it has none or the picture cannot be read (deleted from 作品). */
+function SeriesCover({ path }: { path: string | null }): React.JSX.Element {
+  const [failed, setFailed] = useState(false)
+  return path && !failed ? (
+    <img
+      src={cloverUrl(path)}
+      alt=""
+      draggable={false}
+      onError={() => setFailed(true)}
+      className="aspect-square w-full rounded-md bg-[var(--image-placeholder)] object-cover"
+    />
+  ) : (
+    <span className="flex aspect-square w-full items-center justify-center rounded-md bg-well text-ink-2" data-cover-missing="">
+      <BookOpen className="size-6" strokeWidth={1.6} aria-hidden="true" />
+    </span>
   )
 }
 
@@ -169,18 +194,16 @@ function SeriesWorkspace({ id, onClose }: { id: string; onClose: () => void }): 
   return (
     <div className="flex h-full flex-col bg-surface">
       <div className="flex shrink-0 flex-col gap-4 px-10 pb-4 pt-8">
-        <div className="flex items-start gap-3">
-          <IconButton label="返回漫画列表" className="mt-0.5" onClick={close}>
-            <ArrowLeft className="size-4" strokeWidth={1.6} />
-          </IconButton>
-          <PageHeader
-            className="min-w-0 flex-1"
-            title={series.title}
-            description={
-              panels.busy ? `正在画 ${panels.busy} 格` : panels.review ? `${panels.review} 格等你审核` : series.logline || undefined
-            }
-          />
-        </div>
+        <Button tone="ghost" className="-ml-2 self-start" onClick={close}>
+          <ChevronLeft className="size-4" strokeWidth={1.6} aria-hidden="true" />
+          全部漫画
+        </Button>
+        <PageHeader
+          title={series.title}
+          description={
+            panels.busy ? `正在画 ${panels.busy} 格` : panels.review ? `${panels.review} 格等你审核` : series.logline || undefined
+          }
+        />
         <Tabs
           label="漫画分区"
           value={tab}

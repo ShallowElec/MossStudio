@@ -88,7 +88,11 @@ export function CharactersTab({ series, update }: { series: MangaSeries; update:
               onClick={() => setSelectedId(character.id)}
               leading={
                 character.references[0] ? (
-                  <img src={cloverUrl(character.references[0].path)} alt="" className="size-8 rounded-md object-cover" />
+                  <img
+                    src={cloverUrl(character.references[0].path)}
+                    alt=""
+                    className="size-8 rounded-md bg-[var(--image-placeholder)] object-cover"
+                  />
                 ) : (
                   <UserRound className="size-4 text-ink-2" strokeWidth={1.6} />
                 )

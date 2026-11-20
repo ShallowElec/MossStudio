@@ -228,6 +228,8 @@ export interface MangaSeriesSummary {
   /** Panels with an approved picture, of all panels. */
   approved: number
   panels: number
+  /** The first approved picture in reading order, else the first character's first reference picture. */
+  cover: string | null
   updatedAt: string
 }
 
@@ -241,8 +243,18 @@ export function seriesSummary(series: MangaSeries): MangaSeriesSummary {
     characterCount: series.characters.length,
     approved: panels.filter((panel) => panel.state === 'approved').length,
     panels: panels.length,
+    cover: seriesCover(series),
     updatedAt: series.updatedAt,
   }
+}
+
+function seriesCover(series: MangaSeries): string | null {
+  const approved = [...series.chapters]
+    .sort((a, b) => a.number - b.number)
+    .flatMap((chapter) => chapter.pages.flatMap((page) => page.panels))
+    .find((panel) => panel.state === 'approved')
+  const picture = approved ? panelPicture(approved) : undefined
+  return picture?.path ?? series.characters.find((character) => character.references.length)?.references[0]?.path ?? null
 }
 
 /** A short random id for a new character, chapter, page, panel or balloon. */

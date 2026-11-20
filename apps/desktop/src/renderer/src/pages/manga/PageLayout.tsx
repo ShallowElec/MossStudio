@@ -29,12 +29,14 @@ import {
   type Quad,
   type ReadingDirection,
 } from '@shared/manga/layouts'
+import { anchorAlong } from '@shared/manga/balloons'
 import { newId, type MangaPage, type MangaSeries } from '@shared/manga/model'
 import { Notice } from '../../components/common/Notice'
 import { Switch } from '../../components/form'
 import { Button, FieldLabel, Segmented, Select, cn } from '../../components/ui'
 import { applyTemplate, firstUsable, mergeBlocker, mergePanel, panelsInUse, splitBlocker, splitPanel } from './logic'
 import { PagePreview } from './parts'
+import { placedBalloons, type PlacedBalloon } from './render'
 
 /**
  * 分格 of one page: the page preview with its frames on top. Click a panel to
@@ -47,6 +49,8 @@ type PageChange = (change: (page: MangaPage) => MangaPage) => void
 
 const points = (quad: Quad): string => quad.map((point) => `${point.x},${point.y}`).join(' ')
 const NUDGE = 16
+/** One arrow key moves a balloon this far along its panel's free room (0 to 1). */
+const BALLOON_NUDGE = 0.1
 /** The badges sit on the page, which is white paper in both themes: print colours, as in render.ts, not theme tokens. */
 const PRINT_INK = '#111111'
 const PRINT_PAPER = '#ffffff'
@@ -57,6 +61,8 @@ function FrameOverlay({
   selected,
   onSelect,
   onDrag,
+  balloons,
+  onMoveBalloon,
   label,
   editable,
 }: {
@@ -65,11 +71,15 @@ function FrameOverlay({
   selected: number | null
   onSelect: (index: number) => void
   onDrag: (path: string, point: Point) => void
+  balloons: PlacedBalloon[]
+  onMoveBalloon: (panel: number, lineId: string, anchor: { x: number; y: number }) => void
   label: string
   editable: boolean
 }): React.JSX.Element {
   const svg = useRef<SVGSVGElement>(null)
   const [dragging, setDragging] = useState<string | null>(null)
+  // The balloon being dragged, and where on it the pointer took hold, so it does not jump to centre on the pointer.
+  const [holding, setHolding] = useState<{ id: string; offset: Point } | null>(null)
   const quads = panelQuads(frames, direction)
   const handles = editable ? frameHandles(frames, direction) : []
 
@@ -78,6 +88,26 @@ function FrameOverlay({
     if (!matrix) return null
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
     return { x: point.x, y: point.y }
+  }
+  const centreOf = ({ inner, box }: PlacedBalloon): Point => ({ x: inner.x + box.cx, y: inner.y + box.cy })
+  const moveBalloon = (placed: PlacedBalloon, centre: Point): void => {
+    const { inner, box, line } = placed
+    onMoveBalloon(placed.panel, line.id, {
+      x: anchorAlong(centre.x - inner.x, inner.w, box.rx, box.fontSize, line.x),
+      y: anchorAlong(centre.y - inner.y, inner.h, box.ry, box.fontSize, line.y),
+    })
+  }
+  const nudgeBalloon = ({ panel, line }: PlacedBalloon, key: string): boolean => {
+    const step = {
+      ArrowUp: [0, -BALLOON_NUDGE],
+      ArrowDown: [0, BALLOON_NUDGE],
+      ArrowLeft: [-BALLOON_NUDGE, 0],
+      ArrowRight: [BALLOON_NUDGE, 0],
+    }[key]
+    if (!step) return false
+    const clamp = (value: number): number => Math.round(Math.min(1, Math.max(0, value)) * 1000) / 1000
+    onMoveBalloon(panel, line.id, { x: clamp(line.x + step[0]!), y: clamp(line.y + step[1]!) })
+    return true
   }
   const nudge = (handle: FrameHandle, key: string): boolean => {
     const step = { ArrowUp: [0, -NUDGE], ArrowDown: [0, NUDGE], ArrowLeft: [-NUDGE, 0], ArrowRight: [NUDGE, 0] }[key]
@@ -141,6 +171,45 @@ function FrameOverlay({
           </g>
         )
       })}
+      {editable
+        ? balloons.map((placed) => {
+            const { box, line, panel } = placed
+            const centre = centreOf(placed)
+            const shape = {
+              role: 'button',
+              tabIndex: 0,
+              'aria-label': `第 ${panel + 1} 格的气泡：${line.text.trim()}`,
+              'data-manga-balloon': line.id,
+              className: cn(
+                'cursor-move fill-transparent outline-none transition-colors',
+                holding?.id === line.id ? 'stroke-accent' : 'stroke-transparent hover:stroke-accent focus-visible:stroke-accent',
+              ),
+              strokeWidth: 8,
+              onPointerDown: (event: React.PointerEvent<SVGElement>) => {
+                const point = toPage(event)
+                if (!point) return
+                event.stopPropagation()
+                event.currentTarget.setPointerCapture(event.pointerId)
+                setHolding({ id: line.id, offset: { x: point.x - centre.x, y: point.y - centre.y } })
+              },
+              onPointerMove: (event: React.PointerEvent<SVGElement>) => {
+                if (holding?.id !== line.id) return
+                const point = toPage(event)
+                if (point) moveBalloon(placed, { x: point.x - holding.offset.x, y: point.y - holding.offset.y })
+              },
+              onPointerUp: () => setHolding(null),
+              onPointerCancel: () => setHolding(null),
+              onKeyDown: (event: React.KeyboardEvent<SVGElement>) => {
+                if (nudgeBalloon(placed, event.key)) event.preventDefault()
+              },
+            }
+            return line.kind === 'narration' ? (
+              <rect key={line.id} x={centre.x - box.rx} y={centre.y - box.ry} width={box.rx * 2} height={box.ry * 2} {...shape} />
+            ) : (
+              <ellipse key={line.id} cx={centre.x} cy={centre.y} rx={box.rx} ry={box.ry} {...shape} />
+            )
+          })
+        : null}
       {handles.map((handle) => (
         <g key={handle.path} className="group">
           <line
@@ -226,6 +295,7 @@ export function PageLayout({
   const index = selected !== null && selected < page.panels.length ? selected : null
   const blocker = index === null ? undefined : mergeBlocker(page, index)
   const drafts = page.panels.filter((panel) => panel.state === 'draft').length
+  const balloons = useMemo(() => (candidate ? [] : placedBalloons(shown, direction)), [candidate, shown, direction])
 
   const edit = (change: (current: MangaPage) => MangaPage | undefined): void => onChange((current) => change(current) ?? current)
 
@@ -250,6 +320,17 @@ export function PageLayout({
           onSelect={setSelected}
           onDrag={(path, point) =>
             edit((current) => ({ ...current, frames: dragGutter(current.frames, path, point, direction) ?? current.frames }))
+          }
+          balloons={balloons}
+          onMoveBalloon={(panel, lineId, anchor) =>
+            edit((current) => ({
+              ...current,
+              panels: current.panels.map((item, at) =>
+                at === panel
+                  ? { ...item, dialogue: item.dialogue.map((line) => (line.id === lineId ? { ...line, ...anchor } : line)) }
+                  : item,
+              ),
+            }))
           }
         />
       </div>
@@ -299,7 +380,7 @@ export function PageLayout({
             </label>
           </div>
         ) : (
-          <p className="text-caption text-ink-2">点一格可以拆开、合并或出血；拖动格线调整大小。</p>
+          <p className="text-caption text-ink-2">点一格可以拆开、合并或出血；拖动格线调整大小，拖动气泡换位置。</p>
         )
       ) : null}
 
