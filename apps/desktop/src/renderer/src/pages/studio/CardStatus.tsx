@@ -105,10 +105,11 @@ export function StatusOverlay({
   if (view.active) {
     if (hasPicture) return null
     const text = view.phase === 'queued' ? view.detail : view.detail.split(' · ')[0]
+    // Ink, not ink-2: on the well-strong face ink-2 falls below 4.5:1 in the light theme.
     return (
       <div
         data-card-status={view.phase}
-        className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center text-caption text-ink-2"
+        className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center text-caption text-ink"
       >
         {view.phase === 'queued' ? null : <Spinner className="text-ink-3" />}
         <span className="tabular">{text}</span>
@@ -142,7 +143,7 @@ export function StatusOverlay({
   }
   if (view.error && view.outputs.length === 0) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-caption text-ink-2">
+      <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-caption text-ink">
         <span className="line-clamp-5 [overflow-wrap:anywhere]">{view.error}</span>
       </div>
     )

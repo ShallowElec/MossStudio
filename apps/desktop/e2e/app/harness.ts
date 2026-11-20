@@ -154,6 +154,7 @@ export function installHarness(mount: () => void): E2eMock {
         state: 'running',
         stage: 'denoise',
         progress: { stage: 'denoise', current: Math.floor(total / 2), total, percent: 50 },
+        runStartedAt: job.runStartedAt ?? fixtures.FIXTURE_NOW,
       }
       backend.state.jobs = [step, ...backend.state.jobs.filter((item) => item.id !== id)]
       backend.emit(Events.job, step)

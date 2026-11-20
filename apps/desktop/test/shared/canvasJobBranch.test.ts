@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeCanvasBranchIds, type CanvasBranch, canvasBranchesConflict, canvasLineage } from '@shared/canvasJobBranch'
+import { activeCanvasBranchIds, blockedCanvasIds, type CanvasBranch, canvasBranchesConflict, canvasLineage } from '@shared/canvasJobBranch'
 import type { JobRecord, JobState, ProjectCanvas } from '@shared/types'
 
 const canvas = (id: string, sourceCanvasId?: string, overrides: Partial<ProjectCanvas> = {}): ProjectCanvas => ({
@@ -107,8 +107,15 @@ describe('canvasBranchesConflict', () => {
     expect(canvasBranchesConflict(sibling, child)).toBe(false)
   })
 
-  it('conflicts with itself and never with an unrelated tree', () => {
-    expect(canvasBranchesConflict(child, { sourceId: 'child', path: new Set(['child', 'root']) })).toBe(true)
+  it('lets runs started from the same canvas queue, and never conflicts with an unrelated tree', () => {
+    // Two runs of one 画面: each draws into its own result, both start from the 画面.
+    expect(
+      canvasBranchesConflict(
+        { sourceId: 'root', path: new Set(['run-1', 'root']) },
+        { sourceId: 'root', path: new Set(['run-2', 'root']) },
+      ),
+    ).toBe(false)
+    expect(canvasBranchesConflict(child, { sourceId: 'child', path: new Set(['child', 'root']) })).toBe(false)
     expect(canvasBranchesConflict(root, other)).toBe(false)
   })
 
@@ -117,5 +124,36 @@ describe('canvasBranchesConflict', () => {
     expect(canvasBranchesConflict({ sourceId: 'x', path: new Set(['x', 'root']) }, { sourceId: 'y', path: new Set(['y', 'root']) })).toBe(
       false,
     )
+  })
+})
+
+describe('blockedCanvasIds', () => {
+  const layout = canvas('scene')
+  const run = (id: string, state: JobState | undefined, source = 'scene') =>
+    canvas(id, source, state ? { jobId: `job-${id}`, jobState: state } : {})
+  const jobsOf = (list: ProjectCanvas[]) => list.filter((item) => item.jobId).map((item) => job(item.jobId!, item.jobState!))
+
+  it('does not block a 画面 whose own runs are going: another run queues behind them', () => {
+    const list = [layout, run('done', 'succeeded'), run('drawing', 'running'), run('waiting', 'queued')]
+    const blocked = blockedCanvasIds(list, jobsOf(list))
+    expect(blocked.has('scene')).toBe(false)
+    // A run that is still going cannot be started again from its own card, nor can a sibling result while its 画面 draws.
+    expect(blocked.has('drawing')).toBe(true)
+    expect(blocked.has('done')).toBe(true)
+  })
+
+  it('blocks a 画面 while a run started from a result in its lineage goes', () => {
+    const list = [layout, run('pinned', 'succeeded'), run('again', 'running', 'pinned')]
+    const blocked = blockedCanvasIds(list, jobsOf(list))
+    expect(blocked.has('scene')).toBe(true)
+    // The result it was started from may queue another run of its own.
+    expect(blocked.has('pinned')).toBe(false)
+  })
+
+  it('blocks nothing once every run has ended, and leaves other trees alone', () => {
+    const list = [layout, run('done', 'succeeded'), canvas('other'), run('other-run', 'running', 'other')]
+    expect([...blockedCanvasIds(list, jobsOf(list))]).toEqual(['other-run'])
+    const ended = list.map((item) => (item.id === 'other-run' ? { ...item, jobState: 'succeeded' as const } : item))
+    expect(blockedCanvasIds(ended, jobsOf(ended)).size).toBe(0)
   })
 })

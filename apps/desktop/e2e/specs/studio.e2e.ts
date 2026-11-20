@@ -2,9 +2,11 @@
  * 创作: describe, lay out regions, pick size and quality, generate, follow the
  * run, look at every output, run again; the project switcher and autosave.
  */
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Page } from 'playwright-core'
-import { settle, useApp } from '../support/app'
+import { SHOTS_DIR, settle, useApp } from '../support/app'
+import { expectVisualRules } from '../support/visual'
 
 const ENGINE_JOBS = 'http:POST /api/engine-jobs'
 
@@ -79,16 +81,16 @@ describe('studio', () => {
     expect(first).toMatchObject({ prompt: '海边的灯塔，黄昏，暖色调', width: 1280, height: 720, steps: 50, profile: 'base' })
     expect(Number.isInteger(first!.seed) && first!.seed >= 0).toBe(true)
 
-    // One run per canvas at a time: the button says so until it finishes.
-    await expect.poll(() => generate.textContent()).toContain('生成中')
-    // The values the job already took are locked; the description stays open for the next run.
-    await expect.poll(() => summary.isDisabled()).toBe(true)
-    await expect.poll(() => page.getByRole('group', { name: '尺寸' }).getByRole('button', { name: '16:9' }).isDisabled()).toBe(true)
-    expect(await page.getByText('生成中：尺寸、模型和采样先锁定。描述和区域还能改，下次生成生效。').isVisible()).toBe(true)
+    // While it runs, the button queues another run of this 画面.
+    await expect.poll(() => generate.textContent()).toContain('再来一张')
+    expect(await generate.isEnabled()).toBe(true)
+    // The run took its settings with it: they stay open, and a change goes to the next run.
+    expect(await summary.isDisabled()).toBe(false)
+    expect(await page.getByRole('group', { name: '尺寸' }).getByRole('button', { name: '16:9' }).isDisabled()).toBe(false)
     expect(await page.getByRole('textbox', { name: '描述', exact: true }).isEnabled()).toBe(true)
     await page.evaluate(() => window.__mock.finishJob(window.__mock.state.jobs[0]!.id))
-    await expect.poll(() => generate.isEnabled()).toBe(true)
-    await expect.poll(() => summary.isDisabled()).toBe(false)
+    await expect.poll(() => generate.textContent()).not.toContain('再来一张')
+    expect(await generate.textContent()).toContain('生成')
 
     // Ctrl+Enter generates too, with a fresh random seed.
     await page.getByRole('textbox', { name: '描述', exact: true }).click()
@@ -148,7 +150,7 @@ describe('studio', () => {
     await page.evaluate((jobId) => window.__mock.finishJob(jobId, { outputs: 4 }), second)
     expect(await page.locator('article[data-canvas-card]').count()).toBe(1)
     // The newest thumbnails, then "+N" for the older ones: every output is reachable.
-    const footer = page.locator('article[data-canvas-card] footer').filter({ has: page.getByRole('button', { name: '换个种子' }) })
+    const footer = page.locator('article[data-canvas-card] footer').filter({ has: page.getByRole('button', { name: /^再来一张/ }) })
     const thumbs = footer.getByRole('button', { name: /^第 \d 张$/ })
     await expect.poll(() => thumbs.count()).toBeGreaterThan(0)
     const visibleThumbs = await thumbs.count()
@@ -183,27 +185,160 @@ describe('studio', () => {
     await expect.poll(() => viewer.count()).toBe(0)
   })
 
-  it('runs again with a new seed or the same one', async () => {
+  it('runs again with a new seed, and redraws with new settings only once something changed', async () => {
     const page = await app.open({ scenario: 'ready', route: '/studio' })
     await openStudio(page)
     await describeCanvas(page, 'mountain lake')
     await page.locator('[data-studio-generate]').click()
     const [first] = await submitted(page, 1)
     await page.evaluate((jobId) => window.__mock.finishJob(jobId, { outputs: 1 }), await lastJobId(page))
-    const result = page.locator('article[data-canvas-card]').filter({ has: page.getByRole('button', { name: '换个种子' }) })
-    await result.getByRole('button', { name: '换个种子' }).click()
+    const card = page.locator('article[data-canvas-card]')
+    // One action on the card: another picture of the same idea, with a new seed.
+    await card.getByRole('button', { name: '再来一张 画面 1' }).click()
     const [, fresh] = await submitted(page, 2)
     expect(fresh).toMatchObject({ prompt: first!.prompt, width: first!.width, height: first!.height, steps: first!.steps })
     expect(fresh!.seed).not.toBe(first!.seed)
 
     // Once that run is done, both stack on the one 画面.
     await page.evaluate((jobId) => window.__mock.finishJob(jobId, { outputs: 1 }), await lastJobId(page))
-    expect(await page.locator('article[data-canvas-card]').count()).toBe(1)
-    // Picking the first picture, 重新生成 repeats that run exactly, seed included.
-    await result.getByRole('button', { name: '第 1 张' }).click()
-    await result.getByRole('button', { name: /^重新生成/ }).click()
-    const [, , same] = await submitted(page, 3)
-    expect(same).toMatchObject({ prompt: first!.prompt, seed: first!.seed, steps: first!.steps })
+    expect(await card.count()).toBe(1)
+    // Nothing changed since: redrawing would make the same picture, so it is not offered.
+    const redraw = card.getByRole('button', { name: '用新设置重画 画面 1' })
+    expect(await redraw.count()).toBe(0)
+    await card.getByRole('button', { name: '画面 1 更多操作' }).click()
+    expect(await page.getByRole('menuitem', { name: '用新设置重画这张' }).isDisabled()).toBe(true)
+    await page.keyboard.press('Escape')
+
+    // After an edit, it redraws the picked picture with that picture's seed and the new description.
+    await describeCanvas(page, 'mountain lake at dawn')
+    await card.getByRole('button', { name: '第 1 张' }).click()
+    await redraw.click()
+    const [, , again] = await submitted(page, 3)
+    expect(again).toMatchObject({ prompt: 'mountain lake at dawn', seed: first!.seed, steps: first!.steps })
+  })
+
+  it('queues more runs of a 画面 while one is drawn, shows them waiting, and runs them in order', async () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const page = await app.open({ scenario: 'ready', route: '/studio', theme })
+      await openStudio(page)
+      await describeCanvas(page, '海边的灯塔')
+      const generate = page.locator('[data-studio-generate]')
+      await generate.click()
+      await submitted(page, 1)
+      // Twice more while it is drawn: the button and Ctrl+Enter queue, each with a new seed.
+      await expect.poll(() => generate.textContent()).toContain('再来一张')
+      await generate.click()
+      await page.getByRole('textbox', { name: '描述', exact: true }).click()
+      await page.keyboard.press('Control+Enter')
+      const sent = await submitted(page, 3)
+      expect(new Set(sent.map((job) => job.seed)).size).toBe(3)
+
+      const card = page.locator('article[data-canvas-card]')
+      await expect.poll(() => card.locator('[data-card-queue]').textContent()).toBe('排队 2')
+      expect(await page.locator('[data-generate-queue]').textContent()).toBe('排队 2')
+      const waiting = card.locator('[data-strip-queued]')
+      expect(await waiting.count()).toBe(2)
+      // The placeholders follow the run being drawn, in the order they were asked for.
+      expect(await waiting.evaluateAll((tiles) => tiles.map((tile) => tile.getAttribute('data-strip-queued')))).toEqual(
+        sent.slice(1).map((job) => job.canvasId),
+      )
+      await expectVisualRules(page, `queued runs (${theme})`)
+      await app.screenshot(`studio-queue-card-${theme}`)
+      await generate.screenshot({ path: join(SHOTS_DIR, `studio-queue-button-${theme}.png`) })
+
+      // The engine takes them one after another; each lands in the filmstrip in turn.
+      const ids = await page.evaluate(() => window.__mock.state.jobs.map((job) => job.id).reverse())
+      await page.evaluate((jobId) => window.__mock.finishJob(jobId), ids[0]!)
+      await expect.poll(() => card.locator('[data-card-queue]').textContent()).toBe('排队 1')
+      expect(await waiting.count()).toBe(1)
+      await page.evaluate((jobId) => window.__mock.finishJob(jobId), ids[1]!)
+      await expect.poll(() => card.locator('[data-card-queue]').count()).toBe(0)
+      expect(await waiting.count()).toBe(0)
+      expect(await generate.textContent()).toContain('再来一张')
+      await page.evaluate((jobId) => window.__mock.finishJob(jobId), ids[2]!)
+      await expect.poll(() => generate.textContent()).not.toContain('再来一张')
+      const pictures = card.locator('[data-filmstrip] [data-strip-item]')
+      expect(await pictures.evaluateAll((thumbs) => thumbs.map((thumb) => thumb.getAttribute('data-strip-item')))).toEqual(
+        sent.map((job) => `${job.canvasId}/0`),
+      )
+    }
+  })
+
+  it('再来 4 张 queues four, a waiting one can be called off, and a full queue says so', async () => {
+    const page = await app.open({ scenario: 'ready', route: '/studio', theme: 'light' })
+    await openStudio(page)
+    await describeCanvas(page, '雨夜的霓虹街道')
+    await page.locator('[data-studio-generate]').click()
+    await submitted(page, 1)
+    await page.evaluate((jobId) => window.__mock.finishJob(jobId), await lastJobId(page))
+    const card = page.locator('article[data-canvas-card]')
+    await card.getByRole('button', { name: '画面 1 更多操作' }).click()
+    await page.getByRole('menuitem', { name: '再来 4 张' }).click()
+    const sent = await submitted(page, 5)
+    expect(new Set(sent.slice(1).map((job) => job.seed)).size).toBe(4)
+    // One is drawn, three wait.
+    await expect.poll(() => card.locator('[data-card-queue]').textContent()).toBe('排队 3')
+
+    // 取消这一张 from a placeholder's own menu calls off that run only.
+    const waiting = card.locator('[data-strip-queued]')
+    const target = (await waiting.nth(1).getAttribute('data-strip-queued'))!
+    const job = await page.evaluate((canvasId) => window.__mock.state.jobs.find((item) => item.canvasId === canvasId)!.id, target)
+    await waiting.nth(1).click()
+    await page.getByRole('menuitem', { name: '取消这一张' }).click()
+    await expect.poll(() => app.calls('jobs:cancel')).toEqual([{ id: job }])
+    await expect.poll(() => card.locator('[data-card-queue]').textContent()).toBe('排队 2')
+    expect(await card.locator(`[data-strip-queued="${target}"]`).count()).toBe(0)
+    // It leaves nothing behind: no 停止 tile for a picture that was never started.
+    expect(await card.locator(`[data-strip-item^="${target}/"]`).count()).toBe(0)
+
+    // Right-click on a placeholder offers the same.
+    const other = (await waiting.first().getAttribute('data-strip-queued'))!
+    await waiting.first().click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '取消这一张' }).click()
+    await expect.poll(() => card.locator('[data-card-queue]').textContent()).toBe('排队 1')
+    expect(await card.locator(`[data-strip-queued="${other}"]`).count()).toBe(0)
+
+    // Up to 8 wait; then the button says the queue is full.
+    await card.getByRole('button', { name: '画面 1 更多操作' }).click()
+    await page.getByRole('menuitem', { name: '再来 4 张' }).click()
+    await submitted(page, 9)
+    await card.getByRole('button', { name: '画面 1 更多操作' }).click()
+    await page.getByRole('menuitem', { name: '再来 4 张' }).click()
+    await submitted(page, 12)
+    await expect.poll(() => card.locator('[data-card-queue]').textContent()).toBe('排队 8')
+    const generate = page.locator('[data-studio-generate]')
+    await expect.poll(() => generate.textContent()).toContain('排队已满')
+    expect(await generate.isDisabled()).toBe(true)
+    expect(await card.getByRole('button', { name: '再来一张 画面 1' }).getAttribute('title')).toBe('排队已满')
+  })
+
+  it('sends a queued run with the settings of its click; a change goes to the runs asked for after it', async () => {
+    const page = await app.open({ scenario: 'ready', route: '/studio' })
+    await openStudio(page)
+    await describeCanvas(page, '窗台上的橘猫')
+    const generate = page.locator('[data-studio-generate]')
+    await generate.click()
+    await submitted(page, 1)
+    await generate.click()
+    await submitted(page, 2)
+    // A change while two runs are on their way.
+    await page.locator('[data-settings-summary]').click()
+    await page.getByRole('group', { name: '尺寸' }).getByRole('button', { name: '16:9' }).click()
+    await describeCanvas(page, '窗台上的橘猫，下雪')
+    await generate.click()
+    const [first, second, third] = await submitted(page, 3)
+    expect([first, second].map((job) => [job!.prompt, job!.width, job!.height])).toEqual([
+      ['窗台上的橘猫', 1024, 1024],
+      ['窗台上的橘猫', 1024, 1024],
+    ])
+    expect([third!.prompt, third!.width, third!.height]).toEqual(['窗台上的橘猫，下雪', 1280, 720])
+    // The jobs already queued keep what they were sent with.
+    const queued = await page.evaluate(() => window.__mock.state.jobs.map((job) => [job.params.prompt, job.params.width]).reverse())
+    expect(queued).toEqual([
+      ['窗台上的橘猫', 1024],
+      ['窗台上的橘猫', 1024],
+      ['窗台上的橘猫，下雪', 1280],
+    ])
   })
 
   it('compiles the description and regions into the prompt, and reruns a region canvas', async () => {
@@ -231,7 +366,10 @@ describe('studio', () => {
     expect(layout.items.map((item) => item.caption)).toEqual(['一只橘猫', '一盆绿植'])
 
     await page.evaluate((jobId) => window.__mock.finishJob(jobId, { outputs: 2 }), await lastJobId(page))
-    await page.getByRole('button', { name: '换个种子' }).first().click()
+    await page
+      .getByRole('button', { name: /^再来一张 / })
+      .first()
+      .click()
     const [, again] = await submitted(page, 2)
     expect(again!.prompt).toBe(run!.prompt)
     expect(again!.seed).not.toBe(run!.seed)
@@ -411,7 +549,10 @@ describe('studio', () => {
     })
     await app.start()
     await openStudio(page)
-    await page.getByRole('button', { name: '换个种子' }).first().click()
+    await page
+      .getByRole('button', { name: /^再来一张 / })
+      .first()
+      .click()
     const [run] = await submitted(page, 1)
     const layout = JSON.parse(run!.prompt) as { summary: { caption: string }; items: Array<{ caption: string }> }
     expect(layout.summary.caption).toBe('节日海报')

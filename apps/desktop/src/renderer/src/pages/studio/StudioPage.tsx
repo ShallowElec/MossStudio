@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { GalleryItem, GpuInventorySnapshot, ManagedHost, ProjectCanvas, ProjectLayer } from '@shared/types'
 import { ADAPTER_STRENGTH_DEFAULT, normalizeCanvasAdapters } from '@shared/adapters'
 import { cliGpuUuids, generationGpus } from '@shared/bundleFit'
-import { activeCanvasBranchIds } from '@shared/canvasJobBranch'
+import { MAX_QUEUED_RUNS, activeCanvasBranchIds, blockedCanvasIds } from '@shared/canvasJobBranch'
 import { Events, Ipc } from '@shared/channels'
 import { ScanLine, Sparkles } from 'lucide-react'
 import { Button, ConfirmDialog, useToast } from '../../components/ui'
@@ -64,7 +64,18 @@ import {
   withStartPictureShape,
   withUpscaleSize,
 } from './nodes'
-import { dropRun, givesPicture, isActiveRun, keepCardsShown, pictureLink, pinRun, runsOf, unpinRun, withRunSettings } from './runs'
+import {
+  dropRun,
+  filmstripOf,
+  givesPicture,
+  isActiveRun,
+  keepCardsShown,
+  pictureLink,
+  pinRun,
+  runsOf,
+  unpinRun,
+  withRunSettings,
+} from './runs'
 import { resolveJobInputs } from './jobInputs'
 import { useGenerate } from './useGenerate'
 import { useInputImport } from './useInputImport'
@@ -238,8 +249,14 @@ export function StudioPage(): React.JSX.Element {
   const waiting = preparing?.active && !remoteHost ? preparing : null
   const panelBlockers = waiting ? readiness.blockers.filter((blocker) => !PREPARING_BLOCKERS.has(blocker.id)) : readiness.blockers
   const busyIds = useMemo(() => activeCanvasBranchIds(project.canvases, jobs), [project.canvases, jobs])
-  const selectedBusy = selected ? busyIds.has(selected.id) : false
-  const { submitting, generate } = useGenerate({
+  const blockedIds = useMemo(() => blockedCanvasIds(project.canvases, jobs), [project.canvases, jobs])
+  const selectedBlocked = selected ? blockedIds.has(selected.id) : false
+  // The selected 画面's own runs: while one goes, 生成 queues another (再来一张), up to MAX_QUEUED_RUNS waiting.
+  const selectedFilm = selected?.kind === 'layout' ? filmstripOf(selected, project.canvases) : null
+  const selectedGoing = Boolean(selectedFilm?.runs.some((item) => ACTIVE_JOB_STATES.has(item.jobState ?? '')))
+  const selectedQueued = selectedFilm?.queued.length ?? 0
+  const selectedFull = selectedQueued >= MAX_QUEUED_RUNS
+  const { generate } = useGenerate({
     project,
     catalog,
     preferredBundleId,
@@ -610,7 +627,7 @@ export function StudioPage(): React.JSX.Element {
   }
 
   const runPrimary = (): void => {
-    if (!selected || selected.kind !== 'layout' || submitting || selectedBusy || readiness.blockers.length) return
+    if (!selected || selected.kind !== 'layout' || selectedBlocked || selectedFull || readiness.blockers.length) return
     void run(selected.id)
   }
 
@@ -914,8 +931,10 @@ export function StudioPage(): React.JSX.Element {
           blockers={panelBlockers}
           waiting={waiting}
           prompt={selected ? (readiness.prompt ?? null) : null}
-          busy={selectedBusy}
-          submitting={submitting}
+          blocked={selectedBlocked}
+          going={selectedGoing}
+          queued={selectedQueued}
+          full={selectedFull}
           onChange={changeSelected}
           onPickBundle={(id) => {
             // A few-step model (Turbo) brings its own steps and CFG.
@@ -955,7 +974,7 @@ export function StudioPage(): React.JSX.Element {
           selectedCanvasId={project.selectedCanvasId}
           jobs={jobs}
           busyIds={busyIds}
-          submitting={submitting}
+          blockedIds={blockedIds}
           update={update}
           blockers={readiness.blockers}
           tool={tool}
@@ -973,6 +992,9 @@ export function StudioPage(): React.JSX.Element {
           onPicturesFromGallery={(at) => setGalleryTarget({ at })}
           onOpenViewer={(canvasId, index) => setViewer({ canvasId, index })}
           onRerun={(canvasId, seed, smaller) => void run(canvasId, seed, smaller)}
+          onMoreRuns={(canvasId, count) => {
+            for (let index = 0; index < count; index += 1) void generate(canvasId, 'new')
+          }}
           onCancel={(jobId) => {
             void cancelJob(jobId).catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
           }}

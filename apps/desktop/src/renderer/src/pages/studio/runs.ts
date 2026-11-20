@@ -3,6 +3,7 @@ import { normalizeCanvasAdapters } from '@shared/adapters'
 import { ACTIVE_JOB_STATES } from '../../lib/format'
 import { BOARD_GAP, cardRect, cardWidth, overlaps, resultSpot } from './boardLayout'
 import { consumersOf, linksOf } from './links'
+import { sameData } from './sameData'
 
 /**
  * The runs of a 画面 (layout canvas) and its filmstrip. Every run is a result
@@ -73,15 +74,19 @@ export interface StripItem {
 
 /**
  * The strip's items, oldest first. A run without pictures (still going,
- * failed or stopped) shows only while it is the newest: older ones would
- * only be noise.
+ * failed or stopped) shows until a later run has pictures: older ones would
+ * only be noise, but a run that failed between queued ones stays in sight.
  */
 export function stripOf(runs: readonly ProjectCanvas[]): StripItem[] {
   const items: StripItem[] = []
+  let lastPictured = -1
+  runs.forEach((run, index) => {
+    if (run.outputs?.length) lastPictured = index
+  })
   runs.forEach((run, index) => {
     const outputs = run.outputs ?? []
     if (!outputs.length) {
-      if (index === runs.length - 1) items.push({ runId: run.id, output: 0, number: items.length + 1 })
+      if (index > lastPictured) items.push({ runId: run.id, output: 0, number: items.length + 1 })
       return
     }
     outputs.forEach((output, at) => items.push({ runId: run.id, output: at, path: output.path, number: items.length + 1 }))
@@ -101,17 +106,32 @@ export function shownIndex(layout: Pick<ProjectCanvas, 'shownOutput'>, strip: re
   return newest ? strip.findIndex((item) => item.runId === newest.runId) : -1
 }
 
+/**
+ * Runs of a 画面 waiting behind the one it is drawing, in the order they
+ * were asked for: every run still going after the first. The card's state
+ * as `applyJobs` last copied it from the job decides, so every caller sees
+ * the same queue.
+ */
+export function queuedRunsOf(runs: readonly ProjectCanvas[]): ProjectCanvas[] {
+  return runs.filter((run) => ACTIVE_JOB_STATES.has(run.jobState ?? '')).slice(1)
+}
+
 export interface Filmstrip {
   runs: ProjectCanvas[]
+  /** The pictures and the run being drawn; queued runs are not among them. */
   items: StripItem[]
   /** -1 when the canvas has not run yet. */
   shown: number
+  /** Runs waiting their turn, shown after the items as placeholders. */
+  queued: ProjectCanvas[]
 }
 
 export function filmstripOf(layout: ProjectCanvas, canvases: readonly ProjectCanvas[]): Filmstrip {
   const runs = runsOf(layout, canvases)
-  const items = stripOf(runs)
-  return { runs, items, shown: items.length ? shownIndex(layout, items) : -1 }
+  const queued = queuedRunsOf(runs)
+  const waiting = new Set(queued.map((run) => run.id))
+  const items = stripOf(waiting.size ? runs.filter((run) => !waiting.has(run.id)) : runs)
+  return { runs, items, shown: items.length ? shownIndex(layout, items) : -1, queued }
 }
 
 /** The run and picture a layout canvas shows on its face, if it has run. */
@@ -138,7 +158,9 @@ export function pictureLink(canvases: readonly ProjectCanvas[], link: CanvasImag
 /**
  * Results of a 画面 that only take room: folded, no picture and not running
  * (failed or stopped runs that are no longer the newest). Cleared when it
- * runs again.
+ * runs again. A run whose job is not known yet but that its card says is
+ * going stays: it was just sent, and its job's first word may come after
+ * the reply (another click can queue a run in between).
  */
 export function staleRunIds(
   layoutId: string,
@@ -146,11 +168,48 @@ export function staleRunIds(
   jobs: readonly Pick<JobRecord, 'id' | 'state'>[],
 ): string[] {
   const folded = foldedRunIds(canvases)
+  const unheard = (canvas: ProjectCanvas): boolean =>
+    !jobs.some((job) => job.id === canvas.jobId) && ACTIVE_JOB_STATES.has(canvas.jobState ?? '')
   return canvases
     .filter(
-      (canvas) => folded.has(canvas.id) && canvas.sourceCanvasId === layoutId && !canvas.outputs?.length && !isActiveRun(canvas, jobs),
+      (canvas) =>
+        folded.has(canvas.id) &&
+        canvas.sourceCanvasId === layoutId &&
+        !canvas.outputs?.length &&
+        !isActiveRun(canvas, jobs) &&
+        !unheard(canvas),
     )
     .map((canvas) => canvas.id)
+}
+
+/**
+ * Runs that ended before the engine started them: called off while they
+ * waited, or still waiting when the app quit (main fails those with
+ * E_INTERRUPTED on its next start). They never made anything, so they
+ * leave the filmstrip instead of standing in it as 停止 or 失败.
+ */
+export function unstartedRunIds(
+  canvases: readonly ProjectCanvas[],
+  jobs: readonly Pick<JobRecord, 'id' | 'state' | 'runStartedAt' | 'error'>[],
+): string[] {
+  const folded = foldedRunIds(canvases)
+  return canvases
+    .filter((canvas) => {
+      if (!canvas.jobId || canvas.outputs?.length || !folded.has(canvas.id)) return false
+      const job = jobs.find((item) => item.id === canvas.jobId)
+      if (!job || job.runStartedAt) return false
+      return job.state === 'canceled' || (job.state === 'failed' && job.error?.code === 'E_INTERRUPTED')
+    })
+    .map((canvas) => canvas.id)
+}
+
+/** The canvases without the runs `unstartedRunIds` names; the same list when there are none. */
+export function withoutUnstartedRuns(
+  canvases: ProjectCanvas[],
+  jobs: readonly Pick<JobRecord, 'id' | 'state' | 'runStartedAt' | 'error'>[],
+): ProjectCanvas[] {
+  const ids = unstartedRunIds(canvases, jobs)
+  return ids.length ? ids.reduce<ProjectCanvas[]>((list, id) => dropRun(list, id), canvases) : canvases
 }
 
 /** Whether a canvas has a picture to give: a 画面 through its filmstrip. */
@@ -285,4 +344,28 @@ export function withRunSettings(layout: ProjectCanvas, run: ProjectCanvas): Proj
     if (strength !== undefined && next.inputs?.init) next.inputs = { ...next.inputs, init: { ...next.inputs.init, strength } }
   }
   return next
+}
+
+/**
+ * Whether a 画面's description or settings are no longer what one of its runs
+ * was made with (the seed aside): 用新设置重画 is offered only then.
+ */
+export function differsFromRun(layout: ProjectCanvas, run: ProjectCanvas): boolean {
+  if (layout.kind !== 'layout' || run.kind !== 'result' || run.sourceCanvasId !== layout.id) return false
+  const settings = (canvas: ProjectCanvas, size: { width: number; height: number }): Record<string, unknown> => ({
+    prompt: canvas.prompt,
+    caption: canvas.summary.caption,
+    layers: canvas.layers,
+    negative: canvas.negative,
+    width: size.width,
+    height: size.height,
+    steps: canvas.steps,
+    cfg: canvas.cfg,
+    modelBundleId: canvas.modelBundleId,
+    adapters: normalizeCanvasAdapters(canvas.adapters),
+    sampling: canvas.sampling,
+    upscale: canvas.upscale,
+    inputs: canvas.inputs,
+  })
+  return !sameData(settings(layout, layout), settings(run, run.baseSize ?? run))
 }

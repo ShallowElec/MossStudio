@@ -318,7 +318,7 @@ describe('update chip', () => {
     // The finished run sits in its 画面's filmstrip, which reruns it.
     const rerun = page
       .locator('article[data-canvas-card="c1"]')
-      .getByRole('button', { name: /^重新生成/ })
+      .getByRole('button', { name: /^再来一张/ })
       .first()
     await expect.poll(() => rerun.isDisabled()).toBe(true)
     expect(await rerun.getAttribute('title')).toBe('必须更新到 1.2.0 才能继续生成')

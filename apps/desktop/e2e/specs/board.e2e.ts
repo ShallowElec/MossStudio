@@ -752,7 +752,7 @@ describe('studio board', () => {
     // The new card is an image node: a picture, no generate controls.
     const card = page.locator('article[data-canvas-kind="image"][aria-current="true"]')
     expect(await card.locator('img').count()).toBe(1)
-    expect(await card.getByRole('button', { name: /重新生成|换个种子/ }).count()).toBe(0)
+    expect(await card.getByRole('button', { name: /重新生成|再来一张|用新设置重画/ }).count()).toBe(0)
     expect(await card.locator('[data-output-port]').count()).toBe(1)
   })
 

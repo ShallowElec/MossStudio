@@ -7,6 +7,7 @@ import { engineBinaryName } from '@shared/enginePackages'
 import type { GpuInventoryDevice, JobRecord } from '@shared/types'
 import type { MossInferSink } from '@main/services/mossInfer'
 import { useTempDataRoot } from '@test/helpers/tempDir'
+import { MAX_QUEUED_RUNS } from '@shared/canvasJobBranch'
 
 const emit = vi.hoisted(() => vi.fn())
 const runMossInferJob = vi.hoisted(() => vi.fn())
@@ -513,6 +514,44 @@ describe('engine jobs: queue positions', () => {
     const started = updates(third.id).at(-1)!
     expect(started.state).toBe('starting')
     expect(started.queuePosition).toBeUndefined()
+  })
+})
+
+describe('engine jobs: runs of one canvas', () => {
+  /** A run of 画面 `source` drawing into its own result `run`, as the Studio sends it. */
+  const runOf = (source: string, run: string, lineage: string[] = [source]) =>
+    request(`${run} of ${source}`, { projectId: 'p1', canvasId: run, canvasLineage: lineage })
+
+  it('queues more runs of the same 画面 behind the one it is drawing, each with what it was sent', async () => {
+    const first = await supervisor.startEngineJob(runOf('scene', 'run-1'))
+    const second = await supervisor.startEngineJob({ ...runOf('scene', 'run-2'), seed: 2, width: 1280, height: 720 })
+    const third = await supervisor.startEngineJob({ ...runOf('scene', 'run-3'), seed: 3 })
+    expect([second.state, third.state]).toEqual(['queued', 'queued'])
+    expect(second.params).toMatchObject({ seed: 2, width: 1280, height: 720 })
+
+    // They run one after another, in the order they were asked for.
+    sinks.get(first.id)!.done(0)
+    await vi.waitFor(() => expect(starts.map((start) => start.job.id)).toEqual([first.id, second.id]))
+    expect(starts[1]!.params).toMatchObject({ seed: 2, width: 1280, height: 720 })
+    sinks.get(second.id)!.done(0)
+    await vi.waitFor(() => expect(starts.map((start) => start.job.id)).toEqual([first.id, second.id, third.id]))
+  })
+
+  it('still refuses a run whose source is being drawn by a run started from another canvas', async () => {
+    await supervisor.startEngineJob(runOf('scene', 'run-1'))
+    // A result of the 画面, run again from its own card: its lineage reaches the 画面 being drawn.
+    await expect(supervisor.startEngineJob(runOf('run-0', 'again', ['run-0', 'scene']))).rejects.toThrow('此 Canvas 已有任务')
+    // Another 画面 is not held up.
+    await expect(supervisor.startEngineJob(runOf('other', 'run-x'))).resolves.toMatchObject({ state: 'queued' })
+  })
+
+  it(`waits at most ${MAX_QUEUED_RUNS} runs behind the one being drawn`, async () => {
+    for (let index = 0; index <= MAX_QUEUED_RUNS; index += 1) await supervisor.startEngineJob(runOf('scene', `run-${index}`))
+    await expect(supervisor.startEngineJob(runOf('scene', 'one-too-many'))).rejects.toMatchObject({ code: 'E_QUEUE_FULL' })
+    // Another project's 画面 of the same id has a queue of its own.
+    await expect(supervisor.startEngineJob({ ...runOf('scene', 'elsewhere'), projectId: 'p2' })).resolves.toMatchObject({
+      state: 'queued',
+    })
   })
 })
 

@@ -15,7 +15,7 @@ import { MaskLayer, usePictureSize, type MaskBrush, type MaskCommand } from './M
 import type { Size } from './mask'
 import type { RerunCheck } from './readiness'
 import { canvasDescription } from './prompt'
-import { Filmstrip } from './Filmstrip'
+import { Filmstrip, type QueuedTile } from './Filmstrip'
 import { RegionEditor, RegionLayer, useRegionDraw, type BoardTool } from './RegionLayer'
 import { newRegion, smallerCanvas } from './canvases'
 import type { StripItem } from './runs'
@@ -29,11 +29,14 @@ export interface CardMask {
   onSave: (png: Uint8Array | null) => void
 }
 
-/** A 画面's filmstrip: its pictures, the one on its face, and how each run is doing. */
+/** A 画面's filmstrip: its pictures, the one on its face, how each run is doing, and the runs waiting their turn. */
 export interface CardStrip {
   items: readonly StripItem[]
   shown: number
   views: ReadonlyMap<string, CardJobView>
+  queued: readonly QueuedTile[]
+  /** Call off one waiting run (取消这一张). */
+  onCancelQueued: (runId: string) => void
   onShow: (index: number) => void
   /** Open the viewer at this picture (double-click a thumbnail). */
   onOpen: (index: number) => void
@@ -62,6 +65,8 @@ export interface CanvasCardProps {
   /** The region whose words are being typed on its box. */
   editingRegionId?: string | null
   rerun: RerunCheck
+  /** A 画面's description or settings differ from the run it shows: 用新设置重画 is offered. */
+  changed?: boolean
   /** The linked start picture, drawn as the backdrop of a layout canvas. */
   initPicture?: { path: string; resize?: ImageResizeMode; size: Size | null } | null
   /** The mask painted over the start picture; absent when there is none to show. */
@@ -243,7 +248,15 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
   const current = outputs[Math.min(faceIndex, Math.max(0, outputs.length - 1))]
   const editable = drawsRegions && selected && !view.active
   const showRegions = drawsRegions && (selected || outputs.length === 0 || Boolean(props.planned?.length))
-  const maxThumbs = Math.max(1, Math.floor((width - 116) / 42))
+  // What the footer's buttons leave for thumbnails (about 7 px per character of an xs button, plus padding).
+  const reserved = !strip
+    ? 116
+    : view.state === 'failed' && !view.active
+      ? view.smaller
+        ? 86
+        : 48
+      : 72 + (props.changed ? 86 : 0) + (view.active ? 48 : 0)
+  const maxThumbs = Math.max(1, Math.floor((width - reserved) / 42))
   const preview = view.active ? view.preview : undefined
   // Out of GPU memory, the same size fails again: 改小一点再试 takes the 画面 one size step down.
   const smaller = view.state === 'failed' && view.smaller ? smallerCanvas(canvas) : null
@@ -297,9 +310,11 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
       !canvas.backgroundPath &&
       !view.active &&
       !props.parsing)
-  // The header speaks only while something is happening or went wrong.
+  // The header speaks only while something is happening or went wrong. A 画面's
+  // footer holds its filmstrip, so its header says how far the run is.
   const loud = view.active || view.state === 'failed' || view.state === 'lost'
-  const statusLabel = isImage || isStyle || !loud ? '' : view.label
+  const statusLabel = isImage || isStyle || !loud ? '' : strip && view.active ? view.detail || view.label : view.label
+  const queuedCount = strip?.queued.length ?? 0
   // Buttons and the filmstrip show on hover, focus or selection; a model that cannot be used always shows.
   const modelProblem = canvas.kind === 'layout' && !strip && !view.active && props.model && !props.model.ready
   const quietFooter = !selected && !modelProblem
@@ -334,9 +349,17 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
         >
           {canvas.title}
         </button>
-        <span className={cn('tabular min-w-0 flex-1 truncate text-right', view.state === 'failed' ? 'text-danger' : 'text-ink-2')}>
+        <span
+          data-card-progress={strip && view.active ? '' : undefined}
+          className={cn('tabular min-w-0 flex-1 truncate text-right', view.state === 'failed' ? 'text-danger' : 'text-ink-2')}
+        >
           {statusLabel}
         </span>
+        {queuedCount ? (
+          <Pill tone="accent" className="tabular">
+            <span data-card-queue>排队 {queuedCount}</span>
+          </Pill>
+        ) : null}
         {/* A menu choice acts on its own; the click must not reach the card and select it again. */}
         <div className="contents" onClick={(event) => event.stopPropagation()}>
           <Popover
@@ -627,7 +650,67 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
         )}
         style={{ height: CARD_FOOTER }}
       >
-        {isImage || isStyle ? null : view.active ? (
+        {isImage || isStyle ? null : strip ? (
+          <>
+            <Filmstrip
+              items={strip.items}
+              queued={strip.queued}
+              shown={strip.shown}
+              views={strip.views}
+              max={strip.items.length + strip.queued.length > maxThumbs ? Math.max(1, maxThumbs - 1) : maxThumbs}
+              onShow={strip.onShow}
+              onOpen={strip.onOpen}
+              onPointerDown={strip.onPointerDown}
+              onCancelQueued={strip.onCancelQueued}
+            />
+            <span className="flex-1" />
+            {view.state === 'failed' && !view.active ? (
+              retryButton
+            ) : (
+              <>
+                {props.changed ? (
+                  <Button
+                    tone="ghost"
+                    size="xs"
+                    aria-label={`用新设置重画 ${canvas.title}`}
+                    disabled={!props.rerun.ok}
+                    title={props.rerun.reason}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      props.onRerun('same')
+                    }}
+                  >
+                    用新设置重画
+                  </Button>
+                ) : null}
+                {view.active && jobId ? (
+                  <Button
+                    tone="ghost"
+                    size="xs"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      props.onCancel()
+                    }}
+                  >
+                    取消
+                  </Button>
+                ) : null}
+                <Button
+                  size="xs"
+                  aria-label={`再来一张 ${canvas.title}`}
+                  disabled={!props.rerun.ok}
+                  title={props.rerun.reason}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    props.onRerun('new')
+                  }}
+                >
+                  再来一张
+                </Button>
+              </>
+            )}
+          </>
+        ) : view.active ? (
           <div className="tabular flex min-w-0 flex-1 items-center gap-2 text-caption">
             <span data-card-progress className="min-w-0 flex-1 truncate text-ink">
               {view.detail}
@@ -655,48 +738,6 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
               </Button>
             ) : null}
           </div>
-        ) : strip ? (
-          <>
-            <Filmstrip
-              items={strip.items}
-              shown={strip.shown}
-              views={strip.views}
-              max={strip.items.length > maxThumbs ? Math.max(1, maxThumbs - 1) : maxThumbs}
-              onShow={strip.onShow}
-              onOpen={strip.onOpen}
-              onPointerDown={strip.onPointerDown}
-            />
-            <span className="flex-1" />
-            {view.state === 'failed' ? (
-              retryButton
-            ) : (
-              <>
-                <Button
-                  size="xs"
-                  disabled={!props.rerun.ok}
-                  title={props.rerun.reason}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    props.onRerun('new')
-                  }}
-                >
-                  换个种子
-                </Button>
-                <Button
-                  size="xs"
-                  aria-label={`重新生成 ${canvas.title}`}
-                  disabled={!props.rerun.ok}
-                  title={props.rerun.reason ?? '用现在的设置和这张图的种子再生成一次'}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    props.onRerun('same')
-                  }}
-                >
-                  重新生成
-                </Button>
-              </>
-            )}
-          </>
         ) : outputs.length > 0 ? (
           <>
             {outputs.slice(0, maxThumbs).map((output, index) => (
@@ -733,6 +774,7 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
             <span className="flex-1" />
             <Button
               size="xs"
+              aria-label={`再来一张 ${canvas.title}`}
               disabled={!props.rerun.ok}
               title={props.rerun.reason}
               onClick={(event) => {
@@ -740,19 +782,7 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
                 props.onRerun('new')
               }}
             >
-              换个种子
-            </Button>
-            <Button
-              size="xs"
-              aria-label={`重新生成 ${canvas.title}`}
-              disabled={!props.rerun.ok}
-              title={props.rerun.reason ?? '用同样的参数和种子再生成一次'}
-              onClick={(event) => {
-                event.stopPropagation()
-                props.onRerun('same')
-              }}
-            >
-              重新生成
+              再来一张
             </Button>
           </>
         ) : view.state === 'failed' ? (

@@ -25,7 +25,7 @@ import { gpuMemoryTooSmall, memoryGb } from '@shared/machineFit'
 import { judgeEngineSupport } from '@shared/engineProtocol'
 import { CLI_ENGINE_LABEL, cliBundleProblem, type CliEngineKind } from '@shared/cliEngine'
 import { isCliEngine } from '@shared/enginePackages'
-import { canvasBranchesConflict } from '@shared/canvasJobBranch'
+import { MAX_QUEUED_RUNS, canvasBranchesConflict } from '@shared/canvasJobBranch'
 import {
   resolveGpuProfile,
   settingsForGpuProfile,
@@ -856,6 +856,15 @@ export async function startEngineJob(input: StartEngineJobInput): Promise<JobRec
       const state = activeCanvasJob?.state
       throw new Error(`此 Canvas 已有任务${state === 'queued' ? '排队' : '正在运行'}，请等待完成或先取消该任务。`)
     }
+    // More runs of the same canvas wait their turn, one drawing and at most MAX_QUEUED_RUNS behind it.
+    const going = [...jobs.values()].filter(
+      (job) =>
+        job.projectId === input.projectId &&
+        job.canvasId !== undefined &&
+        (job.canvasLineage?.[0] ?? job.canvasId) === sourceId &&
+        (job.state === 'queued' || job.state === 'starting' || job.state === 'running'),
+    ).length
+    if (going > MAX_QUEUED_RUNS) throw codedError('E_QUEUE_FULL', `这个画面已经排了 ${MAX_QUEUED_RUNS} 张，等前面的画完再加`)
     const reservationId = randomUUID()
     canvasReservations.set(reservationId, branch)
     try {

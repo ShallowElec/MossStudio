@@ -20,6 +20,7 @@ import {
   Input,
   Kbd,
   Modal,
+  Pill,
   Segmented,
   Select,
   Spinner,
@@ -104,8 +105,14 @@ export interface ParamsPanelProps {
   /** First-run preparation still downloading: 生成 fills up and says so. */
   waiting?: Preparation | null
   prompt: CompiledPrompt | null
-  busy: boolean
-  submitting: boolean
+  /** A run in its lineage, started from another canvas, is going: it cannot start yet. */
+  blocked: boolean
+  /** Its own runs going: 生成 becomes 再来一张 and queues another. */
+  going: boolean
+  /** Runs waiting behind the one being drawn. */
+  queued: number
+  /** As many runs wait as may (MAX_QUEUED_RUNS). */
+  full: boolean
   onChange: (update: (canvas: ProjectCanvas) => ProjectCanvas) => void
   onPickBundle: (id: string) => void
   onOpenAdapters: () => void
@@ -156,8 +163,10 @@ function CanvasParams({
   blockers,
   waiting,
   prompt,
-  busy,
-  submitting,
+  blocked,
+  going,
+  queued,
+  full,
   onChange,
   onPickBundle,
   onOpenAdapters,
@@ -235,7 +244,6 @@ function CanvasParams({
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-5">
         {readOnly ? <Notice className="mb-5">参数已固定，复制成新画面后可改</Notice> : null}
-        {!readOnly && busy ? <Notice className="mb-5">生成中：尺寸、模型和采样先锁定。描述和区域还能改，下次生成生效。</Notice> : null}
         <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-6">
           <section className="flex flex-col gap-2.5">
             {/* What the model is finally sent sits next to the description it is built from. */}
@@ -266,10 +274,10 @@ function CanvasParams({
             <InputsSection canvas={canvas} onChange={onChange} wiring={inputs} blockers={blockers} />
           ) : null}
 
-          {/* Model, size and LoRA fold into one line; it opens to change them. While the
-              canvas generates these are the values the running job already took, so they
-              wait for it to finish. */}
-          <fieldset disabled={busy} className="flex min-w-0 flex-col gap-6">
+          {/* Model, size and LoRA fold into one line; it opens to change them. A change
+              applies to the runs asked for after it: queued runs keep what they were sent
+              with. */}
+          <div className="flex min-w-0 flex-col gap-6">
             <button
               type="button"
               data-settings-summary
@@ -485,7 +493,7 @@ function CanvasParams({
                 )}
               </div>
             </Advanced>
-          </fieldset>
+          </div>
         </fieldset>
       </div>
 
@@ -524,10 +532,10 @@ function CanvasParams({
               size="lg"
               block
               data-studio-generate
-              aria-busy={submitting || busy}
-              disabled={submitting || busy || blockers.length > 0 || Boolean(waiting)}
+              aria-busy={blocked}
+              disabled={blocked || full || blockers.length > 0 || Boolean(waiting)}
               onClick={onGenerate}
-              title={busy ? '这个画面正在生成' : undefined}
+              title={blocked ? '这个画面或它的来源正在生成' : undefined}
               className={waiting ? 'relative overflow-hidden' : undefined}
             >
               {waiting ? (
@@ -541,9 +549,15 @@ function CanvasParams({
                 </>
               ) : (
                 <>
-                  {submitting || busy ? <Spinner /> : null}
-                  {submitting ? '正在提交…' : busy ? '生成中…' : '生成'}
-                  {!submitting && !busy ? <Kbd>{SHORTCUT}</Kbd> : null}
+                  {blocked ? <Spinner /> : null}
+                  {blocked ? '生成中…' : full ? '排队已满' : going ? '再来一张' : '生成'}
+                  {!blocked && !full ? <Kbd>{SHORTCUT}</Kbd> : null}
+                  {queued && !blocked ? (
+                    // Solid, so it reads on the button's own ink.
+                    <Pill tone="accent" className="tabular bg-accent text-on-accent">
+                      <span data-generate-queue>排队 {queued}</span>
+                    </Pill>
+                  ) : null}
                 </>
               )}
             </Button>

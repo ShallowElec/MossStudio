@@ -127,12 +127,12 @@ The program prints the device it chose before loading; a different card than the
 The Studio posts a generation to the local backend (`POST /api/engine-jobs`), which calls `startRequestedEngineJob` (`main/services/engineJobStart.ts`): the update gate (`minimumVersion`), LoRA id resolution and input validation happen there, then `startEngineJob` in `main/services/supervisor.ts` takes over.
 
 1. The job waits for any engine activation in progress (`main/lib/engineActivation.ts`), so it never starts on a build about to be stopped.
-2. One active job per canvas branch: a 画面 with a queued or running job refuses another.
+2. Canvas branches (`canvasBranchesConflict` in `shared/canvasJobBranch.ts`): a job is refused while a job started from another canvas has its canvas in its lineage. Jobs started from the same canvas (more runs of one 画面) queue; at most `MAX_QUEUED_RUNS` (8) wait behind the one running, and one more is refused with `E_QUEUE_FULL`.
 3. `resolveLocalGpu` picks the GPU: the card bound to the canvas, else `Settings.gpuSelection`, else automatic. Automatic choice (`selectAutomaticGpu` in `shared/gpuScheduling.ts`) takes an idle compatible GPU first, ordered by compute capability, memory and index, else the least loaded one. It prefers CUDA GPUs; a CLI GPU is used only when the machine has no CUDA GPU and the job is plain text to image, and an integrated GPU only when there is no discrete one. A hand-picked GPU is checked against its engine's hello (`judgeEngineSupport`) or its CLI's limits.
 4. The job takes a slot, `gpu:<uuid>` or `host:<hostId>` (`engineSlotKey`). One job runs per slot; the rest wait in `engineQueues` with a `queuePosition` the Activity panel shows. The record keeps `queuedBehind` (how many jobs were ahead when it was queued) and `runStartedAt` (when its turn came), so a card can tell waiting time from generation time.
 5. `startEngineJobNow` materialises the model (`main/services/modelBundles.ts`), runs the CLI bundle checks, settles the tier from the weights, and dispatches to `runMossInferJob`, `runCliJob` or `runRemoteEngineJob`.
 
-Jobs are persisted in `<data root>/jobs/jobs.json` with one log per job in `jobs/<id>.jsonl`; outputs land in `<data root>/outputs/<job>-1.png` and are recorded for the Library. `main/services/launchQueue.ts` is a leftover from the runner era: it stores `LaunchRow`s in `launch-queue.json` behind the `launch-queue:*` IPC and takes no part in engine scheduling.
+Jobs are persisted in `<data root>/jobs/jobs.json` with one log per job in `jobs/<id>.jsonl`; a job still queued or running when the app quit is marked failed with `E_INTERRUPTED` on the next start and is not resumed; outputs land in `<data root>/outputs/<job>-1.png` and are recorded for the Library. `main/services/launchQueue.ts` is a leftover from the runner era: it stores `LaunchRow`s in `launch-queue.json` behind the `launch-queue:*` IPC and takes no part in engine scheduling.
 
 ## Remote hosts
 

@@ -385,6 +385,8 @@ export function jobLifecycle(base: JobRecord, options: JobLifecycleOptions = {})
     state,
     stage,
     progress: { stage, current, total, percent: Math.round((current / total) * 100) },
+    // Main stamps the moment a job leaves the queue and starts.
+    ...(state === 'queued' ? {} : { runStartedAt: FIXTURE_NOW }),
   })
   const queued = Array.from({ length: Math.max(0, options.queuedAhead ?? 0) }, (_, index) => ({
     ...at('idle', 0, 'queued'),

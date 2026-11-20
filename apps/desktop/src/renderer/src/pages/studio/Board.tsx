@@ -26,6 +26,7 @@ import {
 import { CanvasCard, type CardMenuAction, type CardStrip } from './CanvasCard'
 import type { ParseView } from './CardStatus'
 import { PARSE_CHECKING } from '@shared/gbc'
+import { MAX_QUEUED_RUNS } from '@shared/canvasJobBranch'
 import { useShell } from '../../lib/shell'
 import { newCanvasMenu } from './connect'
 import { boardTakesDrag, isImageFile, sortBoardDrop } from './imageNodes'
@@ -34,7 +35,7 @@ import { LinkMenu } from './LinkMenu'
 import { linkSourceImage, type LinkRole } from './links'
 import { BRUSH_DEFAULT, maskAvailability, startPictureSize } from './mask'
 import type { MaskBrush, MaskCommand } from './MaskLayer'
-import { rerunEligibility, type Blocker, type ReadinessInput } from './readiness'
+import { rerunEligibility, type Blocker, type ReadinessInput, type RerunCheck } from './readiness'
 import { KIND_LABEL, withKind, type BoardTool } from './RegionLayer'
 import { CardToolbar, MaskBar, Toolbar } from './Toolbar'
 import { useCardDrag } from './useCardDrag'
@@ -54,12 +55,14 @@ import {
   boardCanvases,
   canDropRun,
   canUnpin,
+  differsFromRun,
   filmstripOf,
   foldedRunIds,
   givesPicture,
   isActiveRun,
   pictureLink,
   unpinRun,
+  type Filmstrip,
   type StripItem,
 } from './runs'
 import { useRunDrag } from './useRunDrag'
@@ -84,8 +87,10 @@ export interface BoardProps {
   canvases: ProjectCanvas[]
   selectedCanvasId: string | null
   jobs: readonly JobRecord[]
+  /** Canvases with a run going in their lineage: their wires flow. */
   busyIds: ReadonlySet<string>
-  submitting: boolean
+  /** Canvases a new run cannot start on yet (see blockedCanvasIds). */
+  blockedIds: ReadonlySet<string>
   /** The app update state: a required update blocks reruns (see readiness.ts). */
   update?: ReadinessInput['update']
   tool: BoardTool
@@ -102,6 +107,8 @@ export interface BoardProps {
   onOpenViewer: (canvasId: string, index: number) => void
   /** `smaller`: one size step down first (it ran out of GPU memory). */
   onRerun: (canvasId: string, seed: 'new' | 'same', smaller?: boolean) => void
+  /** 再来 4 张: queue this many runs with new seeds (already within the queue's room). */
+  onMoreRuns: (canvasId: string, count: number) => void
   onCancel: (jobId: string) => void
   onShowActivity: (jobId?: string) => void
   onCopy: (canvas: ProjectCanvas) => void
@@ -791,14 +798,46 @@ export function Board(props: BoardProps): React.JSX.Element {
   const recipeList = recipes(props.engineFeatures, props.controlAdapters, props.blockers)
 
   /** The run a card shows: a 画面's picked filmstrip run, or the card itself. */
-  const shownOf = (canvas: ProjectCanvas): { run: ProjectCanvas; item: StripItem | undefined } => {
+  const shownOf = (canvas: ProjectCanvas): { run: ProjectCanvas; item: StripItem | undefined; film: Filmstrip | null } => {
     const film = canvas.kind === 'layout' ? filmstripOf(canvas, props.canvases) : null
     const item = film ? film.items[film.shown] : undefined
-    return { run: (item && film?.runs.find((run) => run.id === item.runId)) || canvas, item }
+    return { run: (item && film?.runs.find((run) => run.id === item.runId)) || canvas, item, film }
+  }
+
+  /** Whether a card can run (once more); a 画面's queue counts. */
+  const runCheck = (canvas: ProjectCanvas, film: Filmstrip | null): RerunCheck =>
+    rerunEligibility(canvas, {
+      blocked: props.blockedIds.has(canvas.id),
+      full: (film?.queued.length ?? 0) >= MAX_QUEUED_RUNS,
+      update: props.update,
+    })
+
+  /** Call off runs waiting in a 画面's queue (those that reached the engine). */
+  const cancelRuns = (runs: readonly ProjectCanvas[]): void => {
+    for (const run of runs) if (run.jobId) props.onCancel(run.jobId)
+  }
+
+  /** A 画面's runs from its menu: four more, the shown one again with the new settings, the queue called off. */
+  const runEntries = (canvas: ProjectCanvas, run: ProjectCanvas, film: Filmstrip | null): BoardMenuEntry[] => {
+    if (canvas.kind !== 'layout' || !film?.items.length) return []
+    const check = runCheck(canvas, film)
+    const room = MAX_QUEUED_RUNS - film.queued.length
+    const changed = differsFromRun(canvas, run)
+    const entries: BoardMenuEntry[] = [
+      { label: '再来 4 张', disabled: !check.ok, title: check.reason, onSelect: () => props.onMoreRuns(canvas.id, Math.min(4, room)) },
+      {
+        label: '用新设置重画这张',
+        disabled: !check.ok || !changed,
+        title: check.reason ?? (changed ? undefined : '描述和设置都没改'),
+        onSelect: () => props.onRerun(canvas.id, 'same'),
+      },
+    ]
+    if (film.queued.length) entries.push({ label: `取消排队的 ${film.queued.length} 张`, onSelect: () => cancelRuns(film.queued) })
+    return [...entries, { gap: true }]
   }
 
   /** A card's menu, the same under its ⋯ and on right-click. */
-  const cardMenu = (canvas: ProjectCanvas, run: ProjectCanvas, item: StripItem | undefined): BoardMenuEntry[] => {
+  const cardMenu = (canvas: ProjectCanvas, run: ProjectCanvas, item: StripItem | undefined, film: Filmstrip | null): BoardMenuEntry[] => {
     const actions = cardActions(canvas, run, item)
     const danger = (entry: BoardMenuEntry): boolean => !('gap' in entry) && entry.tone === 'danger'
     const jobId = run.jobId ?? canvas.jobId
@@ -806,6 +845,7 @@ export function Board(props: BoardProps): React.JSX.Element {
     // 描图: a picture under a 画面 to trace over; a 放大 redraws its 原图 and has none.
     const traceable = canvas.kind === 'layout' && !canvas.upscale
     return [
+      ...runEntries(canvas, run, film),
       ...actions.filter((entry) => !danger(entry)),
       ...(traceable ? [{ label: '描图…', onSelect: () => props.onUnderlay(canvas.id, true) }] : []),
       ...(traceable && canvas.backgroundPath ? [{ label: '不用描图', onSelect: () => props.onUnderlay(canvas.id, false) }] : []),
@@ -942,10 +982,21 @@ export function Board(props: BoardProps): React.JSX.Element {
       setContextMenu({ at, label: '区域', entries: regionMenu(card, region) })
       return
     }
+    // A run waiting in a filmstrip has a menu of its own.
+    const queuedId = target.closest<HTMLElement>('[data-strip-queued]')?.dataset.stripQueued
+    const queued = card && queuedId ? props.canvases.find((canvas) => canvas.id === queuedId) : undefined
+    if (queued) {
+      setContextMenu({
+        at,
+        label: '排队中的一张',
+        entries: [{ label: '取消这一张', disabled: !queued.jobId, onSelect: () => cancelRuns([queued]) }],
+      })
+      return
+    }
     if (card) {
       if (card.id !== props.selectedCanvasId) props.onSelectCanvas(card.id)
-      const { run, item } = shownOf(card)
-      setContextMenu({ at, label: `${card.title} 操作`, entries: cardMenu(card, run, item) })
+      const { run, item, film } = shownOf(card)
+      setContextMenu({ at, label: `${card.title} 操作`, entries: cardMenu(card, run, item, film) })
       return
     }
     const wireId =
@@ -1109,13 +1160,14 @@ export function Board(props: BoardProps): React.JSX.Element {
           const on = bind(canvas.id, {
             hover: (hovering: boolean) => setHoveredCard((current) => (hovering ? canvas.id : current === canvas.id ? null : current)),
             menuSelect: (label: string) => {
-              const entry = cardMenu(canvas, shownRun, item).find((option) => !('gap' in option) && option.label === label)
+              const entry = cardMenu(canvas, shownRun, item, film).find((option) => !('gap' in option) && option.label === label)
               if (entry && !('gap' in entry) && !entry.disabled) entry.onSelect()
             },
             stripShow: (index: number) => showRef.current(canvas.id, film!.items[index]!),
             stripOpen: (index: number) => props.onOpenViewer(film!.items[index]!.runId, film!.items[index]!.output),
             stripPointerDown: (index: number, event: React.PointerEvent<HTMLButtonElement>) =>
               runDrag.start(canvas.id, film!.items[index]!, event),
+            cancelQueued: (runId: string) => cancelRuns(film?.queued.filter((run) => run.id === runId) ?? []),
             saveMask: (png: Uint8Array | null) => props.onSaveMask(canvas.id, png),
             changeDescription: (text: string) => props.onChangeDescription(canvas.id, text),
             stopParse: () => props.onStopParse(canvas.id),
@@ -1170,9 +1222,10 @@ export function Board(props: BoardProps): React.JSX.Element {
                   onShow: on.stripShow,
                   onOpen: on.stripOpen,
                   onPointerDown: on.stripPointerDown,
+                  queued: film.queued.map((run) => ({ runId: run.id, cancellable: Boolean(run.jobId) })),
+                  onCancelQueued: on.cancelQueued,
                 }
               : null
-          const busy = props.busyIds.has(canvas.id)
           // With several picked, none of them is the one being edited: a drag on any face moves them all.
           const isSelected = canvas.id === props.selectedCanvasId && !multi
           const init = canvas.kind === 'layout' ? canvas.inputs?.init : undefined
@@ -1192,7 +1245,7 @@ export function Board(props: BoardProps): React.JSX.Element {
               view={views.get(shownRun.id) ?? viewOf(shownRun)}
               strip={strip}
               jobId={jobId}
-              menu={cardMenu(canvas, shownRun, item).map((entry) => {
+              menu={cardMenu(canvas, shownRun, item, film).map((entry) => {
                 if ('gap' in entry) return entry
                 const { onSelect: _onSelect, ...shown } = entry
                 return shown
@@ -1206,7 +1259,8 @@ export function Board(props: BoardProps): React.JSX.Element {
               selectedRegionId={props.selectedRegionId}
               editingRegionId={editingRegion?.canvasId === canvas.id ? editingRegion.id : null}
               planned={isSelected && plan.length ? plan : undefined}
-              rerun={rerunEligibility(canvas, { busy, submitting: props.submitting, update: props.update })}
+              rerun={runCheck(canvas, film)}
+              changed={canvas.kind === 'layout' && shownRun !== canvas && differsFromRun(canvas, shownRun)}
               initPicture={initPath ? { path: initPath, resize: init?.resize, size: startPictureSize(canvas, props.canvases) } : null}
               mask={
                 showMask

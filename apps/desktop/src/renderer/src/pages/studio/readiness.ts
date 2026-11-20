@@ -252,19 +252,21 @@ export interface RerunCheck {
 }
 
 /**
- * Whether a finished card can run again. A canvas made only of regions has an
- * empty `prompt` but a valid layout, so eligibility is the compiled prompt,
- * never the raw text field.
+ * Whether a card can run again (or once more, queued behind its own runs). A
+ * canvas made only of regions has an empty `prompt` but a valid layout, so
+ * eligibility is the compiled prompt, never the raw text field. `blocked`: a
+ * run in its lineage started from another canvas is going (`blockedCanvasIds`);
+ * `full`: `MAX_QUEUED_RUNS` are already waiting.
  */
 export function rerunEligibility(
   canvas: Pick<ProjectCanvas, 'id' | 'prompt' | 'summary' | 'layers' | 'width' | 'height'>,
-  state: { busy: boolean; submitting: boolean; update?: ReadinessInput['update'] },
+  state: { blocked: boolean; full?: boolean; update?: ReadinessInput['update'] },
 ): RerunCheck {
   // Main would refuse it anyway (E_UPDATE_REQUIRED); say so on the button instead.
   const updateReason = updateRequiredReason(state.update)
   if (updateReason) return { ok: false, reason: updateReason }
-  if (state.submitting) return { ok: false, reason: '正在提交' }
-  if (state.busy) return { ok: false, reason: '这个画面或它的结果正在生成' }
+  if (state.blocked) return { ok: false, reason: '这个画面或它的来源正在生成' }
+  if (state.full) return { ok: false, reason: '排队已满' }
   const compiled = compileCanvasPrompt(canvas)
   if (!compiled.ok) return { ok: false, reason: compiled.errors[0] }
   return { ok: true }

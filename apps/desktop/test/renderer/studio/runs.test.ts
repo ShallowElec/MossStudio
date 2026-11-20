@@ -8,6 +8,7 @@ import {
   boardCanvases,
   canDropRun,
   canUnpin,
+  differsFromRun,
   dropRun,
   filmstripOf,
   foldedRunIds,
@@ -16,11 +17,14 @@ import {
   keepCardsShown,
   pictureLink,
   pinRun,
+  queuedRunsOf,
   shownRun,
   spotBeside,
   staleRunIds,
   unpinRun,
+  unstartedRunIds,
   withRunSettings,
+  withoutUnstartedRuns,
 } from '@renderer/pages/studio/runs'
 import { canvas, layer } from './fixtures'
 
@@ -96,6 +100,84 @@ describe('studio/runs filmstrip', () => {
     expect(pictureLink(list, { canvasId: 'a', output: 0 })).toEqual({ canvasId: 'a', output: 0 })
     expect(givesPicture(layout(), [layout(), run('b')])).toBe(true)
     expect(givesPicture(layout(), [layout()])).toBe(false)
+  })
+})
+
+describe('studio/runs queue', () => {
+  const going = (id: string, state: 'queued' | 'starting' | 'running' = 'queued') =>
+    run(id, { jobId: `job-${id}`, jobState: state, outputs: [] })
+
+  it('puts the runs waiting behind the one being drawn after the pictures, in the order they were asked for', () => {
+    const list = [layout(), run('a'), going('drawing', 'running'), going('next'), going('last')]
+    expect(queuedRunsOf(list.slice(1)).map((item) => item.id)).toEqual(['next', 'last'])
+    const strip = filmstripOf(list[0]!, list)
+    expect(strip.queued.map((item) => item.id)).toEqual(['next', 'last'])
+    // The face follows the run being drawn, not the last one asked for.
+    expect(strip.items.map((item) => item.runId)).toEqual(['a', 'drawing'])
+    expect(strip.shown).toBe(1)
+    expect(shownRun(list[0]!, list)?.run.id).toBe('drawing')
+  })
+
+  it('has no queue while one run or none is going; the next waiting run is drawn once the first ends', () => {
+    expect(filmstripOf(layout(), [layout(), run('a'), going('drawing', 'running')]).queued).toEqual([])
+    expect(filmstripOf(layout(), [layout(), run('a')]).queued).toEqual([])
+    const moved = [layout(), run('a'), run('b'), going('next', 'running'), going('last')]
+    const strip = filmstripOf(moved[0]!, moved)
+    expect(strip.items.map((item) => item.runId)).toEqual(['a', 'b', 'next'])
+    expect(strip.queued.map((item) => item.id)).toEqual(['last'])
+  })
+
+  it('keeps a run that failed between queued ones in sight until a later run has pictures', () => {
+    const list = [layout(), run('a'), run('broke', { jobState: 'failed', outputs: [] }), going('drawing', 'running')]
+    expect(filmstripOf(list[0]!, list).items.map((item) => item.runId)).toEqual(['a', 'broke', 'drawing'])
+    const done = list.map((item) => (item.id === 'drawing' ? run('drawing') : item))
+    expect(filmstripOf(done[0]!, done).items.map((item) => item.runId)).toEqual(['a', 'drawing'])
+  })
+
+  it('takes away the runs that ended before they started: called off while waiting, or waiting when the app quit', () => {
+    const list = [layout(), run('a'), going('called-off'), going('interrupted'), going('stopped'), going('broke'), going('pinned')]
+    const pinned = list.map((item) => (item.id === 'pinned' ? { ...item, pinned: true } : item))
+    const jobs = [
+      { id: 'job-called-off', state: 'canceled' as const },
+      { id: 'job-interrupted', state: 'failed' as const, error: { code: 'E_INTERRUPTED', message: '应用重启，任务已中断' } },
+      // These had started: what they say stays.
+      { id: 'job-stopped', state: 'canceled' as const, runStartedAt: '2026-11-01T00:00:00.000Z' },
+      { id: 'job-broke', state: 'failed' as const, error: { code: 'E_MODEL', message: '模型文件不完整' } },
+      // A card on the board keeps its own 删除.
+      { id: 'job-pinned', state: 'canceled' as const },
+    ]
+    expect(unstartedRunIds(pinned, jobs)).toEqual(['called-off', 'interrupted'])
+    const kept = withoutUnstartedRuns(
+      pinned.map((item) => (item.id === 'l' ? { ...item, shownOutput: { canvasId: 'called-off' } } : item)),
+      jobs,
+    )
+    expect(kept.map((item) => item.id)).toEqual(['l', 'a', 'stopped', 'broke', 'pinned'])
+    expect(kept[0]!.shownOutput).toBeUndefined()
+    // Nothing to take away: the very same list, so nothing re-renders.
+    expect(withoutUnstartedRuns(kept, jobs)).toBe(kept)
+  })
+})
+
+describe('studio/runs differsFromRun', () => {
+  it('tells when the description or a setting is no longer what the run was made with, the seed aside', () => {
+    const scene = layout({ prompt: '春天', summary: { caption: '春天', meta: [], canvas: 'single' }, modelBundleId: 'sft' })
+    const made = run('a', { ...scene, id: 'a', kind: 'result', sourceCanvasId: 'l', seed: 99, outputs: [out('a')] })
+    expect(differsFromRun(scene, made)).toBe(false)
+    expect(differsFromRun({ ...scene, seed: 5, seedLocked: true }, made)).toBe(false)
+    expect(differsFromRun({ ...scene, prompt: '夏天', summary: { ...scene.summary, caption: '夏天' } }, made)).toBe(true)
+    expect(differsFromRun({ ...scene, steps: 50 }, made)).toBe(true)
+    expect(differsFromRun({ ...scene, width: 1280, height: 720 }, made)).toBe(true)
+    expect(differsFromRun({ ...scene, layers: [layer()] }, made)).toBe(true)
+    expect(differsFromRun({ ...scene, adapters: [{ id: 'lora', strength: 0.8 }] }, made)).toBe(true)
+    // A 高清修复 run is compared at its first-pass size.
+    const hires = { ...made, width: 2048, height: 2048, baseSize: { width: 1024, height: 1024 } }
+    expect(differsFromRun(scene, hires)).toBe(false)
+  })
+
+  it('only compares a 画面 with one of its own runs', () => {
+    const scene = layout()
+    expect(differsFromRun(scene, scene)).toBe(false)
+    expect(differsFromRun(scene, run('x', { sourceCanvasId: 'other', prompt: '别的' }))).toBe(false)
   })
 })
 
@@ -191,6 +273,12 @@ describe('studio/runs liveness and clean-up', () => {
       run('pinned', { pinned: true, jobState: 'failed', outputs: [] }),
     ]
     expect(staleRunIds('l', list, [{ id: 'j', state: 'running' }])).toEqual(['failed'])
+  })
+
+  it('keeps a run just sent whose job has not been heard of yet, so a quick second click does not clear it', () => {
+    const list = [layout(), run('sent', { jobId: 'new-job', jobState: 'queued', outputs: [] })]
+    expect(staleRunIds('l', list, [])).toEqual([])
+    expect(staleRunIds('l', list, [{ id: 'new-job', state: 'canceled' }])).toEqual(['sent'])
   })
 
   it('opens a run saved mid-submit (no job id) as not submitted', () => {

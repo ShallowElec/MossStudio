@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef } from 'react'
 import type { BackendInfo } from '@shared/backend'
 import type { Catalog, ControlAdapterEntry, EngineFeatures, JobRecord, ManagedHost, ProjectCanvas } from '@shared/types'
 import { Ipc } from '@shared/channels'
-import { activeCanvasBranchIds, canvasLineage } from '@shared/canvasJobBranch'
+import { MAX_QUEUED_RUNS, blockedCanvasIds, canvasLineage } from '@shared/canvasJobBranch'
 import { adapterStatuses, normalizeCanvasAdapters } from '@shared/adapters'
 import { call } from '../../lib/api'
 import { electronStudioClient } from '../../lib/studioClient'
@@ -13,7 +13,7 @@ import { resolveJobInputs } from './jobInputs'
 import { compileCanvasPrompt } from './prompt'
 import { resolveBundle } from './readiness'
 import { generatedSnapshot, generationCanvas, nodeBlockers, styleLoraNote, withUpscaleSize } from './nodes'
-import { shownRun, staleRunIds } from './runs'
+import { queuedRunsOf, runsOf, shownRun, staleRunIds } from './runs'
 import type { StudioProject } from './useStudioProject'
 
 export type SeedMode = 'auto' | 'new' | 'same'
@@ -40,7 +40,9 @@ function errorMessage(body: unknown, status: number): string {
 /**
  * Submitting a run. Reads the canvas from live state at call time, so a
  * description written a moment earlier (by the user or the assistant) is
- * always the one that is sent.
+ * always the one that is sent. Calls made while one is being submitted wait
+ * for it and go next, so three quick clicks queue three runs; each run takes
+ * the settings of the moment it is sent, and the engine keeps them.
  */
 export function useGenerate(options: {
   project: StudioProject
@@ -52,7 +54,6 @@ export function useGenerate(options: {
   controlAdaptersLoaded?: boolean
   notify: (message: string, tone: 'info' | 'success' | 'error') => void
 }): {
-  submitting: boolean
   /** `smaller`: the 画面 goes one size step down first (it ran out of GPU memory). */
   generate: (
     canvasId?: string,
@@ -60,32 +61,21 @@ export function useGenerate(options: {
     runOptions?: { smaller?: boolean },
   ) => Promise<{ queued: boolean; canvasId?: string; jobId?: string; error?: string }>
 } {
-  const [submitting, setSubmitting] = useState(false)
-  const submittingRef = useRef(false)
+  const chain = useRef<Promise<unknown>>(Promise.resolve())
+  const pending = useRef(0)
   const backend = useRef<BackendInfo | null>(null)
   const latest = useRef(options)
   latest.current = options
 
-  const generate = useCallback(async (canvasId?: string, seedMode: SeedMode = 'auto', runOptions: { smaller?: boolean } = {}) => {
+  const submit = useCallback(async (requestedId: string | null, seedMode: SeedMode, runOptions: { smaller?: boolean }) => {
     const { project, catalog, preferredBundleId, remoteHost, controlAdapters = [], controlAdaptersLoaded, notify } = latest.current
     const fail = (message: string): { queued: false; error: string } => {
       notify(message, 'error')
       return { queued: false, error: message }
     }
-    if (submittingRef.current) return { queued: false, error: '正在提交上一次生成' }
-    const requestedId = canvasId ?? project.selectedRef.current
     const requested = project.canvasesRef.current.find((canvas) => canvas.id === requestedId)
     if (!requested) return fail('先选中一个画面')
     if (requested.kind === 'style') return fail('风格不能单独生成，把它接到画面上')
-
-    // Busy from here on, so a second click shows the state instead of slipping in.
-    submittingRef.current = true
-    setSubmitting(true)
-    const stop = (message: string): { queued: false; error: string } => {
-      submittingRef.current = false
-      setSubmitting(false)
-      return fail(message)
-    }
 
     // Pictures and sampling choices are checked against the engine this run goes to.
     const usesInputs = Boolean(requested.inputs || requested.sampling)
@@ -98,11 +88,11 @@ export function useGenerate(options: {
     // Everything below reads the canvases as they are now: edits made while the engine answered are kept.
     let canvases = project.canvasesRef.current
     let found = canvases.find((canvas) => canvas.id === requested.id)
-    if (!found) return stop('这个画面已经删除了')
+    if (!found) return fail('这个画面已经删除了')
     if (runOptions.smaller) {
       // The 画面 itself gets the smaller size, so the next run fits too and 尺寸 shows it.
       const smaller = smallerCanvas(found)
-      if (!smaller) return stop('已经是最小的尺寸了')
+      if (!smaller) return fail('已经是最小的尺寸了')
       canvases = canvases.map((canvas) => (canvas.id === smaller.id ? smaller : canvas))
       found = smaller
     }
@@ -111,31 +101,32 @@ export function useGenerate(options: {
     // What the engine gets: the description and LoRA with the 风格 nodes' added.
     const generating = generationCanvas(source, canvases)
     const jobs = useApp.getState().jobs
-    if (activeCanvasBranchIds(canvases, jobs).has(source.id)) return stop('这个画面正在生成，等它完成后再试')
+    if (blockedCanvasIds(canvases, jobs).has(source.id)) return fail('这个画面或它的来源正在生成，等它完成后再试')
+    if (queuedRunsOf(runsOf(source, canvases)).length >= MAX_QUEUED_RUNS) return fail('排队已满，等前面的画完再加')
 
     const choice = resolveBundle(catalog, source.modelBundleId, preferredBundleId)
     if (!choice.bundle)
-      return stop(choice.unavailable ? '这个画面用的模型已经不在模型库里，请换一个模型' : '还没有可用的模型，请先到模型页下载')
-    if (!choice.installed) return stop(`「${choice.bundle.name}」还没有下载完`)
+      return fail(choice.unavailable ? '这个画面用的模型已经不在模型库里，请换一个模型' : '还没有可用的模型，请先到模型页下载')
+    if (!choice.installed) return fail(`「${choice.bundle.name}」还没有下载完`)
     const remoteModelPath = remoteHost?.modelPath?.trim()
-    if (remoteHost && !remoteModelPath) return stop(`「${remoteHost.name}」还没有设置模型位置，请到 设置 › 设备与引擎 填写`)
+    if (remoteHost && !remoteModelPath) return fail(`「${remoteHost.name}」还没有设置模型位置，请到 设置 › 设备与引擎 填写`)
     const adapters = normalizeCanvasAdapters(generating.adapters)
     // A 风格's LoRA count too; the message says where they come from.
     const fromStyles = styleLoraNote(source, canvases)
-    if (remoteHost && adapters.length) return stop(`在其他电脑上运行时暂不支持 LoRA，请移除 LoRA 或改回这台电脑${fromStyles}`)
+    if (remoteHost && adapters.length) return fail(`在其他电脑上运行时暂不支持 LoRA，请移除 LoRA 或改回这台电脑${fromStyles}`)
     const missing = adapterStatuses(adapters, catalog?.adapters).filter((item) => !item.installed)
     if (missing.length)
-      return stop(`LoRA ${missing.map((item) => `「${item.name}」`).join('')}找不到了，请移除或到模型库重新安装${fromStyles}`)
+      return fail(`LoRA ${missing.map((item) => `「${item.name}」`).join('')}找不到了，请移除或到模型库重新安装${fromStyles}`)
     // Regions are laid out on the first-pass size.
     const compiled = compileCanvasPrompt(generating.baseSize ? { ...generating, ...generating.baseSize } : generating)
-    if (!compiled.ok) return stop(compiled.errors[0] ?? '描述还不完整')
+    if (!compiled.ok) return fail(compiled.errors[0] ?? '描述还不完整')
     const node = nodeBlockers(generating, canvases)
-    if (node.length) return stop(node[0]!.message)
+    if (node.length) return fail(node[0]!.message)
     const resolved = resolveJobInputs(generating, { canvases, features, controlAdapters, controlAdaptersLoaded })
-    if (resolved.blockers.length) return stop(resolved.blockers[0]!.message)
+    if (resolved.blockers.length) return fail(resolved.blockers[0]!.message)
 
     // 'same' repeats the picture on this card: the seed its run used, not the
-    // source's latest seed (a later 换个种子 from this card records a new one).
+    // source's latest seed (a later 再来一张 from this card records a new one).
     // A 画面 repeats the run picked in its filmstrip.
     const shown = source.kind === 'layout' ? (shownRun(source, canvases)?.run ?? source) : source
     const shownSeed = jobs.find((job) => job.id === shown.jobId)?.params.seed ?? shown.outputs?.[0]?.seed ?? source.seed
@@ -239,11 +230,25 @@ export function useGenerate(options: {
         void project.saveNow()
       }
       return fail(message)
-    } finally {
-      submittingRef.current = false
-      setSubmitting(false)
     }
   }, [])
 
-  return { submitting, generate }
+  const generate = useCallback(
+    (canvasId?: string, seedMode: SeedMode = 'auto', runOptions: { smaller?: boolean } = {}) => {
+      // The canvas is the one asked for now, even if the selection moves before its turn.
+      const requestedId = canvasId ?? latest.current.project.selectedRef.current
+      const run = (): ReturnType<typeof submit> => submit(requestedId, seedMode, runOptions)
+      // Nothing ahead: it reads the board right away, so it is sent as it is at the click.
+      const started = pending.current ? chain.current.then(run, run) : run()
+      pending.current += 1
+      const result = started.finally(() => {
+        pending.current -= 1
+      })
+      chain.current = result.catch(() => undefined)
+      return result
+    },
+    [submit],
+  )
+
+  return { generate }
 }

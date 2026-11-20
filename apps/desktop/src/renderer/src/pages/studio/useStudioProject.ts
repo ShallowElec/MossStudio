@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JobRecord, ProjectCanvas, ProjectDocument, ProjectSummary } from '@shared/types'
 import { electronStudioClient, type StudioClient } from '../../lib/studioClient'
 import { applyJobs, copyAsLayout, createLayoutCanvas, migrateCanvases, removeCanvasFrom, settingsFrom } from './canvases'
-import { foldedRunIds } from './runs'
+import { foldedRunIds, withoutUnstartedRuns } from './runs'
 import { UNTITLED_PROJECT, nextProjectName } from './defaults'
 import { useLiveState } from './useLiveState'
 
@@ -303,9 +303,9 @@ export function useStudioProject(options: {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  // Job progress lands on the canvases that track those jobs.
+  // Job progress lands on the canvases that track those jobs; a run called off before it started leaves.
   useEffect(() => {
-    if (options.jobs.length) setCanvases((previous) => applyJobs(previous, options.jobs))
+    if (options.jobs.length) setCanvases((previous) => withoutUnstartedRuns(applyJobs(previous, options.jobs), options.jobs))
   }, [options.jobs, setCanvases])
 
   /** setCanvases / select for callers: these are local edits. */

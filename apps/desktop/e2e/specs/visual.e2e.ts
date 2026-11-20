@@ -41,6 +41,8 @@ async function seedStudio(page: Page): Promise<void> {
       summary: { caption: '阳光明媚的客厅', meta: [], canvas: 'single' },
       layers: layers as never,
       seed: 40,
+      // The run below was made with these settings, so the card offers no 用新设置重画.
+      negative: 'blurry, watermark',
     })
     const result = canvasFixture({
       id: 'c2',

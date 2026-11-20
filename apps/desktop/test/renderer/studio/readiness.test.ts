@@ -184,14 +184,14 @@ describe('studio/readiness rerunEligibility', () => {
   it('lets a region-only canvas run again even though its prompt field is empty', () => {
     const regionOnly = canvas({ prompt: '', summary: { caption: 'poster', meta: [], canvas: 'single' }, layers: [layer()] })
     expect(regionOnly.prompt).toBe('')
-    expect(rerunEligibility(regionOnly, { busy: false, submitting: false })).toEqual({ ok: true })
+    expect(rerunEligibility(regionOnly, { blocked: false })).toEqual({ ok: true })
   })
 
-  it('blocks while busy or submitting, and when the layout is incomplete', () => {
+  it('blocks while its source is generating, when the queue is full, and when the layout is incomplete', () => {
     const ok = canvas({ prompt: 'x' })
-    expect(rerunEligibility(ok, { busy: true, submitting: false }).ok).toBe(false)
-    expect(rerunEligibility(ok, { busy: false, submitting: true }).ok).toBe(false)
-    expect(rerunEligibility(canvas(), { busy: false, submitting: false })).toMatchObject({ ok: false, reason: '先写一句描述' })
+    expect(rerunEligibility(ok, { blocked: true })).toEqual({ ok: false, reason: '这个画面或它的来源正在生成' })
+    expect(rerunEligibility(ok, { blocked: false, full: true })).toEqual({ ok: false, reason: '排队已满' })
+    expect(rerunEligibility(canvas(), { blocked: false })).toMatchObject({ ok: false, reason: '先写一句描述' })
   })
 })
 
@@ -255,23 +255,21 @@ describe('studio/readiness rerunEligibility with a required update', () => {
 
   it('disables the rerun with the same reason as 生成, before anything else', () => {
     const update = { supported: true, required: true, minimumVersion: '1.2.0' }
-    expect(rerunEligibility(card, { busy: false, submitting: false, update })).toEqual({
+    expect(rerunEligibility(card, { blocked: false, update })).toEqual({
       ok: false,
       reason: '必须更新到 1.2.0 才能继续生成',
     })
-    // Even while busy or submitting, the update is the reason that matters.
-    expect(rerunEligibility(card, { busy: true, submitting: true, update }).reason).toBe('必须更新到 1.2.0 才能继续生成')
-    expect(rerunEligibility(card, { busy: false, submitting: false, update: { ...update, minimumVersion: null } }).reason).toBe(
-      '必须更新后才能继续生成',
-    )
+    // Even while blocked or full, the update is the reason that matters.
+    expect(rerunEligibility(card, { blocked: true, full: true, update }).reason).toBe('必须更新到 1.2.0 才能继续生成')
+    expect(rerunEligibility(card, { blocked: false, update: { ...update, minimumVersion: null } }).reason).toBe('必须更新后才能继续生成')
   })
 
   it('reruns as before when no update is required or the state is unknown', () => {
-    expect(
-      rerunEligibility(card, { busy: false, submitting: false, update: { supported: true, required: false, minimumVersion: '1.0.0' } }),
-    ).toEqual({ ok: true })
-    expect(rerunEligibility(card, { busy: false, submitting: false, update: null })).toEqual({ ok: true })
-    expect(rerunEligibility(card, { busy: false, submitting: false })).toEqual({ ok: true })
+    expect(rerunEligibility(card, { blocked: false, update: { supported: true, required: false, minimumVersion: '1.0.0' } })).toEqual({
+      ok: true,
+    })
+    expect(rerunEligibility(card, { blocked: false, update: null })).toEqual({ ok: true })
+    expect(rerunEligibility(card, { blocked: false })).toEqual({ ok: true })
   })
 
   it('updateRequiredReason is the one wording for both', () => {
