@@ -16,6 +16,7 @@ import {
   samplingForBundle,
   seedForRun,
   sizePresetFor,
+  smallerSize,
 } from '@renderer/pages/studio/defaults'
 
 describe('studio/defaults size presets', () => {
@@ -38,6 +39,15 @@ describe('studio/defaults size presets', () => {
 })
 
 describe('studio/defaults quality presets', () => {
+  it('steps a picture the GPU could not fit down to about half its pixels, on the 16-pixel grid', () => {
+    expect(smallerSize(1024, 1024)).toEqual({ width: 768, height: 768 })
+    expect(smallerSize(1280, 720)).toEqual({ width: 960, height: 544 })
+    expect(smallerSize(864, 1152)).toEqual({ width: 656, height: 864 })
+    // Never below the engine's smallest side; at the bottom there is no step left.
+    expect(smallerSize(300, 1024)).toEqual({ width: MIN_DIMENSION, height: 768 })
+    expect(smallerSize(MIN_DIMENSION, MIN_DIMENSION)).toBeNull()
+  })
+
   it('maps 快速/标准/精细 to 8/20/50 steps with an explicit profile', () => {
     expect(QUALITY_PRESETS.map((preset) => [preset.label, preset.steps, preset.profile])).toEqual([
       ['快速', 8, 'dmd8'],

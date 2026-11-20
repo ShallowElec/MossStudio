@@ -1,3 +1,4 @@
+import { generationErrorText, smallerPictureHelps } from '@shared/generationError'
 import type { JobProgress, JobRecord, ProjectCanvas } from '@shared/types'
 import { ACTIVE_JOB_STATES, duration, jobProgressDetail, jobStateLabel } from '../../lib/format'
 
@@ -29,6 +30,8 @@ export interface CardJobView {
   preview?: { path: string; seq: number }
   /** A failed run can be started again from the card. */
   retry?: boolean
+  /** It failed for want of GPU memory: the same size would fail again, a smaller one gets through. */
+  smaller?: boolean
 }
 
 function phaseOf(stage: JobProgress['stage']): CardPhase {
@@ -56,7 +59,8 @@ export function cardJobView(canvas: ProjectCanvas, job: JobRecord | undefined, j
   const state: CardState = lost ? 'lost' : (rawState ?? 'idle')
   const active = !lost && ACTIVE_JOB_STATES.has(state)
   const progress = job?.progress ?? canvas.progress
-  const error = job?.error?.message ?? canvas.error?.message
+  const failure = job?.error ?? canvas.error
+  const error = failure ? generationErrorText(failure) : undefined
 
   if (state === 'queued') {
     const position = job ? (job.queuePosition ?? queuePosition(job, jobs)) : 0
@@ -97,8 +101,19 @@ export function cardJobView(canvas: ProjectCanvas, job: JobRecord | undefined, j
     const label = parts.length ? parts.join(' · ') : '没有返回图片'
     return { state, active, label, detail: '', outputs, error: outputs.length ? undefined : '任务完成了，但没有返回图片' }
   }
-  if (state === 'failed')
-    return { state, active, label: jobStateLabel({ state }), detail: '', outputs, error: error ?? '生成失败', retry: true }
+  if (state === 'failed') {
+    const smaller = smallerPictureHelps(failure)
+    return {
+      state,
+      active,
+      label: jobStateLabel({ state }),
+      detail: '',
+      outputs,
+      error: error ?? '生成失败',
+      retry: true,
+      ...(smaller ? { smaller } : {}),
+    }
+  }
   if (state === 'canceled') return { state, active, label: jobStateLabel({ state }), detail: '', outputs }
   if (state === 'lost') return { state, active, label: '状态未知', detail: '', outputs, error: '应用重启过，这次生成的进度已无法找回' }
   return { state: 'idle', active: false, label: outputs.length ? `${outputs.length} 张` : '', detail: '', outputs }

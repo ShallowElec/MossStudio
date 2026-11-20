@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { solutionTarget } from '@renderer/components/shell/ActivityPanel'
+import shipped from '../../../resources/rules.json'
 
 describe('solutionTarget', () => {
   it('opens the settings section a rule names', () => {
@@ -24,5 +25,15 @@ describe('solutionTarget', () => {
   it('hides actions that have no real fix', () => {
     expect(solutionTarget({ label: '降低设置重试', action: 'retry_lower' })).toBeNull()
     expect(solutionTarget({ label: '?', action: 'something_new' })).toBeNull()
+  })
+
+  it('every fix the shipped rules suggest is one the app can carry out', () => {
+    const solutions = shipped.rules.flatMap((rule) => rule.solutions.map((solution) => ({ rule: rule.id, ...solution })))
+    expect(solutions.filter((solution) => !solutionTarget(solution)).map((solution) => `${solution.rule}: ${solution.action}`)).toEqual([])
+  })
+
+  it('words the shipped rules for people, without engine internals', () => {
+    const text = shipped.rules.map((rule) => `${rule.title} ${rule.explain} ${rule.solutions.map((solution) => solution.label).join(' ')}`)
+    expect(text.filter((line) => /DMD|bf16|MPS|Python|HF |实例|镜像/.test(line))).toEqual([])
   })
 })

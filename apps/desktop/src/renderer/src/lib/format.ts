@@ -1,3 +1,4 @@
+import { generationErrorText } from '@shared/generationError'
 import { memoryGb } from '@shared/machineFit'
 import type { JobProgress, JobRecord, PackageInstallProgress } from '@shared/types'
 
@@ -219,7 +220,8 @@ export function jobSummary(job: JobRecord): string {
   } else if (job.state === 'starting' || job.state === 'running') {
     parts.push(jobProgressDetail(job.progress))
   } else if (job.state === 'failed' && job.error?.message) {
-    parts.push(job.error.message)
+    // A training words its own failures; a generation's is worded by its code.
+    parts.push(job.kind === 'training' ? job.error.message : generationErrorText(job.error))
   } else if (job.state === 'succeeded' && job.kind !== 'training') {
     parts.push(dimensions(job.params.width, job.params.height))
   }

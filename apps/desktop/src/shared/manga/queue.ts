@@ -1,3 +1,4 @@
+import { generationErrorText } from '../generationError'
 import type { JobRecord } from '../types'
 import type { MangaChapter, MangaPanel, MangaSeries, PanelState } from './model'
 
@@ -142,7 +143,7 @@ export function applyJob(panel: MangaPanel, job: Pick<JobRecord, 'id' | 'state' 
       takes: [...panel.takes, ...takes].slice(-30),
     }
   }
-  if (job.state === 'failed') return failed(panel, job.error?.message ?? '生成失败了', now)
+  if (job.state === 'failed') return failed(panel, job.error ? generationErrorText(job.error) : '生成失败了', now)
   // Stopped by a person: not retried.
   if (job.state === 'canceled') return { ...panel, jobId: undefined, state: panel.takes.length ? 'review' : 'draft' }
   return panel.state === 'running' ? panel : { ...panel, state: 'running' }

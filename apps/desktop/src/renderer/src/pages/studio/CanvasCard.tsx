@@ -4,6 +4,7 @@ import type { ImageResizeMode, ProjectCanvas, ProjectLayer } from '@shared/types
 import { Button, IconButton, Pill, cn } from '../../components/ui'
 import { MenuGap, MenuItem, Popover } from '../../components/common/Popover'
 import { cloverUrl } from '../../lib/clover'
+import { dimensions } from '../../lib/format'
 import { tidyEntries, type BoardMenuEntry } from './BoardMenu'
 import type { LinkRole } from './links'
 import { OutputImage } from './OutputImage'
@@ -16,7 +17,7 @@ import type { RerunCheck } from './readiness'
 import { canvasDescription } from './prompt'
 import { Filmstrip } from './Filmstrip'
 import { RegionEditor, RegionLayer, useRegionDraw, type BoardTool } from './RegionLayer'
-import { newRegion } from './canvases'
+import { newRegion, smallerCanvas } from './canvases'
 import type { StripItem } from './runs'
 import { StartPicture } from './StartPicture'
 import { sameData } from './sameData'
@@ -120,7 +121,8 @@ export interface CanvasCardProps {
   onEditDone: (cancel: boolean) => void
   onDragStart: (event: React.PointerEvent<HTMLElement>) => void
   onOpenViewer: (index: number) => void
-  onRerun: (seed: 'new' | 'same') => void
+  /** `smaller`: one size step down first (it ran out of GPU memory). */
+  onRerun: (seed: 'new' | 'same', smaller?: boolean) => void
   onCancel: () => void
   onShowActivity: () => void
   /** 拆成区域 is filling this 画面. */
@@ -243,6 +245,35 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
   const showRegions = drawsRegions && (selected || outputs.length === 0 || Boolean(props.planned?.length))
   const maxThumbs = Math.max(1, Math.floor((width - 116) / 42))
   const preview = view.active ? view.preview : undefined
+  // Out of GPU memory, the same size fails again: 改小一点再试 takes the 画面 one size step down.
+  const smaller = view.state === 'failed' && view.smaller ? smallerCanvas(canvas) : null
+  const retryButton = smaller ? (
+    <Button
+      size="xs"
+      aria-label={`改小一点再试 ${canvas.title}`}
+      disabled={!props.rerun.ok}
+      title={props.rerun.reason ?? `改成 ${dimensions(smaller.width, smaller.height)} 再生成`}
+      onClick={(event) => {
+        event.stopPropagation()
+        props.onRerun('same', true)
+      }}
+    >
+      改小一点再试
+    </Button>
+  ) : (
+    <Button
+      size="xs"
+      aria-label={`重试 ${canvas.title}`}
+      disabled={!props.rerun.ok}
+      title={props.rerun.reason}
+      onClick={(event) => {
+        event.stopPropagation()
+        props.onRerun('same')
+      }}
+    >
+      重试
+    </Button>
+  )
   // While painting the mask, the start picture shows even over earlier results.
   const painting = Boolean(props.mask?.interactive && props.initPicture)
   const pictureSize = usePictureSize(props.mask ? props.initPicture?.path : undefined, props.initPicture?.size ?? null)
@@ -466,7 +497,9 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
         ) : null}
 
         {props.parsing ? <ParseOverlay parse={props.parsing} onStop={() => props.onStopParse?.()} /> : null}
-        {isImage || isStyle ? null : <StatusOverlay view={view} hasPicture={Boolean(preview)} />}
+        {isImage || isStyle ? null : (
+          <StatusOverlay view={view} hasPicture={Boolean(preview)} {...(strip && jobId ? { onDetails: props.onShowActivity } : {})} />
+        )}
         {view.active && (view.phase === 'denoise' || view.phase === 'decode' || view.phase === 'save' || view.phase === 'text') ? (
           <ProgressStrip percent={view.phase === 'denoise' ? view.percent : undefined} />
         ) : null}
@@ -635,18 +668,7 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
             />
             <span className="flex-1" />
             {view.state === 'failed' ? (
-              <Button
-                size="xs"
-                aria-label={`重试 ${canvas.title}`}
-                disabled={!props.rerun.ok}
-                title={props.rerun.reason}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  props.onRerun('same')
-                }}
-              >
-                重试
-              </Button>
+              retryButton
             ) : (
               <>
                 <Button
@@ -735,18 +757,7 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
           </>
         ) : view.state === 'failed' ? (
           <>
-            <Button
-              size="xs"
-              aria-label={`重试 ${canvas.title}`}
-              disabled={!props.rerun.ok}
-              title={props.rerun.reason}
-              onClick={(event) => {
-                event.stopPropagation()
-                props.onRerun('same')
-              }}
-            >
-              重试
-            </Button>
+            {retryButton}
             {jobId ? (
               <Button
                 tone="ghost"

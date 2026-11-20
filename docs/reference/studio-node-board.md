@@ -1,7 +1,7 @@
 ---
 status: current
 last-verified: 2026-11-08 (fec4fe3)
-code: apps/desktop/src/renderer/src/pages/studio/, apps/desktop/src/renderer/src/lib/preparation.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/canvasJobBranch.ts, apps/desktop/src/shared/cliEngine.ts
+code: apps/desktop/src/renderer/src/pages/studio/, apps/desktop/src/renderer/src/lib/preparation.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/canvasJobBranch.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/shared/generationError.ts
 ---
 
 # Studio node board
@@ -92,6 +92,7 @@ Wires (`studio/wires.ts`, drawn by `studio/WireLayer.tsx`) are of two kinds: `in
 
 - A run (`studio/useGenerate.ts`) resolves the 画面 with its 风格 nodes (`generationCanvas`), resolves inputs, picks the seed (`studio/defaults.ts` `seedForRun`: a new random seed unless 种子 is locked), and writes into a new result canvas (`taskCanvasFor`). The 画面's face follows the newest run.
 - The filmstrip (`studio/runs.ts`, `studio/Filmstrip.tsx`) lists every run of a 画面, oldest left. A run stays folded in the strip unless it is pinned, feeds another canvas, or is itself the source of a result (`foldedRunIds`). Click a thumbnail to show it on the face (and on the wires), double-click to open the viewer (`studio/OutputViewer.tsx`), drag it onto the board to pin it where it lands (`studio/useRunDrag.ts`). Runs that do not fit sit behind +N. A run without a picture (running, 失败, 停止) shows only while it is the newest; the next run clears such leftovers (`staleRunIds`). A finished card reads N 张, then 排队 N 张 when jobs were ahead of it and 实跑 with the engine's own time (`studio/jobStatus.ts`, from `JobRecord.queuedBehind` and `runStartedAt`).
+- A failed run says what happened in plain words, from the code the engine returned (`shared/generationError.ts`); the engine's own text stays in the job log, behind 查看详情 (on the face of a 画面, in the footer of a result). Out of GPU memory (`E_OOM`) reads 显存不够这个尺寸, and 重试, which would fail the same way, becomes 改小一点再试: the 画面 goes one size step down (`smallerSize` in `studio/defaults.ts`, about half the pixels, regions scaled along by `smallerCanvas`) and runs again. A 放大, whose size comes from its start picture, and a 画面 already at the smallest size keep 重试. The same words show in 活动 and the failure notification, and in 漫画's retry line.
 - Busy branches (`shared/canvasJobBranch.ts`): while a job is active, its canvas and every canvas upstream in its `sourceCanvasId` chain count as busy, so 生成 and 重新生成 are disabled with 这个画面或它的结果正在生成. Main checks the same lineage before starting a job.
 
 Picture actions in a card's menu (`studio/Board.tsx` `cardActions`):

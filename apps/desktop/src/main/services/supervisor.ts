@@ -39,6 +39,7 @@ import { getTrainingHost } from './trainingHosts'
 import { cancelRemoteEngineJob, runRemoteEngineJob } from './remoteEngine'
 import { remoteAbsolute } from './ssh'
 import { pushDiagnostic } from './diagnostics'
+import { generationErrorText } from '@shared/generationError'
 import { pushLocalNotification } from './desktopNotifications'
 import { LineSplitter, exitRule, loadRules, matchRule, stripAnsi, toDiagnostic } from './parsers'
 import { waitForEngineActivation } from '../lib/engineActivation'
@@ -214,7 +215,10 @@ function update(job: JobRecord, patch: Partial<JobRecord>): void {
     const target = job.caseName ?? job.instanceName
     pushLocalNotification({
       title: job.state === 'succeeded' ? '生成完成' : '生成失败',
-      body: job.state === 'succeeded' ? `${target} · 点击查看终端` : `${target} · ${job.error?.message ?? '查看诊断了解原因'}`,
+      body:
+        job.state === 'succeeded'
+          ? `${target} · 点击查看终端`
+          : `${target} · ${job.error ? generationErrorText(job.error) : '查看诊断了解原因'}`,
       windowKind: 'studio',
       route: job.state === 'succeeded' ? undefined : '/diagnostics',
     })
@@ -478,6 +482,8 @@ function handleRunnerEvent(job: JobRecord, runningJob: RunningJob, payload: stri
         solutions: [{ label: '查看日志', action: 'open_log' }],
       }
     pushDiagnostic(toDiagnostic(rule, String(event['traceback'] ?? message), job.id))
+    // The card and 活动 word the failure by its code; the engine's own text stays readable under 查看详情.
+    appendLog(job, 'stderr', message, runningJob)
     update(job, {
       state: 'failed',
       error: { code, message },

@@ -565,8 +565,8 @@ export function StudioPage(): React.JSX.Element {
     },
   }
 
-  const run = async (canvasId: string, seed?: 'new' | 'same'): Promise<void> => {
-    const result = await generate(canvasId, seed)
+  const run = async (canvasId: string, seed?: 'new' | 'same', smaller?: boolean): Promise<void> => {
+    const result = await generate(canvasId, seed, { smaller })
     if (result.canvasId && result.canvasId !== canvasId) board.current?.reveal(result.canvasId)
   }
 
@@ -931,7 +931,7 @@ export function StudioPage(): React.JSX.Element {
           onImportPictures={(at) => void importPicturesAt(at)}
           onPicturesFromGallery={(at) => setGalleryTarget({ at })}
           onOpenViewer={(canvasId, index) => setViewer({ canvasId, index })}
-          onRerun={(canvasId, seed) => void run(canvasId, seed)}
+          onRerun={(canvasId, seed, smaller) => void run(canvasId, seed, smaller)}
           onCancel={(jobId) => {
             void cancelJob(jobId).catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
           }}

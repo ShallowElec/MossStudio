@@ -549,6 +549,27 @@ describe('engine jobs: live previews', () => {
   })
 })
 
+describe('engine jobs: failures', () => {
+  it("words an out-of-memory failure plainly and keeps the engine's own text in the job log", async () => {
+    const { pushLocalNotification } = await import('@main/services/desktopNotifications')
+    const job = await supervisor.startEngineJob(request('oom'))
+    const sink = sinks.get(job.id)!
+    sink.event({ type: 'ready' })
+    sink.event({ type: 'error', code: 'E_OOM', message: 'CUDA out of memory. Tried to allocate 2.00 GiB', fatal: true })
+    sink.done(1)
+
+    expect(updates(job.id).at(-1)).toMatchObject({
+      state: 'failed',
+      error: { code: 'E_OOM', message: 'CUDA out of memory. Tried to allocate 2.00 GiB' },
+    })
+    const logs = await supervisor.getJobLogs(job.id)
+    expect(logs.map((line) => line.text)).toContain('CUDA out of memory. Tried to allocate 2.00 GiB')
+    expect(vi.mocked(pushLocalNotification)).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '生成失败', body: expect.stringContaining('显存不够这个尺寸') }),
+    )
+  })
+})
+
 describe('engine jobs: cancel', () => {
   it('cancels a remote job over its own session and never touches the local engines', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })

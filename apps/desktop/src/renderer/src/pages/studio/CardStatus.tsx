@@ -89,8 +89,19 @@ export function ProgressStrip({ percent }: { percent?: number }): React.JSX.Elem
   )
 }
 
-/** What the picture area says while a run has not drawn anything yet, or ended without a picture. */
-export function StatusOverlay({ view, hasPicture }: { view: CardJobView; hasPicture: boolean }): React.JSX.Element | null {
+/**
+ * What the picture area says while a run has not drawn anything yet, or ended without a picture.
+ * `onDetails`: a failed run's 查看详情, where its footer has no room for it (a 画面's filmstrip).
+ */
+export function StatusOverlay({
+  view,
+  hasPicture,
+  onDetails,
+}: {
+  view: CardJobView
+  hasPicture: boolean
+  onDetails?: () => void
+}): React.JSX.Element | null {
   if (view.active) {
     if (hasPicture) return null
     const text = view.phase === 'queued' ? view.detail : view.detail.split(' · ')[0]
@@ -108,10 +119,24 @@ export function StatusOverlay({ view, hasPicture }: { view: CardJobView; hasPict
     return (
       <div
         data-card-status="failed"
-        role="alert"
-        className="absolute inset-0 flex items-center justify-center bg-danger-soft p-4 text-center text-caption text-danger"
+        className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-danger-soft p-4 text-center text-caption text-danger"
       >
-        <span className="line-clamp-5 [overflow-wrap:anywhere]">{view.error}</span>
+        <span role="alert" className="line-clamp-5 [overflow-wrap:anywhere]">
+          {view.error}
+        </span>
+        {onDetails ? (
+          <Button
+            tone="ghost"
+            size="xs"
+            data-board-ui
+            onClick={(event) => {
+              event.stopPropagation()
+              onDetails()
+            }}
+          >
+            查看详情
+          </Button>
+        ) : null}
       </div>
     )
   }

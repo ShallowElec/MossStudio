@@ -99,7 +99,8 @@ export interface BoardProps {
   /** A new 画面; at a board point when given (the right-click menu). */
   onAddCanvas: (at?: Point) => void
   onOpenViewer: (canvasId: string, index: number) => void
-  onRerun: (canvasId: string, seed: 'new' | 'same') => void
+  /** `smaller`: one size step down first (it ran out of GPU memory). */
+  onRerun: (canvasId: string, seed: 'new' | 'same', smaller?: boolean) => void
   onCancel: (jobId: string) => void
   onShowActivity: (jobId?: string) => void
   onCopy: (canvas: ProjectCanvas) => void
@@ -1107,7 +1108,7 @@ export function Board(props: BoardProps): React.JSX.Element {
               // Letting go of a moved card is not a click on its picture.
               if (!cardDrag.isDragTail()) props.onOpenViewer(shownRun.id, index)
             },
-            rerun: (seed: 'new' | 'same') => props.onRerun(canvas.id, seed),
+            rerun: (seed: 'new' | 'same', smaller?: boolean) => props.onRerun(canvas.id, seed, smaller),
             cancel: () => {
               if (jobId) props.onCancel(jobId)
             },

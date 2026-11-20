@@ -830,10 +830,54 @@ describe('studio board', () => {
     await emitJob(page, id, { stage: 'decode', progress: { stage: 'decode', current: 30, total: 30, percent: 100 } })
     await expect.poll(() => card.locator('[data-card-progress]').textContent()).toBe('还原图像')
 
-    await emitJob(page, id, { state: 'failed', preview: undefined, error: { code: 'E_OOM', message: '显存不够，换小一点的尺寸再试' } })
-    await expect.poll(() => card.getByRole('alert').textContent()).toBe('显存不够，换小一点的尺寸再试')
+    // A failure the app has no words of its own for shows its message, with 重试 (out of memory has its own test below).
+    await emitJob(page, id, { state: 'failed', preview: undefined, error: { code: 'E_MODEL', message: '模型文件不完整，请重新下载' } })
+    await expect.poll(() => card.getByRole('alert').textContent()).toBe('模型文件不完整，请重新下载')
     expect(await card.getByRole('button', { name: '重试 画面 1' }).isVisible()).toBe(true)
   })
+
+  for (const theme of ['light', 'dark'] as const) {
+    it(`out of GPU memory (${theme}): says so plainly, keeps the engine's words under 查看详情, and 改小一点再试 runs smaller`, async () => {
+      const page = await openBoard(app, { theme })
+      await page.locator('[data-studio-generate]').click()
+      await page.waitForFunction((channel) => window.__mock.callsTo(channel).length >= 1, ENGINE_JOBS)
+      const id = await page.evaluate(() => window.__mock.state.jobs[0]!.id)
+      const card = page.locator('article[data-canvas-card="canvas-1"]')
+      const raw = 'CUDA out of memory. Tried to allocate 2.00 GiB'
+      // Main keeps the engine's own words in the job log.
+      await page.evaluate(
+        ([jobId, text]) => {
+          window.__mock.state.jobLogs = { [jobId]: [{ jobId, seq: 1, at: new Date().toISOString(), stream: 'stderr', text }] }
+        },
+        [id, raw] as const,
+      )
+      await emitJob(page, id, { state: 'failed', preview: undefined, error: { code: 'E_OOM', message: raw } })
+      await expect.poll(() => card.getByRole('alert').textContent()).toBe('显存不够这个尺寸')
+      expect(await card.textContent()).not.toContain('CUDA')
+      // The same size would fail again: no 重试, a smaller picture instead.
+      expect(await card.getByRole('button', { name: '重试 画面 1' }).count()).toBe(0)
+      const smaller = card.getByRole('button', { name: '改小一点再试 画面 1' })
+      expect(await smaller.isVisible()).toBe(true)
+      await app.screenshot(`board-out-of-memory-${theme}`)
+
+      // 查看详情: 活动 says it plainly too, and the engine's own words are in the log.
+      await card.locator('[data-card-status="failed"]').getByRole('button', { name: '查看详情' }).click()
+      const row = page.locator(`[data-job-row="${id}"]`)
+      await expect.poll(() => row.innerText()).toContain('失败 · 显存不够这个尺寸')
+      await expect.poll(() => row.locator('[data-job-log]').textContent()).toContain(raw)
+      await app.screenshot(`activity-out-of-memory-${theme}`)
+      await page.getByRole('button', { name: '关闭活动' }).click()
+
+      await smaller.click()
+      await page.waitForFunction((channel) => window.__mock.callsTo(channel).length >= 2, ENGINE_JOBS)
+      const rerun = await page.evaluate((channel) => window.__mock.callsTo(channel)[1] as { width: number; height: number }, ENGINE_JOBS)
+      expect(rerun).toMatchObject({ width: 768, height: 768 })
+      // The 画面 itself is now that size, so the next run fits too.
+      await expect
+        .poll(() => page.evaluate(() => window.__mock.state.projects[0]!.canvases.find((item) => item.id === 'canvas-1')?.width))
+        .toBe(768)
+    })
+  }
 
   /** Bounding boxes of every wire chip on screen. */
   async function chipBoxes(page: Page): Promise<Array<{ x: number; y: number; width: number; height: number }>> {
