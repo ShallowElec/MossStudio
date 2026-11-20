@@ -1,8 +1,17 @@
 import { ArrowUp, ChevronDown, Copy, History, PenLine, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Events, Ipc } from '@shared/channels'
-import type { AgentMode, AiConversationInfo, AiMessage, AiProviderInfo, AiStreamEvent, AiToolCall } from '@shared/ai'
+import {
+  languageProvider,
+  type AgentMode,
+  type AiConversationInfo,
+  type AiMessage,
+  type AiProviderInfo,
+  type AiStreamEvent,
+  type AiToolCall,
+} from '@shared/ai'
 import { Notice } from '../../../components/common/Notice'
+import { ProviderDialog } from '../../../components/common/ProviderDialog'
 import { MenuGap, MenuItem, Popover } from '../../../components/common/Popover'
 import {
   Button,
@@ -21,6 +30,7 @@ import {
 } from '../../../components/ui'
 import { useUiAnimationEnabled } from '../../../components/motion'
 import { useShell } from '../../../lib/shell'
+import { useApp } from '../../../store'
 import { call, onEvent } from '../../../lib/api'
 import { applyPlan, applyStudioDescription, formatStudioContext, readStudioSnapshot } from '../../../lib/agentTools'
 import { relative } from '../../../lib/format'
@@ -28,7 +38,6 @@ import type { AgentCard, AgentCardAnswer } from '@shared/agent/cards'
 import { ChoiceCard } from './ChoiceCard'
 import { ConfirmCard } from './ConfirmCard'
 import { PlanCard } from './PlanCard'
-import { ProviderDialog } from './ProviderDialog'
 import { ToolTrace, type TraceEntry } from './ToolTrace'
 import { toolDetail } from './format'
 
@@ -115,6 +124,11 @@ export function Assistant(): React.JSX.Element {
   const animate = useUiAnimationEnabled()
   const [providers, setProviders] = useState<AiProviderInfo[]>([])
   const [providerId, setProviderId] = useState('')
+  // 设置 › 语言模型 › 助手和漫画 is where a new chat starts; picking another in the menu changes it there too.
+  const chosenId = useApp((state) => state.settings?.languageProviderId ?? null)
+  const saveSettings = useApp((state) => state.saveSettings)
+  const chosen = useRef(chosenId)
+  chosen.current = chosenId
   const [conversations, setConversations] = useState<AiConversationInfo[]>([])
   const [conversation, setConversation] = useState<AiConversationInfo | null>(null)
   const [mode, setMode] = useState<AgentMode>(readMode)
@@ -146,7 +160,9 @@ export function Assistant(): React.JSX.Element {
         call<AiConversationInfo[]>(Ipc.aiConversations),
       ])
       setProviders(nextProviders)
-      setProviderId((current) => (nextProviders.some((provider) => provider.id === current) ? current : nextProviders[0]?.id || ''))
+      setProviderId((current) =>
+        nextProviders.some((provider) => provider.id === current) ? current : (languageProvider(nextProviders, chosen.current)?.id ?? ''),
+      )
       setConversations(nextConversations)
     } catch {
       // Keep what is on screen.
@@ -155,7 +171,14 @@ export function Assistant(): React.JSX.Element {
 
   useEffect(() => {
     void refresh()
+    return onEvent(Events.aiProviders, () => void refresh())
   }, [])
+
+  const listed = useRef(providers)
+  listed.current = providers
+  useEffect(() => {
+    if (chosenId && listed.current.some((provider) => provider.id === chosenId)) setProviderId(chosenId)
+  }, [chosenId])
 
   // Reopen the conversation the user was in before this panel last unmounted.
   useEffect(() => {
@@ -482,6 +505,7 @@ export function Assistant(): React.JSX.Element {
                     selected={item.id === providerId}
                     onSelect={() => {
                       setProviderId(item.id)
+                      if (item.id !== chosenId) void saveSettings({ languageProviderId: item.id }).catch(() => undefined) // the pick still holds for this chat
                       close()
                     }}
                   >
@@ -762,7 +786,14 @@ export function Assistant(): React.JSX.Element {
         }}
       />
 
-      <ProviderDialog open={settingsOpen} providers={providers} busy={busy} onClose={() => setSettingsOpen(false)} onChanged={refresh} />
+      <ProviderDialog
+        open={settingsOpen}
+        providers={providers}
+        busy={busy}
+        description="助手通过你选择的语言模型服务工作，需要支持工具调用（function calling）。密钥只保存在这台电脑上。"
+        onClose={() => setSettingsOpen(false)}
+        onChanged={refresh}
+      />
 
       <Modal
         open={proposal !== null}

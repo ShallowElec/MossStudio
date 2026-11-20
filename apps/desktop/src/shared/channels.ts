@@ -310,6 +310,8 @@ export const Events = {
   terminalData: 'event:ssh-terminal-data',
   terminalExit: 'event:ssh-terminal-exit',
   aiStream: 'event:ai-stream',
+  /** AiProviderInfo[] after a language model is connected, edited or removed, wherever that happened. */
+  aiProviders: 'event:ai-providers',
   /** GbcParseProgress */
   gbcParse: 'event:gbc-parse',
   /** GbcSetupProgress */

@@ -1,13 +1,15 @@
 /**
- * 自动描述: one short Chinese sentence per picture from the 语言模型 the person connected for the
- * 助手. Pictures leave the computer only through this action, which the person starts.
+ * 自动描述: one short Chinese sentence per picture from the 语言模型 chosen for 助手和漫画 in
+ * 设置 › 语言模型. Pictures leave the computer only through this action, which the person starts.
  */
 import { readFile } from 'node:fs/promises'
 import { nativeImage } from 'electron'
 import type { TrainingCaptionResult, TrainingKind } from '@shared/training'
 import { errorCode } from '../../lib/codedError'
 import { readImageHeader } from '../imageHeaders'
-import { askAboutImage, currentProviderId, E_NO_IMAGE_INPUT } from '../ai'
+import { languageProvider } from '@shared/ai'
+import { askAboutImage, E_NO_IMAGE_INPUT, listProviders } from '../ai'
+import { getSettings } from '../settings'
 import { scanDataset, writeCaptions } from './dataset'
 import { getTrainingProject } from './store'
 
@@ -17,9 +19,9 @@ const CONCURRENCY = 3
 const MAX_SEND_BYTES = 3.5 * 1024 * 1024
 const SEND_SIDE = 1536
 
-export const NO_PROVIDER = '先在创作的「助手」里连接一个能看图的语言模型，再自动描述。'
-export const NO_IMAGE_INPUT = '「助手」里连接的语言模型看不了图片。换一个能看图的模型后再试。'
-export const ALL_FAILED = '描述没有写成。请确认「助手」里的语言模型能连上，稍后再试。'
+export const NO_PROVIDER = '还没有连接语言模型。连接一个能看图的，再自动写描述。'
+export const NO_IMAGE_INPUT = '「助手和漫画」用的语言模型看不了图片。在 设置 › 语言模型 里换一个能看图的，再试一次。'
+export const ALL_FAILED = '描述没有写成。请确认语言模型能连上，稍后再试。'
 
 const SYSTEM = '你为图像模型的训练图片写描述。只输出一句简短的中文描述，不加引号、编号或解释。'
 
@@ -64,7 +66,7 @@ async function pictureForSending(path: string): Promise<{ data: Uint8Array; mime
 
 export async function autoCaption(id: string, names?: string[]): Promise<TrainingCaptionResult> {
   const project = await getTrainingProject(id)
-  const providerId = currentProviderId()
+  const providerId = languageProvider(listProviders(), getSettings().languageProviderId)?.id
   if (!providerId) return { written: 0, failed: 0, error: NO_PROVIDER }
   const dataset = await scanDataset(id)
   const wanted = names ? new Set(names) : null

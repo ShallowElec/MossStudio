@@ -94,6 +94,17 @@ describe('automatic descriptions', () => {
     expect(await captions.autoCaption(project.id, ['a.png', 'b.png'])).toEqual({ written: 0, failed: 2, error: captions.ALL_FAILED })
   })
 
+  it('asks the model 设置 › 语言模型 chose for 助手和漫画, not the newest one', async () => {
+    const ai = await import('@main/services/ai')
+    const chosen = ai.saveProvider({ name: 'chosen', kind: 'openai', baseUrl: 'https://chosen.example.test', model: 'v', apiKey: 'k' })
+    ai.saveProvider({ name: 'newest', kind: 'openai', baseUrl: 'https://newest.example.test', model: 'v', apiKey: 'k' })
+    writeFileSync(join(root(), 'settings.json'), JSON.stringify({ languageProviderId: chosen.id }))
+    const { captions, project } = await setup(null)
+    reply = () => json({ choices: [{ message: { content: '坐在窗边' } }] })
+    expect((await captions.autoCaption(project.id, ['a.png'])).written).toBe(1)
+    expect(requests[0]!.url).toBe('https://chosen.example.test/chat/completions')
+  })
+
   it('asks for the content only, not the style, when learning a 画风', async () => {
     const { captions } = await setup(null, 'style')
     expect(captions.captionPrompt('style', '')).toContain('不要描述画风')

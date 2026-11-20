@@ -13,6 +13,8 @@ export interface AiProviderInfo {
   model: string
   temperature: number
   hasKey: boolean
+  /** The provider answered that this model takes no pictures; cleared when its model or address changes. */
+  noImageInput?: boolean
 }
 
 export interface AiProviderInput {
@@ -124,3 +126,28 @@ export const AI_PROVIDER_PRESETS: Array<{
   { kind: 'gemini', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash' },
   { kind: 'ollama', name: 'Ollama (local)', baseUrl: 'http://127.0.0.1:11434', model: 'llama3.1' },
 ]
+
+/** The kinds a connection for 看图 can be: KohakuGBC talks to the OpenAI-compatible and Anthropic APIs only. */
+export const PICTURE_KINDS: readonly AiProviderKind[] = ['openai', 'anthropic']
+
+/**
+ * Whether 看图 (解析, 拆成区域) can use a connection: one of `PICTURE_KINDS`
+ * with a key, unless its provider answered that the model takes no pictures.
+ */
+export function seesPictures(provider: Pick<AiProviderInfo, 'kind' | 'hasKey' | 'noImageInput'>): boolean {
+  return provider.hasKey && PICTURE_KINDS.includes(provider.kind) && !provider.noImageInput
+}
+
+/** The model for 助手和漫画 (the assistant, 漫画 storyboard, training captions): the chosen one, else the first connected. */
+export function languageProvider<T extends { id: string }>(providers: readonly T[], chosen: string | null | undefined): T | undefined {
+  return providers.find((provider) => provider.id === chosen) ?? providers[0]
+}
+
+/** The model for 看图: the chosen one while it can still see pictures, else the first that can. */
+export function visionProvider<T extends Pick<AiProviderInfo, 'id' | 'kind' | 'hasKey' | 'noImageInput'>>(
+  providers: readonly T[],
+  chosen: string | null | undefined,
+): T | undefined {
+  const usable = providers.filter(seesPictures)
+  return usable.find((provider) => provider.id === chosen) ?? usable[0]
+}

@@ -96,6 +96,8 @@ const cases = {
       'no per-GPU engines': { engineDeviceOverrides: {} },
       '拆成区域 settings': { gbcEnabled: true, gbcProviderId: 'provider-1', gbcVersionId: 'gbc-1', gbcDetector: 'sam3' },
       '拆成区域 defaults': { gbcProviderId: null, gbcVersionId: null },
+      '助手和漫画 model': { languageProviderId: 'provider-1' },
+      '助手和漫画 default': { languageProviderId: null },
     },
     rejects: {
       'unknown theme': { theme: 'blue' },
@@ -119,6 +121,7 @@ const cases = {
       'null engine auto-update': { engineAutoUpdate: null },
       'unknown GBC detector': { gbcDetector: 'yolo' },
       'empty GBC model': { gbcProviderId: '' },
+      'empty 助手和漫画 model': { languageProviderId: '' },
       'unknown engine package': { engineDeviceOverrides: { 'GPU-1': 'cu11' } },
       'engine package for no GPU': { engineDeviceOverrides: { '': 'vulkan' } },
       '65 per-GPU engines': { engineDeviceOverrides: Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`GPU-${i}`, 'vulkan'])) },

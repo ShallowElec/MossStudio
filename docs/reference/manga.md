@@ -14,7 +14,7 @@ One series is one `MangaSeries` (`shared/manga/model.ts`, zod schemas `mangaSeri
 
 | Part | Field | Holds |
 | --- | --- | --- |
-| Series | `title`, `logline`, `readingDirection` (`rtl` \| `ltr`), `providerId` | Name, synopsis, page order, the language model used for storyboard and memory |
+| Series | `title`, `logline`, `readingDirection` (`rtl` \| `ltr`), `providerId` | Name, synopsis, page order, the language model used for storyboard and memory (absent: 设置 › 语言模型 › 助手和漫画, resolved by main for `ai:complete`) |
 | 画风 | `style` | Description, negative description, LoRA, `monochrome` (成品为纯黑白), model (`modelBundleId`, absent = the one 创作 uses), steps and CFG |
 | 人物卡 | `characters[]` | `appearance` (never changes), `personality` (language model only), `triggerWords`, `references` (up to 8), `referenceStrength` (参考强度, 0.1 to 1, absent = 1), `outfits` with `defaultOutfitId`, `adapters` |
 | 章节 | `chapters[]` | `number`, `title`, `outline`, `summary` (剧情记忆), `pages` |
@@ -67,6 +67,8 @@ The geometry, styles, scoring and shot rules follow the 漫画分镜工作台 of
 - unknown characters are dropped, and balloons are placed from the reading side (`defaultBalloonPlaces`).
 
 Text longer than the document allows is cut, and extra characters or lines are dropped. Each change is reported as a warning (分镜有几处自动调整了) instead of failing. An answer that still would not save is refused, so a storyboard never breaks later saves.
+
+生成分镜 and 写入剧情记忆 stay clickable with no language model connected: the click opens the connect dialog titled 生成分镜要用语言模型 (or 写入剧情记忆要用语言模型), and the request goes out once a model is connected; 取消 sends nothing (`useModelGate`, see [architecture.md](/docs/reference/architecture.md#routes)). The 设定 tab's 语言模型 choice appears once a model is connected.
 
 `storyMemory` (`shared/manga/memory.ts`) is the story so far: earlier chapters' summaries in order, then all facts, within `MEMORY_BUDGET` characters. The oldest summaries are dropped first. 写入剧情记忆 sends `memoryRequest` and stores the answer. The chapter gets a new `summary`. `mergeFacts` replaces the facts that chapter set before and keeps the ones the author wrote. The 剧情记忆 tab shows the result and what the next chapter will be given.
 

@@ -3,6 +3,7 @@ import { join, relative } from 'node:path'
 import { compareEngineTags, parseEngineStamp } from '@shared/engineUpdate'
 import { hasGithubToken, saveGithubToken } from './githubCredentials'
 import { hasHfToken } from './hfCredentials'
+import { legacyAssistantProviderId } from './ai'
 import type { Settings } from '@shared/types'
 import { isInside, paths, setEngineRoot } from '../lib/paths'
 
@@ -68,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   trainingEnabled: false,
   gbcEnabled: false,
   gbcProviderId: null,
+  languageProviderId: null,
   gbcVersionId: null,
   gbcDetector: 'owlv2',
   gbcLanguage: 'auto',
@@ -132,6 +134,9 @@ export function getSettings(): Settings {
     // them visible for anyone who was using them before the switch existed.
     if (parsed.remoteHostsEnabled === undefined) cache.remoteHostsEnabled = hasConfiguredRemoteHosts()
     if (parsed.trainingEnabled === undefined) cache.trainingEnabled = hasTrainerInstall(parsed.trainerRoot ?? null)
+    // Before 设置 › 语言模型, the assistant, 漫画 and training captions used the provider of the
+    // most recent conversation, else the newest one. That choice becomes the stored one.
+    if (parsed.languageProviderId === undefined) cache.languageProviderId = legacyAssistantProviderId()
     migrateLegacyEngineSettings(cache, parsed as Record<string, unknown>)
     // MossInfer 2.0 (server protocol 2) removed the auto tier: load requires
     // reference | high | turbo. Map legacy configs to the recommended default.

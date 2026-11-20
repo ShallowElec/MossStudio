@@ -9,12 +9,13 @@ import {
 } from '@renderer/pages/settings/sections'
 
 describe('settings sections', () => {
-  it('lists the eight sections in order, 训练 after 功能', () => {
+  it('lists the nine sections in order, 语言模型 between 网络 and 功能, 训练 after 功能', () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
       'general',
       'devices',
       'storage',
       'network',
+      'llm',
       'features',
       'training',
       'updates',
@@ -33,6 +34,8 @@ describe('settings sections', () => {
     expect(sectionFromPath('/settings/Devices')).toBe('devices')
     expect(sectionFromPath('/settings/devices/extra')).toBe('devices')
     expect(sectionFromPath('/settings/training')).toBe('training')
+    expect(sectionFromPath('/settings/llm')).toBe('llm')
+    expect(sectionLabel('llm')).toBe('语言模型')
   })
 
   it('opens 通用 for bare, unknown and foreign paths', () => {

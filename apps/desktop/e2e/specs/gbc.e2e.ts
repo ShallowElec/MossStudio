@@ -13,7 +13,7 @@ interface Setup {
   settings?: Partial<Settings>
   /** GBC is installed and runs. */
   ready?: boolean
-  /** The 助手 has a model that can read pictures. */
+  /** A model that can see pictures is connected (else only Ollama). */
   provider?: boolean
   theme?: 'light' | 'dark'
 }
@@ -45,12 +45,10 @@ async function openBoard(app: E2eApp, setup: Setup = {}): Promise<Page> {
       window.__mock.state.projects = [
         projectFixture({ id: 'project-1', name: '小猫', canvases: [picture, layout], selectedCanvasId: 'canvas-1' }),
       ]
-      window.__mock.state.aiProviders = provider
-        ? [
-            aiProviderFixture({ id: 'local', kind: 'ollama', name: 'Ollama' }),
-            aiProviderFixture({ id: 'claude', kind: 'anthropic', name: 'Claude' }),
-          ]
-        : []
+      window.__mock.state.aiProviders = [
+        aiProviderFixture({ id: 'local', kind: 'ollama', name: 'Ollama' }),
+        ...(provider ? [aiProviderFixture({ id: 'claude', kind: 'anthropic', name: 'Claude' })] : []),
+      ]
       window.__mock.state.gbc.status = gbcStatusFixture(ready)
     },
     { picturePath: PICTURE, ready: setup.ready ?? true, provider: setup.provider ?? true },
@@ -158,12 +156,31 @@ describe('拆成区域', () => {
     await expect.poll(() => cardIds(page)).toEqual(['img-1', 'canvas-1'])
   })
 
-  it('says what is missing, and leads to 设置', async () => {
+  it('with no model that sees pictures, asks for one right there and then reads', async () => {
     const page = await openBoard(app, { provider: false })
     await pictureMenu(page)
     const entry = page.getByRole('menuitem', { name: /拆成区域/ })
-    expect(await entry.textContent()).toBe('拆成区域 先给助手加一个模型')
+    expect(await entry.textContent()).toBe('拆成区域')
+    await entry.click()
+    const dialog = page.getByRole('dialog', { name: '拆成区域要用语言模型' })
+    await dialog.waitFor()
+    // Cancelling leaves the board as it was.
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await expect.poll(() => dialog.count()).toBe(0)
+    expect(await app.calls('gbc:parse')).toEqual([])
+    expect(await cardIds(page)).toEqual(['img-1', 'canvas-1'])
 
+    await pictureMenu(page)
+    await page.getByRole('menuitem', { name: '拆成区域' }).click()
+    await dialog.getByRole('button', { name: 'Anthropic' }).click()
+    await dialog.getByLabel('API Key').fill('sk-test')
+    await dialog.getByRole('button', { name: '连接并拆成区域' }).click()
+    await expect.poll(() => app.calls('ai:provider-save').then((calls) => calls.length)).toBe(1)
+    await expect.poll(() => app.calls('gbc:parse').then((calls) => calls.length)).toBe(1)
+    await expect.poll(async () => (await cardIds(page)).length).toBe(3)
+  })
+
+  it('a missing install leads to 设置', async () => {
     const notInstalled = await openBoard(app, { ready: false })
     await pictureMenu(notInstalled)
     expect(await notInstalled.getByRole('menuitem', { name: /拆成区域/ }).textContent()).toBe('拆成区域 看图还没装好')
@@ -199,6 +216,24 @@ describe('解析', () => {
     await expect.poll(() => page.locator('[data-references-row]').count()).toBe(1)
   })
 
+  it('with no model that sees pictures, 解析 asks for one and then reads with it', async () => {
+    const page = await openBoard(app, { provider: false })
+    await page.locator('[data-gbc-toggle]').click()
+    const panel = page.locator('[data-gbc-panel]')
+    await panel.waitFor()
+    expect(await panel.getByLabel('看图的模型').count()).toBe(0)
+    await panel.getByLabel('从画板选择').selectOption('img-1')
+    await panel.locator('[data-gbc-run]').click()
+    const dialog = page.getByRole('dialog', { name: '解析要用语言模型' })
+    await dialog.waitFor()
+    expect(await dialog.getByLabel('接口类型').locator('option').allTextContents()).toEqual(['OpenAI 兼容', 'Anthropic'])
+    await dialog.getByRole('button', { name: 'OpenAI', exact: true }).click()
+    await dialog.getByLabel('API Key').fill('sk-test')
+    await dialog.getByRole('button', { name: '连接并解析' }).click()
+    await expect.poll(() => app.calls<{ providerId: string }>('gbc:job-start').then((calls) => calls.at(-1)?.providerId)).toBe('provider-2')
+    await expect.poll(() => panel.locator('#gbc-caption').inputValue()).toBe('午后的窗台，阳光照在一只睡着的橘猫身上')
+  })
+
   it('is not offered while 看图拆区域 is off', async () => {
     const page = await openBoard(app, { settings: { gbcEnabled: false } })
     expect(await page.locator('[data-gbc-toggle]').count()).toBe(0)
@@ -229,11 +264,8 @@ describe('设置 › 功能 › 看图拆区域', () => {
     await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ gbcEnabled: true })
     await page.getByRole('heading', { name: '看图拆区域' }).waitFor()
 
-    // Only models that can read pictures are offered.
-    const model = page.getByRole('combobox', { name: '看图的模型' })
-    await expect.poll(() => model.locator('option').allTextContents()).toEqual(['Claude · claude-sonnet', 'GPT · gpt-x'])
-    await model.selectOption('gpt')
-    await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ gbcProviderId: 'gpt' })
+    // The model is chosen in 设置 › 语言模型 › 看图, not here.
+    expect(await page.getByRole('combobox', { name: '看图的模型' }).count()).toBe(0)
 
     await page.getByRole('button', { name: '安装' }).waitFor()
     await app.screenshot('gbc-settings-light')
@@ -255,10 +287,10 @@ describe('设置 › 功能 › 看图拆区域', () => {
     await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ gbcDetector: 'sam3' })
   })
 
-  it('says to add a model first when the 助手 has none that reads pictures', async () => {
+  it('asks for no model here, even when none sees pictures', async () => {
     const page = await app.open({ route: '/settings/features', settings: { gbcEnabled: true }, theme: 'dark' })
-    await page.getByText('先在助手里添加一个 OpenAI 兼容或 Anthropic 的模型，并填好 API Key。').waitFor()
-    expect(await page.getByRole('combobox', { name: '看图的模型' }).count()).toBe(0)
+    await page.getByRole('heading', { name: '看图拆区域' }).waitFor()
+    expect(await page.getByText('看图的模型').count()).toBe(0)
     await app.screenshot('gbc-settings-dark')
   })
 })

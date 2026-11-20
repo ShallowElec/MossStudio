@@ -11,6 +11,7 @@ const SECTIONS = [
   ['devices', '设备与引擎'],
   ['storage', '存储'],
   ['network', '网络'],
+  ['llm', '语言模型'],
   ['features', '功能'],
   ['updates', '通知与更新'],
   ['about', '关于'],
@@ -173,5 +174,113 @@ describe('settings', () => {
     await page.evaluate(() => window.__mock.fail('settings:update', { code: 'E_WRITE', message: '设置文件无法写入' }))
     await page.getByRole('group', { name: '主题' }).getByRole('button', { name: '深色' }).click()
     await expect.poll(() => page.getByText(/设置文件无法写入/).isVisible()).toBe(true)
+  })
+})
+
+describe('设置 › 语言模型', () => {
+  const app = useApp()
+
+  /** Ollama (text only), Claude and GPT (both see pictures); GPT is the 助手和漫画 model an older version picked. */
+  async function openConnected(theme: 'light' | 'dark' = 'light'): Promise<Page> {
+    const page = await app.open({ route: '/settings/llm', defer: true, theme, settings: { languageProviderId: 'gpt' } })
+    await page.evaluate(() => {
+      const { aiProviderFixture } = window.__mock.fixtures
+      window.__mock.state.aiProviders = [
+        aiProviderFixture({ id: 'local', kind: 'ollama', name: 'Ollama', model: 'llava' }),
+        aiProviderFixture({ id: 'claude', kind: 'anthropic', name: 'Claude', model: 'claude-sonnet' }),
+        aiProviderFixture({ id: 'gpt', kind: 'openai', name: 'GPT', model: 'gpt-x' }),
+      ]
+    })
+    await app.start()
+    await page.getByRole('heading', { name: '谁来做' }).waitFor()
+    return page
+  }
+
+  const title = (page: Page, id: string) => page.locator(`[data-provider="${id}"]`)
+
+  it('connects the first model from nothing, and then asks who does what', async () => {
+    const page = await app.open({ route: '/settings/llm', theme: 'light' })
+    await page.getByText('还没有连接语言模型').waitFor()
+    expect(await page.getByRole('heading', { name: '谁来做' }).count()).toBe(0)
+    await app.screenshot('settings-llm-empty-light')
+
+    await page.getByRole('button', { name: '连接语言模型' }).click()
+    const dialog = page.getByRole('dialog', { name: '连接语言模型' })
+    await dialog.getByRole('button', { name: 'DeepSeek' }).click()
+    await dialog.getByLabel('API Key').fill('sk-test')
+    await dialog.getByRole('button', { name: '添加' }).click()
+    await expect.poll(() => dialog.count()).toBe(0)
+    expect((await app.calls<{ name: string; apiKey?: string }>('ai:provider-save')).at(-1)).toMatchObject({
+      name: 'DeepSeek',
+      model: 'deepseek-chat',
+      apiKey: 'sk-test',
+    })
+    await page.getByRole('heading', { name: '谁来做' }).waitFor()
+    expect(await page.getByRole('combobox', { name: '助手和漫画' }).locator('option').allTextContents()).toEqual([
+      'DeepSeek · deepseek-chat',
+    ])
+  })
+
+  it('lists each model with what it can do, and keeps the choice an existing user had', async () => {
+    const page = await openConnected()
+    expect(await title(page, 'claude').textContent()).toBe('Claude能看图')
+    expect(await title(page, 'gpt').textContent()).toBe('GPT能看图')
+    expect(await title(page, 'local').textContent()).toBe('Ollama')
+    expect(await page.getByText('gpt-x', { exact: true }).isVisible()).toBe(true)
+
+    const language = page.getByRole('combobox', { name: '助手和漫画' })
+    expect(await language.inputValue()).toBe('gpt')
+    expect(await language.locator('option').allTextContents()).toEqual(['Ollama · llava', 'Claude · claude-sonnet', 'GPT · gpt-x'])
+    await language.selectOption('local')
+    await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ languageProviderId: 'local' })
+
+    // Only models that can see pictures are offered for 看图; it starts on the first of them.
+    const vision = page.getByRole('combobox', { name: '看图' })
+    expect(await vision.inputValue()).toBe('claude')
+    expect(await vision.locator('option').allTextContents()).toEqual(['Claude · claude-sonnet', 'GPT · gpt-x'])
+    await vision.selectOption('gpt')
+    await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ gbcProviderId: 'gpt' })
+    await app.screenshot('settings-llm-light')
+  })
+
+  it('edits a model without showing or losing its key', async () => {
+    const page = await openConnected()
+    await page.getByRole('button', { name: '编辑 Claude' }).click()
+    const dialog = page.getByRole('dialog', { name: '编辑「Claude」' })
+    expect(await dialog.getByLabel('API Key').inputValue()).toBe('')
+    await dialog.getByLabel('模型').fill('claude-opus')
+    await dialog.getByRole('button', { name: '保存修改' }).click()
+    await expect
+      .poll(() => app.calls('ai:provider-save').then((calls) => calls.at(-1)))
+      .toMatchObject({ id: 'claude', model: 'claude-opus' })
+    expect((await app.calls<{ apiKey?: string }>('ai:provider-save')).at(-1)!.apiKey).toBeUndefined()
+    await expect.poll(() => page.getByText('claude-opus', { exact: true }).isVisible()).toBe(true)
+  })
+
+  it('removes a model only after asking', async () => {
+    const page = await openConnected('dark')
+    await app.screenshot('settings-llm-dark')
+    await page.getByRole('button', { name: '移除 Ollama' }).click()
+    const confirm = page.getByRole('dialog', { name: '移除「Ollama」？' })
+    await confirm.getByRole('button', { name: '取消' }).click()
+    expect(await app.calls('ai:provider-remove')).toEqual([])
+
+    await page.getByRole('button', { name: '移除 Ollama' }).click()
+    await confirm.getByRole('button', { name: '移除' }).click()
+    await expect.poll(() => app.calls('ai:provider-remove')).toEqual([{ id: 'local' }])
+    await expect.poll(() => page.getByRole('button', { name: '编辑 Ollama' }).count()).toBe(0)
+  })
+
+  it('offers to connect a model that sees pictures when none does', async () => {
+    const page = await app.open({ route: '/settings/llm', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.aiProviders = [window.__mock.fixtures.aiProviderFixture({ id: 'local', kind: 'ollama', name: 'Ollama' })]
+    })
+    await app.start()
+    await page.getByRole('button', { name: '连接能看图的模型' }).click()
+    const dialog = page.getByRole('dialog', { name: '连接语言模型' })
+    // Only the services that can read pictures for 解析 and 拆成区域.
+    expect(await dialog.getByLabel('接口类型').locator('option').allTextContents()).toEqual(['OpenAI 兼容', 'Anthropic'])
+    expect(await dialog.getByRole('button', { name: 'Ollama (local)' }).count()).toBe(0)
   })
 })

@@ -1,14 +1,14 @@
 import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { languageProvider } from '@shared/ai'
 import type { MangaSeries } from '@shared/manga/model'
-import { Notice } from '../../components/common/Notice'
 import { Button, ConfirmDialog, Field, Group, Input, Row, Section, Segmented, Select, Switch, Textarea } from '../../components/ui'
 import { useApp } from '../../store'
 import { QUALITY_PRESETS, qualityFor, samplingForBundle } from '../studio/defaults'
 import { installedBundles, resolveBundle } from '../studio/readiness'
 import { readPreferredBundle } from './preferences'
-import { AdapterEditor, useProviders } from './parts'
+import { useProviders } from '../../lib/useProviders'
+import { AdapterEditor } from './parts'
 import type { SeriesUpdate } from './useSeries'
 
 /** 设定: the series itself, the look every panel shares, and the language model the storyboard uses. */
@@ -21,9 +21,10 @@ export function SettingsTab({
   update: SeriesUpdate
   onDelete: () => void
 }): React.JSX.Element {
-  const navigate = useNavigate()
   const catalog = useApp((state) => state.catalog)
-  const { providers, loaded } = useProviders()
+  const settings = useApp((state) => state.settings)
+  const { providers } = useProviders()
+  const fallback = languageProvider(providers, settings?.languageProviderId)
   const [confirming, setConfirming] = useState(false)
   const bundles = catalog ? installedBundles(catalog) : []
   const style = series.style
@@ -114,31 +115,21 @@ export function SettingsTab({
         </div>
       </Section>
 
-      <Section title="语言模型" description="把大纲拆成分镜、记下剧情，都由这里选的语言模型完成。">
-        {loaded && !providers.length ? (
-          <Notice
-            tone="info"
-            action={
-              <Button size="xs" onClick={() => void navigate('/studio')}>
-                去连接
-              </Button>
-            }
-          >
-            还没有连接语言模型。打开创作页右上角的「助手」，在「连接设置」里添加一个。
-          </Notice>
-        ) : (
+      {/* With nothing connected, 生成分镜 asks for a model where it is clicked. */}
+      {fallback ? (
+        <Section title="语言模型" description="把大纲拆成分镜、记下剧情，都由这里选的语言模型完成。">
           <Field label="用哪个语言模型">
             <Select
               value={providers.some((item) => item.id === series.providerId) ? series.providerId : ''}
               onValueChange={(providerId) => update((current) => ({ ...current, providerId: providerId || undefined }))}
               options={[
-                { value: '', label: providers[0] ? `默认（${providers[0].name}）` : '默认' },
+                { value: '', label: `默认（${fallback.name}）` },
                 ...providers.map((provider) => ({ value: provider.id, label: `${provider.name} · ${provider.model}` })),
               ]}
             />
           </Field>
-        )}
-      </Section>
+        </Section>
+      ) : null}
 
       <Group>
         <Row title="删除这部漫画" description="人物卡、章节和参考图会一起删除，无法恢复。已经生成的图片仍保留在「作品」里。">

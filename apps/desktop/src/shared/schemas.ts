@@ -388,6 +388,7 @@ export const schemas = {
       trainingEnabled: z.boolean(),
       gbcEnabled: z.boolean(),
       gbcProviderId: z.string().min(1).max(120).nullable(),
+      languageProviderId: z.string().min(1).max(120).nullable(),
       gbcVersionId: z.string().min(1).max(160).nullable(),
       gbcDetector: z.enum(['owlv2', 'sam3']),
       gbcLanguage: z.enum(['auto', 'zh', 'en']),

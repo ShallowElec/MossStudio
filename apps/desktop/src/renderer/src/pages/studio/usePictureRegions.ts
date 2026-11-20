@@ -7,6 +7,7 @@ import { call, onEvent } from '../../lib/api'
 import { useGbcState } from '../../lib/gbc'
 import { useApp } from '../../store'
 import { useToast } from '../../components/ui'
+import { useModelGate } from '../../components/common/ProviderDialog'
 import { sectionPath } from '../settings/sections'
 import { removeCanvasFrom, type CanvasSettings } from './canvases'
 import type { ParseView } from './CardStatus'
@@ -23,7 +24,8 @@ interface ProjectAccess {
 /**
  * 拆成区域 on the board: a new 画面 beside the picture that fills with the
  * regions GBC finds. 停止, a failure, or the 画面 going away ends the run; an
- * untouched 画面 is taken away again.
+ * untouched 画面 is taken away again. With no model that can see pictures,
+ * choosing it asks for one first (`dialog`).
  */
 export function usePictureRegions(
   project: ProjectAccess,
@@ -34,12 +36,14 @@ export function usePictureRegions(
   parsing: Readonly<Record<string, ParseView>>
   parse: (sourceId: string) => void
   stop: (canvasId: string) => void
+  dialog: React.JSX.Element
 } {
   const settings = useApp((state) => state.settings)
   const enabled = Boolean(settings?.gbcEnabled)
   const gbc = useGbcState(enabled, settings?.gbcVersionId ?? null)
   const navigate = useNavigate()
   const toast = useToast()
+  const gate = useModelGate()
   const [parsing, setParsing] = useState<Record<string, ParseView>>({})
   const parsingRef = useRef(parsing)
   parsingRef.current = parsing
@@ -81,6 +85,10 @@ export function usePictureRegions(
       void navigate(sectionPath('features'))
       return
     }
+    void gate.require({ action: '拆成区域', vision: true }, () => parseNow(sourceId))
+  }
+
+  const parseNow = (sourceId: string): void => {
     const made = regionsCanvasFrom(project.canvasesRef.current, sourceId, { fallback: options.latestSettings() })
     if (!made) return
     const canvasId = made.created.id
@@ -115,5 +123,5 @@ export function usePictureRegions(
     if (view) void call(Ipc.gbcCancel, { runId: view.runId }).catch(() => undefined)
   }
 
-  return { blocker: enabled ? gbc.blocker : undefined, parsing, parse, stop }
+  return { blocker: enabled ? gbc.blocker : undefined, parsing, parse, stop, dialog: gate.dialog }
 }

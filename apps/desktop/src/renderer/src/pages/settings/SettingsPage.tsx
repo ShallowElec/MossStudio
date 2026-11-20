@@ -6,6 +6,7 @@ import { AboutSection } from './AboutSection'
 import { DevicesSection } from './DevicesSection'
 import { FeaturesSection } from './FeaturesSection'
 import { GeneralSection } from './GeneralSection'
+import { LanguageModelsSection } from './LanguageModelsSection'
 import { NetworkSection } from './NetworkSection'
 import { StorageSection } from './StorageSection'
 import { TrainingSection } from './TrainingSection'
@@ -17,6 +18,7 @@ const SECTION_COMPONENTS: Record<SettingsSectionId, () => React.JSX.Element> = {
   devices: DevicesSection,
   storage: StorageSection,
   network: NetworkSection,
+  llm: LanguageModelsSection,
   features: FeaturesSection,
   training: TrainingSection,
   updates: UpdatesSection,

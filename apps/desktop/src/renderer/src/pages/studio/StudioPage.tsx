@@ -1186,6 +1186,7 @@ export function StudioPage(): React.JSX.Element {
           )
         }}
       />
+      {regions.dialog}
     </div>
   )
 }

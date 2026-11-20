@@ -1,7 +1,7 @@
 ---
 status: current
 last-verified: 2026-11-08 (fec4fe3)
-code: apps/desktop/src/main/index.ts, apps/desktop/src/main/windows.ts, apps/desktop/src/main/ipc.ts, apps/desktop/src/main/lib/paths.ts, apps/desktop/src/main/install/, apps/desktop/src/main/update/, apps/desktop/src/preload/index.ts, apps/desktop/src/renderer/src/App.tsx, apps/desktop/src/renderer/src/components/shell/routes.ts, apps/desktop/src/renderer/src/pages/settings/sections.ts, apps/desktop/src/shared/channels.ts, apps/desktop/src/shared/agent/, apps/desktop/src/backend/index.ts, apps/desktop/src/main/services/backend.ts, apps/desktop/src/main/services/gbc.ts, apps/desktop/src/shared/gbc.ts
+code: apps/desktop/src/main/index.ts, apps/desktop/src/main/windows.ts, apps/desktop/src/main/ipc.ts, apps/desktop/src/main/lib/paths.ts, apps/desktop/src/main/install/, apps/desktop/src/main/update/, apps/desktop/src/preload/index.ts, apps/desktop/src/renderer/src/App.tsx, apps/desktop/src/renderer/src/components/shell/routes.ts, apps/desktop/src/renderer/src/pages/settings/sections.ts, apps/desktop/src/renderer/src/pages/settings/LanguageModelsSection.tsx, apps/desktop/src/renderer/src/components/common/ProviderDialog.tsx, apps/desktop/src/shared/channels.ts, apps/desktop/src/shared/agent/, apps/desktop/src/backend/index.ts, apps/desktop/src/main/services/backend.ts, apps/desktop/src/main/services/gbc.ts, apps/desktop/src/shared/gbc.ts
 ---
 
 # Architecture
@@ -61,7 +61,9 @@ The Rail (`components/shell/Rail.tsx`) lists `PRIMARY_ROUTES` from `components/s
 | `/settings/<section>` | 设置, `pages/Settings.tsx` | From the Rail's bottom button |
 | `/setup` | 准备开始创作, `pages/Setup.tsx`, full page without the Rail | While `Settings.onboardingState` is `pending` the app redirects here. 开始下载 installs the engine plan and the recommended model as one preparation (`lib/preparation.ts`); the Studio's 生成 button shows the same progress while it runs (`lib/usePreparation.ts`) |
 
-Settings sections (`pages/settings/sections.ts`): `general` 通用, `devices` 设备与引擎, `storage` 存储, `network` 网络, `features` 功能, `training` 训练 (listed only while `Settings.trainingEnabled` is on, `visibleSections`), `updates` 通知与更新, `about` 关于. Bare `/settings` and unknown names open 通用; older names (`engine`, `engines`, `remote`, `hosts`, `lan`, `alerts`, `notifications`, `diagnostics`, `appearance`) map to the current section (`ALIASES`).
+Settings sections (`pages/settings/sections.ts`): `general` 通用, `devices` 设备与引擎, `storage` 存储, `network` 网络, `llm` 语言模型, `features` 功能, `training` 训练 (listed only while `Settings.trainingEnabled` is on, `visibleSections`), `updates` 通知与更新, `about` 关于. Bare `/settings` and unknown names open 通用; older names (`engine`, `engines`, `remote`, `hosts`, `lan`, `alerts`, `notifications`, `diagnostics`, `appearance`) map to the current section (`ALIASES`).
+
+语言模型 (`pages/settings/LanguageModelsSection.tsx`) lists the connected language models (`ai:providers-list`) with 编辑 and 移除, and picks who does what: 助手和漫画 (`Settings.languageProviderId`: the assistant, 漫画 storyboard and memory, training captions) and 看图 (`Settings.gbcProviderId`: 解析 and 拆成区域, offered only the models `seesPictures` in `shared/ai.ts` accepts). A null choice, or one that was removed, falls back to the first suitable connection (`languageProvider`, `visionProvider`). Settings written before this section existed get `languageProviderId` from the provider of the most recent 助手 conversation, else the newest one, which is what those features used then (`getSettings`). Connecting, editing and every action that needs a model use one dialog, `components/common/ProviderDialog.tsx`; `useModelGate` there keeps such an action clickable with no suitable model and opens the dialog titled after the action, which runs it once connected. Main sends `event:ai-providers` after every save or removal, so the 助手, 设置 and the pages that ask for a model show the same list.
 
 Old routes redirect (`LEGACY_REDIRECTS`): `/gallery` → `/library`; `/engines`, `/devices`, `/instances` → `/settings/devices`; `/diagnostics` → `/studio` and opens the Activity panel's 问题 tab. The Activity panel (`components/shell/ActivityPanel.tsx`, state in `lib/shell.ts`) has the tabs `jobs`, `notifications` and `problems`. The Studio itself is described in [studio-node-board.md](/docs/reference/studio-node-board.md); the navigation decision is [ADR-0011](/docs/decisions/0011-rail-navigation-and-node-board.md).
 
@@ -142,7 +144,7 @@ The LAN page (`renderer/src/web/main.tsx` with `web/LayoutEditor.tsx`) is a sepa
 | `cache/` | `mossinfer/` (the engine's cache), `previews/` (live previews) | various |
 | `trainer/` | Trainer git mirror, versions and runtimes ([ADR-0002](/docs/decisions/0002-trainer-backend.md)) | trainer services |
 | `training/<id>/` | One folder per training: `project.json`, its pictures, caches and runs ([training.md](/docs/reference/training.md#2-data-on-disk)) | `services/training/` |
-| `ai/agent.json`, `gbc/` | Assistant providers and conversations; GBC runs | `services/ai.ts`, `gbc.ts` |
+| `ai/agent.json`, `gbc/` | Language model connections (keys included; the renderer only ever sees `hasKey`) and assistant conversations; GBC runs | `services/ai.ts`, `gbc.ts` |
 | `logs/`, `downloads/` | Logs and in-flight downloads | |
 | `git/`, `instances/`, `runtimes/`, `launch-queue.json`, `cases.json` | Runner era; archived on first start by `services/legacyMigration.ts` | leftovers |
 
@@ -160,12 +162,12 @@ Generation runs in MossInfer, a native engine installed per GPU: a long-lived `m
 
 ## GBC
 
-[KohakuGBC](https://github.com/KohakuBlueleaf/KohakuGBC) is an optional external tool behind the 看图拆区域 feature (`Settings.gbcEnabled`, off by default). It finds the objects in a picture and asks one of the 助手's models (an OpenAI-compatible or Anthropic API with a key) to describe each. The Studio uses it for 拆成区域 ([studio-node-board.md](/docs/reference/studio-node-board.md#6-runs-and-the-filmstrip)).
+[KohakuGBC](https://github.com/KohakuBlueleaf/KohakuGBC) is an optional external tool behind the 看图拆区域 feature (`Settings.gbcEnabled`, off by default). It finds the objects in a picture and asks the 看图 model from 设置 › 语言模型 (an OpenAI-compatible or Anthropic API with a key) to describe each. The Studio uses it for 拆成区域 ([studio-node-board.md](/docs/reference/studio-node-board.md#6-runs-and-the-filmstrip)).
 
 - `main/services/gbcGit.ts` keeps a bare mirror of KohakuGBC and checks out each version as a worktree under `gbc/versions/` (or `Settings.gbcRoot`). KohakuGBC is not on PyPI, so a version is always installed from its code.
 - `main/services/gbc.ts` installs a version's `.venv` (PyTorch from the trainer's index, then `pip install -e .[torch]`, reporting the download in `GbcSetupProgress.download`), checks it (`gbcStatus`, cached until an install or `fresh`), and runs `gbc run` on a generated machine config. The API key reaches the process only through its environment.
 - Every GBC process is owned there: 停止 (`gbc:cancel`) and quitting (`stopGbcProcesses` on `before-quit`) end it, and a run stops after 30 minutes.
-- Channels: `gbc:setup` (安装 in 设置 › 功能) with `event:gbc-setup`, and `gbc:parse` with `event:gbc-parse` progress; the version channels serve 设置 › 功能 › 高级. `shared/gbc.ts` turns a GBC graph into regions (`regionsFromGraph`) and says why it cannot run (`gbcBlocker`).
+- Channels: `gbc:setup` (安装 in 设置 › 功能) with `event:gbc-setup`, and `gbc:parse` with `event:gbc-parse` progress; the version channels serve 设置 › 功能 › 高级. `shared/gbc.ts` turns a GBC graph into regions (`regionsFromGraph`) and says why it cannot run (`gbcBlocker`: still checking, or not installed; a missing model is asked for at the click instead).
 - `gbc:run`, `gbc:list-images` and `gbc:thumbnails` (folders and sidecar files) have no UI.
 
 ## Leftovers

@@ -417,10 +417,34 @@ describe('complete', () => {
 
   it('uses the first provider when none is named, and says when there is none or no answer', async () => {
     const api = await load()
-    await expect(api.complete({ system: 's', prompt: 'p' })).rejects.toThrow('还没有连接语言模型，请先在助手里添加')
+    await expect(api.complete({ system: 's', prompt: 'p' })).rejects.toThrow('还没有连接语言模型。请在 设置 › 语言模型 里连接一个。')
     api.saveProvider({ name: 'local', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'm' })
     replies.push(() => Response.json({ message: { content: '  ' } }))
     await expect(api.complete({ system: 's', prompt: 'p' })).rejects.toThrow('语言模型没有回答，请再试一次')
     expect(requests[0]!.url).toBe('http://127.0.0.1:11434/api/chat')
+  })
+})
+
+describe('pictures', () => {
+  const picture = { system: 's', prompt: 'p', image: { data: new Uint8Array([1, 2, 3]), mime: 'image/png' } }
+
+  it('remembers a model that takes no pictures until its model or address changes', async () => {
+    const { api, id } = await provider('openai')
+    replies.push(() => Response.json({ error: { message: 'This model does not support image input' } }, { status: 400 }))
+    await expect(api.askAboutImage(id, picture)).rejects.toMatchObject({ code: api.E_NO_IMAGE_INPUT })
+    expect(api.listProviders()[0]).toMatchObject({ id, noImageInput: true })
+
+    // Saving it again unchanged (a new key) keeps what the provider said.
+    api.saveProvider({ id, name: 'openai', kind: 'openai', baseUrl: 'https://llm.example.test', model: 'm', apiKey: 'sk-new' })
+    expect(api.listProviders()[0]!.noImageInput).toBe(true)
+    api.saveProvider({ id, name: 'openai', kind: 'openai', baseUrl: 'https://llm.example.test', model: 'vision' })
+    expect(api.listProviders()[0]).not.toHaveProperty('noImageInput')
+  })
+
+  it('does not mark a model for a passing failure', async () => {
+    const { api, id } = await provider('openai')
+    replies.push(() => Response.json({ error: { message: 'rate limited' } }, { status: 429 }))
+    await expect(api.askAboutImage(id, picture)).rejects.toThrow('rate limited')
+    expect(api.listProviders()[0]).not.toHaveProperty('noImageInput')
   })
 })

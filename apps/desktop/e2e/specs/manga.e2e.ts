@@ -137,6 +137,46 @@ describe('manga', () => {
     expect(await page.getByLabel('第 1 话').inputValue()).toBe('阿秋在旧港口察觉有人跟踪。')
   })
 
+  it('asks for a language model right at 生成分镜, then storyboards with it', async () => {
+    const page = await openSeries(() => {
+      localStorage.removeItem('mossstudio.manga.open')
+      window.__mock.state.aiProviders = []
+    })
+    await page.evaluate(
+      (answers) => {
+        window.__mock.state.aiCompletions = answers
+      },
+      [STORYBOARD],
+    )
+    await page.getByRole('button', { name: '新建漫画' }).click()
+    await page.getByRole('heading', { name: '未命名漫画' }).waitFor()
+    // 设定 sends nobody elsewhere to connect one.
+    await page.getByRole('tab', { name: '设定' }).click()
+    await page.getByRole('heading', { name: '画风', exact: true }).waitFor()
+    expect(await page.getByText(/连接设置/).count()).toBe(0)
+
+    await page.getByRole('tab', { name: /章节/ }).click()
+    await page.getByLabel('大纲', { exact: true }).fill('阿秋深夜去旧港口调查，察觉有人跟踪。')
+    const storyboard = page.getByRole('button', { name: '生成分镜' })
+    await storyboard.click()
+    const dialog = page.getByRole('dialog', { name: '生成分镜要用语言模型' })
+    await dialog.waitFor()
+    await app.screenshot('manga-needs-model-light')
+    // Cancelling does nothing.
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await expect.poll(() => dialog.count()).toBe(0)
+    expect(await app.calls('ai:complete')).toEqual([])
+
+    await storyboard.click()
+    await dialog.getByRole('button', { name: 'DeepSeek' }).click()
+    await dialog.getByLabel('API Key').fill('sk-test')
+    await dialog.getByRole('button', { name: '连接并生成分镜' }).click()
+    await expect.poll(() => app.calls('ai:complete').then((calls) => calls.length)).toBe(1)
+    expect((await app.calls<{ name: string }>('ai:provider-save'))[0]).toMatchObject({ name: 'DeepSeek', apiKey: 'sk-test' })
+    expect((await app.calls<{ prompt: string }>('ai:complete'))[0]!.prompt).toContain('阿秋深夜去旧港口调查')
+    await expect.poll(() => panels(page).count()).toBe(2)
+  })
+
   it('draws a chapter two panels at a time, retries a failure, and exports after review', async () => {
     const page = await openSeries(() => {
       const { mangaSeriesFixture } = window.__mock.fixtures

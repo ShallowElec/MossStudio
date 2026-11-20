@@ -1,7 +1,7 @@
 import type { Settings } from '@shared/types'
 
 /** Settings sections, in the order they appear. The URL decides which one is open. */
-export type SettingsSectionId = 'general' | 'devices' | 'storage' | 'network' | 'features' | 'training' | 'updates' | 'about'
+export type SettingsSectionId = 'general' | 'devices' | 'storage' | 'network' | 'llm' | 'features' | 'training' | 'updates' | 'about'
 
 export interface SettingsSection {
   id: SettingsSectionId
@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'devices', label: '设备与引擎' },
   { id: 'storage', label: '存储' },
   { id: 'network', label: '网络' },
+  { id: 'llm', label: '语言模型' },
   { id: 'features', label: '功能' },
   { id: 'training', label: '训练', feature: 'trainingEnabled' },
   { id: 'updates', label: '通知与更新' },

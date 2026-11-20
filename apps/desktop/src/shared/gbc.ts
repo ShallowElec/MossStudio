@@ -222,22 +222,13 @@ export interface GbcJobSnapshot {
   warnings: string[]
 }
 
-/** The 助手 models GBC can read pictures with: an OpenAI-compatible or Anthropic API with a key. */
-export function gbcCanUse(provider: { kind: string; hasKey: boolean }): boolean {
-  return provider.hasKey && (provider.kind === 'openai' || provider.kind === 'anthropic')
-}
-
 /**
  * Why 拆成区域 cannot run yet, as the menu says it, or null when it can.
  * `status` is undefined while it is still being checked.
  */
-export function gbcBlocker(
-  status: Pick<GbcStatus, 'available'> | null | undefined,
-  providers: readonly { kind: string; hasKey: boolean }[],
-): string | null {
+export function gbcBlocker(status: Pick<GbcStatus, 'available'> | null | undefined): string | null {
   if (status === undefined) return PARSE_CHECKING
-  // A chosen model that is gone falls back to the first usable one, so only having none blocks.
-  if (!providers.some(gbcCanUse)) return '先给助手加一个模型'
+  // A missing model is not a blocker: the action asks for one where it is clicked.
   if (!status?.available) return '看图还没装好'
   return null
 }

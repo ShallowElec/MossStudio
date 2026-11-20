@@ -7,6 +7,8 @@ import { chapterProgress, dequeue, enqueue, updatePanel } from '@shared/manga/qu
 import { parseStoryboard, storyboardRequest } from '@shared/manga/storyboard'
 import { call } from '../../lib/api'
 import { Notice } from '../../components/common/Notice'
+import { useModelGate } from '../../components/common/ProviderDialog'
+import { useProviders } from '../../lib/useProviders'
 import {
   Button,
   ConfirmDialog,
@@ -24,7 +26,7 @@ import {
 import { PanelCard } from './PanelCard'
 import { approveAll, chapterLabel, exportBlockers, newChapter, newPage, nextChapterNumber, updateChapter, updatePage } from './logic'
 import { PageLayout } from './PageLayout'
-import { CountInput, askModel, useProviders } from './parts'
+import { CountInput, askModel } from './parts'
 import { renderPagePng, type PictureCache } from './render'
 import type { SeriesUpdate } from './useSeries'
 
@@ -89,6 +91,7 @@ function ChapterEditor({
 }): React.JSX.Element {
   const toast = useToast()
   const { providers } = useProviders()
+  const gate = useModelGate()
   const [pageCount, setPageCount] = useState(6)
   const [busy, setBusy] = useState<'storyboard' | 'memory' | 'export' | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
@@ -194,7 +197,9 @@ function ChapterEditor({
             tone={chapter.pages.length ? 'secondary' : 'primary'}
             disabled={!chapter.outline.trim() || busy !== null || drawing}
             title={drawing ? '先停止生成' : undefined}
-            onClick={() => (chapter.pages.length ? setConfirm('replace') : void storyboard())}
+            onClick={() =>
+              void gate.require({ action: '生成分镜' }, () => (chapter.pages.length ? setConfirm('replace') : void storyboard()))
+            }
           >
             <Sparkles className="size-4" strokeWidth={1.6} />{' '}
             {busy === 'storyboard' ? '正在拆分镜…' : chapter.pages.length ? '重新生成分镜' : '生成分镜'}
@@ -235,7 +240,7 @@ function ChapterEditor({
             <Button disabled={!progress.review} onClick={() => update((current) => approveAll(current, chapter.id))}>
               <CheckCheck className="size-4" strokeWidth={1.6} /> 全部通过
             </Button>
-            <Button disabled={busy !== null} onClick={() => void remember()}>
+            <Button disabled={busy !== null} onClick={() => void gate.require({ action: '写入剧情记忆' }, () => void remember())}>
               <Brain className="size-4" strokeWidth={1.6} /> {busy === 'memory' ? '正在记下…' : '写入剧情记忆'}
             </Button>
             <Button disabled={busy !== null || Boolean(blocker)} title={blocker ?? undefined} onClick={() => void exportChapter()}>
@@ -310,6 +315,7 @@ function ChapterEditor({
           onRemoved()
         }}
       />
+      {gate.dialog}
     </div>
   )
 }

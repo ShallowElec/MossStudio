@@ -24,7 +24,7 @@ import { combinationBundle } from '@shared/modelCombos'
 import { isModelFileName } from '@shared/modelImport'
 import { isSharedModelId } from '@shared/sharedModels'
 import { MANGA_SCHEMA_VERSION, seriesSummary, type MangaSeries, type MangaSeriesSave } from '@shared/manga/model'
-import type { AiChatInput, AiConversationInfo, AiMessage } from '@shared/ai'
+import type { AiChatInput, AiConversationInfo, AiMessage, AiProviderInfo, AiProviderInput } from '@shared/ai'
 import type { WebAccessInfo } from '@shared/backend'
 import type { EngineHello } from '@shared/engineProtocol'
 import type { UpdateBusyReason, UpdateRestartResult, UpdaterState } from '@shared/update'
@@ -936,6 +936,30 @@ function defaultHandlers(): Map<string, Handler> {
 
   // AI
   h.set(Ipc.aiProvidersList, (_, { state }) => state.aiProviders)
+  // Keys never come back: the list says only whether one is saved, as main's does.
+  h.set(Ipc.aiProviderSave, (payload, { state, emit }) => {
+    const input = p<AiProviderInput>(payload)
+    const id = input.id ?? `provider-${state.aiProviders.length + 1}`
+    const existing = state.aiProviders.find((item) => item.id === id)
+    const saved: AiProviderInfo = {
+      id,
+      name: input.name.trim(),
+      kind: input.kind,
+      baseUrl: input.baseUrl.replace(/\/$/, ''),
+      model: input.model.trim(),
+      temperature: input.temperature ?? 0.7,
+      hasKey: Boolean(input.apiKey || existing?.hasKey),
+    }
+    state.aiProviders = [saved, ...state.aiProviders.filter((item) => item.id !== id)]
+    emit(Events.aiProviders, state.aiProviders)
+    return saved
+  })
+  h.set(Ipc.aiProviderRemove, (payload, { state, emit }) => {
+    const { id } = p<{ id: string }>(payload)
+    state.aiProviders = state.aiProviders.filter((item) => item.id !== id)
+    emit(Events.aiProviders, state.aiProviders)
+    return true
+  })
   h.set(Ipc.aiConversations, (_, { state }) => state.conversations)
   h.set(Ipc.aiChat, (payload, { state }) => {
     const input = p<AiChatInput>(payload)

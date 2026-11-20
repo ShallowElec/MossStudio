@@ -1,7 +1,7 @@
 ---
 status: current
 last-verified: 2026-11-08 (fec4fe3)
-code: apps/desktop/src/renderer/src/pages/studio/assistant/, apps/desktop/src/renderer/src/lib/agent/, apps/desktop/src/renderer/src/lib/agentTools.ts, apps/desktop/src/shared/agent/, apps/desktop/src/shared/ai.ts, apps/desktop/src/main/services/ai.ts
+code: apps/desktop/src/renderer/src/pages/studio/assistant/, apps/desktop/src/renderer/src/components/common/ProviderDialog.tsx, apps/desktop/src/renderer/src/lib/agent/, apps/desktop/src/renderer/src/lib/agentTools.ts, apps/desktop/src/shared/agent/, apps/desktop/src/shared/ai.ts, apps/desktop/src/main/services/ai.ts
 ---
 
 # Studio assistant
@@ -12,11 +12,11 @@ Paths are relative to `apps/desktop/src/`; `assistant/` stands for `renderer/src
 
 ## 1. The panel
 
-The 助手 button in the title bar opens the right sidebar; the panel stays mounted while hidden so a running turn survives (`renderer/src/pages/studio/StudioPage.tsx`). Its one header row (`assistant/Assistant.tsx`): a 语言模型 menu listing the connected providers with 连接设置… last, a 自主 | 审批 switch, 历史对话 and 新对话. An empty chat shows three starters (润色描述, 拆成区域, 做一套分镜). A reply's actions appear on hover: 用作描述, 复制, 重新回答. Enter sends, Shift+Enter breaks a line.
+The 助手 button in the title bar opens the right sidebar; the panel stays mounted while hidden so a running turn survives (`renderer/src/pages/studio/StudioPage.tsx`). Its one header row (`assistant/Assistant.tsx`): a 语言模型 menu listing the connected providers with 连接设置… last (a new chat starts on 设置 › 语言模型 › 助手和漫画, and picking another here saves it there; a reopened conversation keeps its own), a 自主 | 审批 switch, 历史对话 and 新对话. An empty chat shows three starters (润色描述, 拆成区域, 做一套分镜). A reply's actions appear on hover: 用作描述, 复制, 重新回答. Enter sends, Shift+Enter breaks a line.
 
 ## 2. Providers
 
-连接设置 opens 连接语言模型 (`assistant/ProviderDialog.tsx`). The kinds are `AiProviderKind` in `shared/ai.ts`: `openai` (shown as OpenAI 兼容; also DeepSeek and Moonshot), `anthropic`, `gemini` and `ollama`; `AI_PROVIDER_PRESETS` fills name, address and model for each. Main (`main/services/ai.ts`) keeps providers and conversations in `ai/agent.json` under the data root and returns only `hasKey`; a key never reaches the renderer. The Ollama path (`ollamaChat`) sends no tools and returns no tool calls, so that assistant answers in text only.
+连接设置 opens 连接语言模型 (`renderer/src/components/common/ProviderDialog.tsx`), the same dialog and the same list as 设置 › 语言模型 and as every action that asks for a model where it is clicked ([architecture.md](/docs/reference/architecture.md#routes)). The kinds are `AiProviderKind` in `shared/ai.ts`: `openai` (shown as OpenAI 兼容; also DeepSeek and Moonshot), `anthropic`, `gemini` and `ollama`; `AI_PROVIDER_PRESETS` fills name, address and model for each. Main (`main/services/ai.ts`) keeps providers and conversations in `ai/agent.json` under the data root and returns only `hasKey`; a key never reaches the renderer. The Ollama path (`ollamaChat`) sends no tools and returns no tool calls, so that assistant answers in text only.
 
 ## 3. What the model sees
 

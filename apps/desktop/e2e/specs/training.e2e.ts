@@ -123,14 +123,31 @@ describe('training: a new training', () => {
     await expect.poll(() => page.locator('[data-recipe-fields]').isVisible()).toBe(true)
   })
 
+  it('with no language model, 自动写描述 asks for one right there and then writes', async () => {
+    const page = await app.open({ scenario: 'trainings', route: '/training/tp-aming' })
+    await page.getByRole('button', { name: '自动写描述' }).click()
+    const dialog = page.getByRole('dialog', { name: '自动写描述要用语言模型' })
+    await dialog.waitFor()
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await expect.poll(() => dialog.count()).toBe(0)
+    expect(await app.calls('training:caption-auto')).toEqual([])
+
+    await page.getByRole('button', { name: '自动写描述' }).click()
+    await dialog.getByRole('button', { name: 'OpenAI', exact: true }).click()
+    await dialog.getByLabel('API Key').fill('sk-test')
+    await dialog.getByRole('button', { name: '连接并自动写描述' }).click()
+    await expect.poll(() => app.calls('training:caption-auto').then((calls) => calls.length)).toBe(1)
+  })
+
   it('explains at the moment 自动写描述 cannot run, and where to fix it', async () => {
     const page = await app.open({ scenario: 'trainings', route: '/training/tp-aming', defer: true })
     await page.evaluate(() => {
-      window.__mock.state.training.captionError = '还没有能看图的语言模型'
+      window.__mock.state.aiProviders = [window.__mock.fixtures.aiProviderFixture({ id: 'text', name: 'DeepSeek' })]
+      window.__mock.state.training.captionError = '「助手和漫画」用的语言模型看不了图片。'
     })
     await app.start()
     await page.getByRole('button', { name: '自动写描述' }).click()
-    await expect.poll(() => page.locator('[data-caption-problem]').textContent()).toContain('还没有能看图的语言模型')
+    await expect.poll(() => page.locator('[data-caption-problem]').textContent()).toContain('「助手和漫画」用的语言模型看不了图片。')
     await expect.poll(() => page.getByRole('button', { name: '连接语言模型' }).isVisible()).toBe(true)
   })
 

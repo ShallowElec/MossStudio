@@ -86,6 +86,17 @@ async function seedManga(page: Page): Promise<void> {
   })
 }
 
+/** A text-only model and one that sees pictures. */
+async function seedProviders(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const { aiProviderFixture } = window.__mock.fixtures
+    window.__mock.state.aiProviders = [
+      aiProviderFixture({ id: 'local', kind: 'ollama', name: 'Ollama', model: 'llama3.1' }),
+      aiProviderFixture({ id: 'claude', kind: 'anthropic', name: 'Anthropic', model: 'claude-sonnet-4-5' }),
+    ]
+  })
+}
+
 async function clearManga(page: Page): Promise<void> {
   await page.evaluate(() => localStorage.removeItem('mossstudio.manga.open'))
 }
@@ -244,6 +255,16 @@ const STOPS: Stop[] = [
   },
   {
     page: 'manga',
+    state: 'needs-model',
+    open: { scenario: 'ready', route: '/manga' },
+    seed: seedManga,
+    prepare: async (page) => {
+      await page.getByRole('button', { name: '写入剧情记忆' }).click()
+      await page.getByRole('dialog', { name: '写入剧情记忆要用语言模型' }).waitFor()
+    },
+  },
+  {
+    page: 'manga',
     state: 'settings',
     open: { scenario: 'ready', route: '/manga' },
     seed: seedManga,
@@ -324,6 +345,8 @@ const STOPS: Stop[] = [
   { page: 'settings', state: 'devices-remote', open: { scenario: 'remoteHost', route: '/settings/devices', settings: ALL_FEATURES } },
   { page: 'settings', state: 'storage', open: { scenario: 'ready', route: '/settings/storage' } },
   { page: 'settings', state: 'network', open: { scenario: 'ready', route: '/settings/network' } },
+  { page: 'settings', state: 'llm-empty', open: { scenario: 'ready', route: '/settings/llm' } },
+  { page: 'settings', state: 'llm', open: { scenario: 'ready', route: '/settings/llm' }, seed: seedProviders },
   { page: 'settings', state: 'features', open: { scenario: 'ready', route: '/settings/features', settings: ALL_FEATURES } },
   { page: 'settings', state: 'updates', open: { scenario: 'updateAvailable', route: '/settings/updates' } },
   { page: 'settings', state: 'about', open: { scenario: 'ready', route: '/settings/about' } },

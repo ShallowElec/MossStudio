@@ -3,7 +3,6 @@ import {
   GBC_MAX_REGIONS,
   PARSE_CHECKING,
   gbcBlocker,
-  gbcCanUse,
   pictureFromGraph,
   regionsFromGraph,
   resolveGbcLanguage,
@@ -131,22 +130,11 @@ describe('regionsFromGraph', () => {
 })
 
 describe('gbcBlocker', () => {
-  const claude = { kind: 'anthropic', hasKey: true }
-
-  it('only an OpenAI-compatible or Anthropic model with a key can read pictures', () => {
-    expect(gbcCanUse(claude)).toBe(true)
-    expect(gbcCanUse({ kind: 'openai', hasKey: true })).toBe(true)
-    expect(gbcCanUse({ kind: 'openai', hasKey: false })).toBe(false)
-    expect(gbcCanUse({ kind: 'ollama', hasKey: true })).toBe(false)
-    expect(gbcCanUse({ kind: 'gemini', hasKey: true })).toBe(false)
-  })
-
-  it('says what is missing, in the order the person fixes it', () => {
-    expect(gbcBlocker(undefined, [])).toBe(PARSE_CHECKING)
-    expect(gbcBlocker({ available: true }, [{ kind: 'ollama', hasKey: true }])).toBe('先给助手加一个模型')
-    expect(gbcBlocker({ available: false }, [claude])).toBe('看图还没装好')
-    expect(gbcBlocker(null, [claude])).toBe('看图还没装好')
-    expect(gbcBlocker({ available: true }, [claude])).toBeNull()
+  it('blocks while checking and until the install works; a missing model is asked for at the click instead', () => {
+    expect(gbcBlocker(undefined)).toBe(PARSE_CHECKING)
+    expect(gbcBlocker({ available: false })).toBe('看图还没装好')
+    expect(gbcBlocker(null)).toBe('看图还没装好')
+    expect(gbcBlocker({ available: true })).toBeNull()
   })
 })
 

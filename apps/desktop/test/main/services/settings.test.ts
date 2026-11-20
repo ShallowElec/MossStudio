@@ -212,6 +212,52 @@ describe('getSettings', () => {
     expect(settings.trainingEnabled).toBe(false)
   })
 
+  it('keeps the language model an existing user had: the most recent conversation’s, else the newest connected', async () => {
+    const provider = (id: string) => ({
+      id,
+      name: id,
+      kind: 'openai',
+      baseUrl: 'https://llm.test',
+      model: 'm',
+      temperature: 0.7,
+      hasKey: true,
+      apiKey: 'k',
+    })
+    const conversation = (providerId: string, updatedAt: string) => ({
+      id: `c-${providerId}`,
+      title: 't',
+      providerId,
+      messages: [],
+      createdAt: updatedAt,
+      updatedAt,
+    })
+    mkdirSync(join(root(), 'ai'), { recursive: true })
+    writeFileSync(
+      join(root(), 'ai', 'agent.json'),
+      JSON.stringify({
+        providers: [provider('newest'), provider('older')],
+        conversations: [conversation('newest', '2026-11-01T00:00:00Z'), conversation('older', '2026-11-02T00:00:00Z')],
+      }),
+    )
+    writeSettings({ theme: 'dark' })
+    expect((await load()).getSettings().languageProviderId).toBe('older')
+
+    vi.resetModules()
+    writeFileSync(
+      join(root(), 'ai', 'agent.json'),
+      JSON.stringify({ providers: [provider('newest'), provider('older')], conversations: [] }),
+    )
+    expect((await load()).getSettings().languageProviderId).toBe('newest')
+  })
+
+  it('keeps a language model chosen in 设置, and has none before any is connected', async () => {
+    writeSettings({ languageProviderId: 'chosen' })
+    expect((await load()).getSettings().languageProviderId).toBe('chosen')
+    vi.resetModules()
+    writeSettings({ theme: 'dark' })
+    expect((await load()).getSettings().languageProviderId).toBeNull()
+  })
+
   it('applies engineRoot to the engine path resolver', async () => {
     writeSettings({ engineRoot: join(root(), 'custom-engine') })
     const { getSettings } = await load()

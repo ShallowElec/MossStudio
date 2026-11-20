@@ -34,10 +34,9 @@ const DETECTORS: Array<{ value: Settings['gbcDetector']; label: string }> = [
   { value: 'sam3', label: 'SAM 3（插画）' },
 ]
 
-/** 设置 › 功能 › 看图拆区域: which model reads the picture, and the KohakuGBC it runs on. */
+/** 设置 › 功能 › 看图拆区域: the KohakuGBC it runs on. The model that reads is chosen in 设置 › 语言模型. */
 export function GbcSettings(): React.JSX.Element {
   const settings = useApp((state) => state.settings)!
-  const save = useSaveSettings()
   const toast = useToast()
   const gbc = useGbcState(true, settings.gbcVersionId)
   const [setup, setSetup] = useState<GbcSetupProgress | null>(null)
@@ -61,31 +60,9 @@ export function GbcSettings(): React.JSX.Element {
     }
   }
 
-  const providerId = gbc.providers.some((provider) => provider.id === settings.gbcProviderId)
-    ? settings.gbcProviderId!
-    : (gbc.providers[0]?.id ?? '')
-
   return (
-    <Section title="看图拆区域" description="用 KohakuGBC 找出图里的物体，再请助手的模型描述每一个。">
+    <Section title="看图拆区域" description="用 KohakuGBC 找出图里的物体，再请看图的语言模型描述每一个。">
       <Group>
-        <Row
-          title="看图的模型"
-          description={
-            gbc.providers.length || gbc.status === undefined
-              ? undefined
-              : '先在助手里添加一个 OpenAI 兼容或 Anthropic 的模型，并填好 API Key。'
-          }
-        >
-          {gbc.providers.length ? (
-            <Select
-              aria-label="看图的模型"
-              className="w-[260px]"
-              value={providerId}
-              options={gbc.providers.map((provider) => ({ value: provider.id, label: `${provider.name} · ${provider.model}` }))}
-              onValueChange={(value) => void save({ gbcProviderId: value })}
-            />
-          ) : null}
-        </Row>
         <SetupRow
           state={gbc}
           setup={setup}

@@ -247,8 +247,10 @@ export interface Settings {
   trainingEnabled: boolean
   /** Optional feature: 拆成区域 with KohakuGBC. Off by default. */
   gbcEnabled: boolean
-  /** The 助手 model GBC reads pictures with; null = the first usable one. */
+  /** 设置 › 语言模型 › 看图: the model 解析 and 拆成区域 read pictures with; null = the first that can. */
   gbcProviderId: string | null
+  /** 设置 › 语言模型 › 助手和漫画: the model the assistant, 漫画 and training captions use; null = the first connected. */
+  languageProviderId: string | null
   /** The installed KohakuGBC version 拆成区域 runs; null = none installed yet. */
   gbcVersionId: string | null
   /** How GBC finds objects: OWLv2 for photos, SAM 3 for illustrations. */

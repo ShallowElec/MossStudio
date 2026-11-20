@@ -137,6 +137,25 @@ describe('拆成区域', () => {
     state.providers.pop()
   })
 
+  it('passes over a chosen model whose provider said it takes no pictures', async () => {
+    state.providers.push({
+      id: 'text',
+      name: 'Text',
+      kind: 'openai',
+      baseUrl: 'https://text.test/v1',
+      model: 'text-only',
+      temperature: 1,
+      hasKey: true,
+      noImageInput: true,
+    } as (typeof state.providers)[number])
+    state.settings = settingsFixture({ gbcEnabled: true, gbcProviderId: 'text' })
+    const { parseRegions } = await load()
+    await parseRegions('run-1', picture())
+    expect(state.configs[0]).not.toContain('text-only')
+    expect(state.configs[0]).toContain('"model": "claude-sonnet"')
+    state.providers.pop()
+  })
+
   it('removes the run folder once the graph is read', async () => {
     let folder = ''
     state.behaviour = async (args, options, onLine) => {
@@ -197,7 +216,7 @@ describe('拆成区域', () => {
     await expect(parseRegions('run-4', picture())).rejects.toThrow('超过 30 分钟')
     const providers = state.providers
     state.providers = providers.filter((provider) => provider.kind === 'ollama')
-    await expect(parseRegions('run-5', picture())).rejects.toThrow('先给助手加一个能用的模型')
+    await expect(parseRegions('run-5', picture())).rejects.toThrow('还没有能看图的语言模型。请在 设置 › 语言模型 里连接一个。')
     state.providers = providers
   })
 })

@@ -17,7 +17,7 @@ import type { ManagedHost } from '@shared/types'
 import { call } from '../../lib/api'
 import { Notice } from '../../components/common/Notice'
 import { Advanced, Button, FieldLabel, Input, Segmented, Spinner, useToast } from '../../components/ui'
-import { ProviderDialog } from '../studio/assistant/ProviderDialog'
+import { ProviderDialog, useModelGate } from '../../components/common/ProviderDialog'
 import {
   LENGTH_LABEL,
   advancedSummary,
@@ -81,6 +81,7 @@ export function Editor({
   const [captionError, setCaptionError] = useState<string | null>(null)
   const [providers, setProviders] = useState<AiProviderInfo[] | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const gate = useModelGate()
   const [starting, setStarting] = useState(false)
   const [problem, setProblem] = useState<string | null>(startProblem)
   const [dragging, setDragging] = useState(false)
@@ -362,7 +363,7 @@ export function Editor({
         onAddFolder={() => void addFolder()}
         onRemove={(name) => void remove(name)}
         onCaption={(name, caption) => void setCaption(name, caption)}
-        onAutoCaption={() => void autoCaption()}
+        onAutoCaption={() => void gate.require({ action: '自动写描述' }, () => void autoCaption())}
       />
       {dragging ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--scrim)]">
@@ -379,6 +380,7 @@ export function Editor({
           setCaptionError(null)
         }}
       />
+      {gate.dialog}
     </div>
   )
 }

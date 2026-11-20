@@ -3,8 +3,8 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { Events } from '@shared/channels'
+import { visionProvider } from '@shared/ai'
 import {
-  gbcCanUse,
   pictureFromGraph,
   regionsFromGraph,
   resolveGbcLanguage,
@@ -265,11 +265,12 @@ export function installGbc(): Promise<GbcStatus> {
   return setup
 }
 
-/** The 助手 model 设置 › 功能 chose, or the first one GBC can use. */
+const NO_VISION_MODEL = '还没有能看图的语言模型。请在 设置 › 语言模型 里连接一个。'
+
+/** The model 设置 › 语言模型 › 看图 chose, or the first one that can see pictures. */
 function readingProvider(settings: Settings): string {
-  const usable = listProviders().filter(gbcCanUse)
-  const chosen = usable.find((provider) => provider.id === settings.gbcProviderId) ?? usable[0]
-  if (!chosen) throw new Error('先给助手加一个能用的模型')
+  const chosen = visionProvider(listProviders(), settings.gbcProviderId)
+  if (!chosen) throw new Error(NO_VISION_MODEL)
   return chosen.id
 }
 
@@ -344,7 +345,7 @@ export async function runGbc(input: GbcRunInput, control: GbcRunControl = {}): P
   const folder = input.folder?.trim() ?? ''
   if (!selectedFiles.length && (!folder || !existsSync(folder))) throw new Error('GBC 图片目录/文件不存在')
   const provider = getProviderSecret(input.providerId)
-  if (!provider) throw new Error('先给助手加一个能用的模型')
+  if (!provider) throw new Error(NO_VISION_MODEL)
   if (!provider.apiKey) throw new Error('看图的模型还没有填 API Key')
   const gpu = (await run('nvidia-smi', ['-L'], { timeoutMs: 5000 })).code === 0
   const device = gpu ? 'cuda:0' : 'cpu'
@@ -740,7 +741,7 @@ async function runJob(jobId: string, files: string[], input: GbcJobInput, langua
  */
 export async function startGbcJob(input: GbcJobInput): Promise<{ jobId: string; total: number }> {
   const provider = getProviderSecret(input.providerId)
-  if (!provider) throw new Error('先给助手加一个能用的模型')
+  if (!provider) throw new Error(NO_VISION_MODEL)
   if (!provider.apiKey) throw new Error('看图的模型还没有填 API Key')
   const files = [...(input.files ?? [])].filter((path) => path.trim())
   if (!files.length) {

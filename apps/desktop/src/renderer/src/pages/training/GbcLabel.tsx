@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { visionProvider } from '@shared/ai'
 import { trainingCaption, type GbcJobPicture } from '@shared/gbc'
 import type { DatasetImage } from '@shared/training'
 import { Button, ConfirmDialog, Modal, Segmented, Spinner, Textarea, useToast } from '../../components/ui'
 import { Notice } from '../../components/common/Notice'
+import { useModelGate } from '../../components/common/ProviderDialog'
 import { cloverUrl } from '../../lib/clover'
 import { useGbcJob, useGbcState } from '../../lib/gbc'
 import { useApp } from '../../store'
@@ -26,6 +28,7 @@ export function GbcLabel({
   const enabled = Boolean(settings?.gbcEnabled)
   const gbc = useGbcState(enabled, settings?.gbcVersionId ?? null)
   const job = useGbcJob()
+  const gate = useModelGate()
   const [scope, setScope] = useState<'noCaption' | 'all'>('noCaption')
   const [confirming, setConfirming] = useState(false)
   const [queue, setQueue] = useState<GbcJobPicture[] | null>(null)
@@ -33,10 +36,7 @@ export function GbcLabel({
   const [draft, setDraft] = useState('')
   const [done, setDone] = useState({ written: 0, skipped: 0 })
 
-  const providerId = useMemo(() => {
-    const chosen = settings?.gbcProviderId
-    return chosen && gbc.providers.some((provider) => provider.id === chosen) ? chosen : (gbc.providers[0]?.id ?? '')
-  }, [gbc.providers, settings?.gbcProviderId])
+  const providerId = visionProvider(gbc.providers, settings?.gbcProviderId)?.id ?? ''
 
   const candidates = useMemo(() => images.filter((image) => (scope === 'all' ? true : !image.caption?.trim())), [images, scope])
 
@@ -63,16 +63,13 @@ export function GbcLabel({
   const image = current ? images.find((item) => item.path === current.path) : undefined
   const running = job.busy
 
-  function start(): void {
-    if (!providerId) {
-      toast.push('先给助手加一个能看图的模型', 'error')
-      return
-    }
+  function start(model = providerId): void {
     setConfirming(false)
+    if (!model) return
     void job
       .run({
         files: candidates.map((item) => item.path),
-        providerId,
+        providerId: model,
         detector: settings?.gbcDetector ?? 'owlv2',
         language: settings?.gbcLanguage ?? 'auto',
         preset: 'mid',
@@ -131,7 +128,11 @@ export function GbcLabel({
           ]}
         />
         <Button
-          onClick={() => (candidates.length > 10 ? setConfirming(true) : start())}
+          onClick={() =>
+            void gate.require({ action: '打标', vision: true }, (connected) =>
+              candidates.length > 10 ? setConfirming(true) : start(connected?.id),
+            )
+          }
           disabled={running || !candidates.length || Boolean(gbc.blocker)}
           title={gbc.blocker ?? undefined}
         >
@@ -152,8 +153,9 @@ export function GbcLabel({
         confirmLabel="开始打标"
         destructive={false}
         onClose={() => setConfirming(false)}
-        onConfirm={start}
+        onConfirm={() => start()}
       />
+      {gate.dialog}
 
       {job.job?.phase === 'failed' ? <Notice tone="danger">{job.job.error ?? '打标失败'}</Notice> : null}
       {job.job?.warnings.length ? <Notice tone="warn">{job.job.warnings[0]}</Notice> : null}

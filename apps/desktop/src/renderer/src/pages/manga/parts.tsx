@@ -153,19 +153,6 @@ export function PagePreview({
   )
 }
 
-/** The language models connected in the assistant (连接设置). */
-export function useProviders(): { providers: AiProviderInfo[]; loaded: boolean } {
-  const [providers, setProviders] = useState<AiProviderInfo[]>([])
-  const [loaded, setLoaded] = useState(false)
-  useEffect(() => {
-    call<AiProviderInfo[]>(Ipc.aiProvidersList)
-      .then(setProviders)
-      .catch(() => setProviders([]))
-      .finally(() => setLoaded(true))
-  }, [])
-  return { providers, loaded }
-}
-
 /** One storyboard or memory request to the series' language model. */
 export function askModel(series: Pick<MangaSeries, 'providerId'>, request: MemoryRequest, providers: AiProviderInfo[]): Promise<string> {
   const providerId = providers.some((item) => item.id === series.providerId) ? series.providerId : undefined

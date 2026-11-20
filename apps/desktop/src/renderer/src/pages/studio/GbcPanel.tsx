@@ -1,10 +1,12 @@
 import { ImagePlus, Square, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { visionProvider } from '@shared/ai'
 import { Events, Ipc } from '@shared/channels'
 import type { GbcLanguage, GbcPicture, GbcPreset, GbcProgram, GbcSetupProgress } from '@shared/gbc'
 import type { ProjectCanvas } from '@shared/types'
 import { Button, FieldLabel, Segmented, Select, Spinner, Textarea, useToast } from '../../components/ui'
 import { Notice } from '../../components/common/Notice'
+import { useModelGate } from '../../components/common/ProviderDialog'
 import { call, onEvent } from '../../lib/api'
 import { cloverUrl } from '../../lib/clover'
 import { useGbcJob, useGbcState } from '../../lib/gbc'
@@ -42,6 +44,7 @@ export function GbcPanel({
   const enabled = Boolean(settings?.gbcEnabled)
   const gbc = useGbcState(enabled, settings?.gbcVersionId ?? null)
   const job = useGbcJob()
+  const gate = useModelGate()
   const [source, setSource] = useState<Source | null>(null)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [providerId, setProviderId] = useState('')
@@ -62,14 +65,10 @@ export function GbcPanel({
     setLanguage(settings.gbcLanguage)
   }, [settings])
 
+  // Starts on 设置's 看图 model, and moves off one that was removed meanwhile.
   useEffect(() => {
-    if (!providerId && gbc.providers.length) {
-      const chosen =
-        settings?.gbcProviderId && gbc.providers.some((item) => item.id === settings.gbcProviderId)
-          ? settings.gbcProviderId
-          : gbc.providers[0]!.id
-      setProviderId(chosen)
-    }
+    if (gbc.providers.some((item) => item.id === providerId)) return
+    setProviderId(visionProvider(gbc.providers, settings?.gbcProviderId)?.id ?? '')
   }, [gbc.providers, providerId, settings?.gbcProviderId])
 
   useEffect(() => {
@@ -89,13 +88,13 @@ export function GbcPanel({
 
   const picture = job.job?.pictures[0]?.picture ?? null
   const running = job.busy
-  const canRun = Boolean(source) && Boolean(providerId) && !running && !gbc.blocker && gbc.status?.available !== false
+  const canRun = Boolean(source) && !running && !gbc.blocker && gbc.status?.available !== false
 
-  function start(fresh = false): void {
-    if (!source || !providerId) return
+  function start(fresh = false, model = providerId): void {
+    if (!source || !model) return
     setCaption('')
     void job
-      .run({ path: source.path, providerId, detector, language, preset, program, destination: 'studio', fresh })
+      .run({ path: source.path, providerId: model, detector, language, preset, program, destination: 'studio', fresh })
       .catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
   }
 
@@ -231,20 +230,18 @@ export function GbcPanel({
         </section>
 
         <section className="flex flex-col gap-2">
-          <FieldLabel htmlFor="gbc-provider">看图的模型</FieldLabel>
-          <Select
-            id="gbc-provider"
-            value={providerId}
-            onChange={(event) => setProviderId(event.target.value)}
-            disabled={!gbc.providers.length}
-          >
-            {gbc.providers.length ? null : <option value="">先在 助手 里加一个模型</option>}
-            {gbc.providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}
-              </option>
-            ))}
-          </Select>
+          {gbc.providers.length ? (
+            <>
+              <FieldLabel htmlFor="gbc-provider">看图的模型</FieldLabel>
+              <Select id="gbc-provider" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
+                {gbc.providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </option>
+                ))}
+              </Select>
+            </>
+          ) : null}
           <div className="flex gap-2">
             <Select aria-label="找物体的方式" value={detector} onChange={(event) => setDetector(event.target.value as 'owlv2' | 'sam3')}>
               <option value="owlv2">OWLv2</option>
@@ -287,7 +284,13 @@ export function GbcPanel({
               </Button>
             </>
           ) : (
-            <Button tone="primary" size="sm" data-gbc-run disabled={!canRun} onClick={() => start()}>
+            <Button
+              tone="primary"
+              size="sm"
+              data-gbc-run
+              disabled={!canRun}
+              onClick={() => void gate.require({ action: '解析', vision: true }, (connected) => start(false, connected?.id))}
+            >
               解析
             </Button>
           )}
@@ -353,6 +356,7 @@ export function GbcPanel({
           })
         }}
       />
+      {gate.dialog}
     </div>
   )
 }

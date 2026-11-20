@@ -6,7 +6,7 @@ import { Events, Ipc } from '@shared/channels'
 import { schemas } from '@shared/schemas'
 import { trainingSchemas } from '@shared/training'
 import { resolveToolset, toolDefinitions } from '@shared/agent/registry'
-import type { AgentMode, AiToolCall, AiToolResult } from '@shared/ai'
+import { languageProvider, type AgentMode, type AiToolCall, type AiToolResult } from '@shared/ai'
 import type { IpcResult, Settings } from '@shared/types'
 import { emit } from './lib/events'
 import { ensureDirs, paths } from './lib/paths'
@@ -260,10 +260,15 @@ export function registerIpc(): void {
 
   handle(Ipc.aiProvidersList, null, () => listProviders())
 
-  handle(Ipc.aiProviderSave, schemas.aiProviderSave, (input) => saveProvider(input))
+  handle(Ipc.aiProviderSave, schemas.aiProviderSave, (input) => {
+    const saved = saveProvider(input)
+    emit(Events.aiProviders, listProviders())
+    return saved
+  })
 
   handle(Ipc.aiProviderRemove, schemas.projectId, ({ id }) => {
     removeProvider(id)
+    emit(Events.aiProviders, listProviders())
     return true
   })
 
@@ -276,7 +281,10 @@ export function registerIpc(): void {
 
   handle(Ipc.aiConversationRename, schemas.aiConversationTitle, ({ id, title }) => renameConversation(id, title))
 
-  handle(Ipc.aiComplete, schemas.aiComplete, (input) => complete(input))
+  // A request that names no model (a 漫画 series that never picked one) goes to 设置's 助手和漫画 model.
+  handle(Ipc.aiComplete, schemas.aiComplete, (input) =>
+    complete({ ...input, providerId: input.providerId ?? languageProvider(listProviders(), getSettings().languageProviderId)?.id }),
+  )
 
   handle(Ipc.aiToolResult, schemas.aiToolResult, ({ callId, result }) => {
     pendingToolCalls.get(callId)?.(result)
