@@ -214,13 +214,51 @@ describe('plain API keys in agent.json (from before encryption)', () => {
     expect(ai.getProviderSecret('provider-a')?.apiKey).toBe('sk-plain-a')
   })
 
-  it('ask for the key again when the keyring can no longer decrypt it', async () => {
+  it('say the keyring may be locked when it cannot decrypt a key, and use a plain copy if there is one', async () => {
+    writeLegacyAgent()
     const ai = await load()
     const saved = ai.saveProvider(input('sk-lost'))
+    ai.saveProvider({ ...input('sk-encrypted-a'), id: 'provider-a' })
+    // An older version, after a rollback, wrote a plain key again next to the encrypted one.
+    const file = JSON.parse(agent()) as { providers: Array<{ id: string; apiKey?: string }> }
+    file.providers.find((provider) => provider.id === 'provider-a')!.apiKey = 'sk-plain-a'
+    writeFileSync(agentFile(), JSON.stringify(file))
     vi.spyOn(safeStorage, 'decryptString').mockImplementation(() => {
-      throw new Error('keyring reset')
+      throw new Error('keyring locked')
     })
-    expect(() => ai.getProviderSecret(saved.id)).toThrow('请在 设置 › 语言模型 里重新填写')
+    expect(() => ai.getProviderSecret(saved.id)).toThrow('系统钥匙串可能还没解锁')
+    expect(ai.getProviderSecret('provider-a')?.apiKey).toBe('sk-plain-a')
+  })
+
+  it('drop temp files a killed write left behind, which may hold plain keys', async () => {
+    writeLegacyAgent()
+    const leftover = join(root(), 'ai', '.agent.json.1234.abcd.tmp')
+    writeFileSync(leftover, readFileSync(agentFile()))
+    ;(await load()).migratePlainApiKeys()
+    expect(readdirSync(join(root(), 'ai'))).toEqual(['agent.json'])
+    expect(everyFile()).not.toContain('sk-plain')
+  })
+})
+
+describe('an unreadable ai-credentials.json', () => {
+  it('is moved aside, not silently overwritten, when a key is saved', async () => {
+    writeFileSync(credentialsFile(), '{"provider-old": "trunc')
+    const ai = await load()
+    const saved = ai.saveProvider(input('sk-after'))
+    expect(ai.getProviderSecret(saved.id)?.apiKey).toBe('sk-after')
+    const aside = readdirSync(root()).filter((name) => name.startsWith('ai-credentials.json.unreadable-'))
+    expect(aside).toHaveLength(1)
+    expect(readFileSync(join(root(), aside[0]!), 'utf8')).toBe('{"provider-old": "trunc')
+  })
+
+  it('stops a save when it cannot be read at all, leaving it where it is', async () => {
+    // A path that exists but cannot be read as a file, like one another program holds locked.
+    mkdirSync(credentialsFile())
+    const ai = await load()
+    expect(() => ai.saveProvider(input('sk-blocked'))).toThrow(/EISDIR/)
+    expect(statSync(credentialsFile()).isDirectory()).toBe(true)
+    expect(readdirSync(root()).some((name) => name.includes('unreadable'))).toBe(false)
+    expect(ai.listProviders()).toEqual([])
   })
 })
 
@@ -249,6 +287,15 @@ describe('API keys never leave the main process', () => {
     returned.push(models.connectProvider({ ...input(''), id: 'provider-a', name: 'A again' }))
     returned.push(ai.listProviders(), settings.getSettings())
     await expect(models.completeWithDefault({ providerId: 'provider-a', system: 's', prompt: 'p' })).rejects.toThrow('invalid request')
+    // The 助手 streams to the window that asked (event.sender), not through onEmit.
+    const streamed: unknown[] = []
+    await expect(
+      ai.chat(
+        { providerId: 'provider-b', message: 'hi' },
+        { emit: (event) => streamed.push(event), runTool: async () => ({ ok: true, content: '' }), tools: [] },
+      ),
+    ).rejects.toThrow()
+    emitted.push(streamed)
     models.disconnectProvider('provider-b')
     const report = diagnosticsReport({
       info: null,

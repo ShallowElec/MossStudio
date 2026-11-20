@@ -1515,13 +1515,21 @@ exit 0
     }
 
     if (scenario === 'ai-provider') {
-      const saved = saveProvider({
-        name: 'Scenario',
-        kind: 'openai',
-        baseUrl: 'https://example.com/v1',
-        model: 'test-model',
-        apiKey: 'secret-key',
-      })
+      let saved
+      try {
+        saved = saveProvider({
+          name: 'Scenario',
+          kind: 'openai',
+          baseUrl: 'https://example.com/v1',
+          model: 'test-model',
+          apiKey: 'secret-key',
+        })
+      } catch (error) {
+        // Without an OS keyring (Linux basic_text) a key cannot be saved: fail instead of hanging.
+        console.error('[scenario] ai-provider', error instanceof Error ? error.message : error)
+        app.exit(1)
+        return
+      }
       const listed = listProviders().find((provider) => provider.id === saved.id)
       removeProvider(saved.id)
       const after = listProviders().some((provider) => provider.id === saved.id)

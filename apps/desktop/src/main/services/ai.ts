@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type {
   AgentMode,
   AiChatInput,
@@ -74,8 +74,10 @@ function withKey(provider: StoredProvider): KeyedProvider {
   try {
     stored = getAiKey(provider.id)
   } catch {
-    // The system keyring cannot decrypt it (reset or replaced): a plain copy still works, else ask again.
-    if (!provider.apiKey) throw new Error('读不出保存的 API Key，请在 设置 › 语言模型 里重新填写。')
+    // The keyring is locked, unavailable in this session, or was reset: a plain copy still works.
+    if (!provider.apiKey) {
+      throw new Error('读不出保存的 API Key：系统钥匙串可能还没解锁。解锁后再试；钥匙串重置过的话，请在 设置 › 语言模型 里重新填写。')
+    }
   }
   return { ...provider, apiKey: stored ?? provider.apiKey ?? '' }
 }
@@ -144,6 +146,11 @@ export function removeProvider(id: string): void {
  * the move. Without secure storage they stay in agent.json and keep working (withKey).
  */
 export function migratePlainApiKeys(): void {
+  // A temp file left by a write that was killed before its rename is never the only copy, and
+  // may hold plain keys.
+  const folder = dirname(file())
+  const leftovers = existsSync(folder) ? readdirSync(folder).filter((name) => /^\.agent\.json\..*\.tmp$/.test(name)) : []
+  for (const name of leftovers) rmSync(join(folder, name), { force: true })
   const store = load()
   const plain = store.providers.filter((provider) => typeof provider.apiKey === 'string')
   if (!plain.length) return

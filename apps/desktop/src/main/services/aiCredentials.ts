@@ -1,4 +1,5 @@
 import { safeStorage } from 'electron'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import { readJsonObject, writeJsonAtomic } from '../install/record'
 import { paths } from '../lib/paths'
 
@@ -19,11 +20,27 @@ export function getAiKey(id: string): string | undefined {
 }
 
 /**
+ * The saved keys, for a write that replaces the file. Unlike `load`, only a missing file reads
+ * as empty: a read error throws, and an unparseable file is moved aside, so a save never
+ * silently drops the other providers' keys.
+ */
+function loadForWrite(): Record<string, string> {
+  const file = paths.aiCredentials()
+  if (!existsSync(file)) return {}
+  const credentials = readJsonObject(file)
+  if (credentials) return credentials as Record<string, string>
+  readFileSync(file) // rethrows a read error (a lock, no access) rather than treating it as corrupt
+  renameSync(file, `${file}.unreadable-${Date.now()}`)
+  console.warn('[ai] ai-credentials.json could not be parsed; moved aside')
+  return {}
+}
+
+/**
  * Save or (with null) remove keys in one write. fsync'd: the key migration drops the plain
  * copies from agent.json only after this returns, so it must be on disk first.
  */
 export function saveAiKeys(keys: Record<string, string | null>): void {
-  const credentials = load()
+  const credentials = loadForWrite()
   for (const [id, key] of Object.entries(keys)) {
     if (!key) {
       delete credentials[id]
