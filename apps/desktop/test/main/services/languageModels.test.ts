@@ -6,8 +6,10 @@ import { useTempDataRoot } from '@test/helpers/tempDir'
 const root = useTempDataRoot()
 const requests: string[] = []
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules()
+  // A real keyring, as on a desktop (the mock defaults to plain text on Linux), so keys can be saved.
+  vi.spyOn((await import('electron')).safeStorage, 'getSelectedStorageBackend').mockReturnValue('gnome_libsecret')
   requests.length = 0
   vi.stubGlobal(
     'fetch',

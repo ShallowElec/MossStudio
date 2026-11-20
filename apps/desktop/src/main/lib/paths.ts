@@ -65,6 +65,8 @@ export const paths = {
   root,
   engineRoot,
   settings: () => join(root(), 'settings.json'),
+  /** Language-model API keys by provider id, encrypted (services/aiCredentials.ts). */
+  aiCredentials: () => join(root(), 'ai-credentials.json'),
   announcements: () => join(root(), 'announcements.json'),
   git: () => join(root(), 'git'),
   mirror: () => join(root(), 'git', 'moss-image.git'),

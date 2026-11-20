@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
   AgentMode,
@@ -18,11 +18,19 @@ import type {
 import { agentCardSchema, makeCard, planStepSchema, type AgentCard, type AgentCardAnswer, type PlanStep } from '@shared/agent/cards'
 import { MODE_RULES, TOOL_RULES } from '@shared/agent/registry'
 import { Events } from '@shared/channels'
+import { writeJsonAtomic } from '../install/record'
 import { paths } from '../lib/paths'
 import { codedError } from '../lib/codedError'
 import { emit } from '../lib/events'
+import { getAiKey, hasAiKey, saveAiKeys } from './aiCredentials'
 
+/** As agent.json holds it. `apiKey` is a plain key from before encryption that could not be moved yet. */
 interface StoredProvider extends AiProviderInfo {
+  apiKey?: string
+}
+
+/** A provider with its key read from the encrypted store, for one request. Never stored or returned to a window. */
+interface KeyedProvider extends AiProviderInfo {
   apiKey: string
 }
 
@@ -57,24 +65,39 @@ function load(): Store {
 }
 
 function save(store: Store): void {
-  mkdirSync(join(paths.root(), 'ai'), { recursive: true })
-  writeFileSync(file(), JSON.stringify(store, null, 2), 'utf8')
+  writeJsonAtomic(file(), store)
+}
+
+/** The provider with its API key: the encrypted one, else a plain one from before encryption. */
+function withKey(provider: StoredProvider): KeyedProvider {
+  let stored: string | undefined
+  try {
+    stored = getAiKey(provider.id)
+  } catch {
+    // The system keyring cannot decrypt it (reset or replaced): a plain copy still works, else ask again.
+    if (!provider.apiKey) throw new Error('读不出保存的 API Key，请在 设置 › 语言模型 里重新填写。')
+  }
+  return { ...provider, apiKey: stored ?? provider.apiKey ?? '' }
 }
 
 export function getProviderSecret(id: string): { kind: string; baseUrl: string; model: string; apiKey: string } | null {
   const provider = load().providers.find((item) => item.id === id)
-  return provider ? { kind: provider.kind, baseUrl: provider.baseUrl, model: provider.model, apiKey: provider.apiKey } : null
+  return provider ? { kind: provider.kind, baseUrl: provider.baseUrl, model: provider.model, apiKey: withKey(provider).apiKey } : null
 }
 
 function publicProvider(provider: StoredProvider): AiProviderInfo {
-  const { apiKey: _apiKey, ...rest } = provider
-  return { ...rest, hasKey: Boolean(provider.apiKey) }
+  const { apiKey: plain, ...rest } = provider
+  return { ...rest, hasKey: hasAiKey(provider.id) || Boolean(plain) }
 }
 
 export function listProviders(): AiProviderInfo[] {
   return load().providers.map(publicProvider)
 }
 
+/**
+ * Connect or edit a provider. A typed key goes to the encrypted store before agent.json is
+ * written, so the provider never shows up without it; an empty one keeps the saved key.
+ */
 export function saveProvider(input: AiProviderInput): AiProviderInfo {
   const store = load()
   const id = input.id || `provider-${randomUUID().slice(0, 8)}`
@@ -85,6 +108,10 @@ export function saveProvider(input: AiProviderInput): AiProviderInfo {
     existing.kind === input.kind &&
     existing.baseUrl === input.baseUrl.replace(/\/$/, '') &&
     existing.model === input.model.trim()
+  const typed = input.apiKey?.trim()
+  if (typed) saveAiKeys({ [id]: typed })
+  // A plain key that could not be moved (no secure storage) stays until the user types a new one.
+  const plain = typed ? undefined : existing?.apiKey
   const provider: StoredProvider = {
     id,
     name: input.name.trim() || 'Custom',
@@ -92,8 +119,8 @@ export function saveProvider(input: AiProviderInput): AiProviderInfo {
     baseUrl: input.baseUrl.replace(/\/$/, ''),
     model: input.model.trim(),
     temperature: input.temperature ?? 0.7,
-    hasKey: Boolean(input.apiKey || existing?.apiKey),
-    apiKey: input.apiKey?.trim() || existing?.apiKey || '',
+    hasKey: hasAiKey(id) || Boolean(plain),
+    ...(plain ? { apiKey: plain } : {}),
     ...(sameModel && existing.noImageInput ? { noImageInput: true } : {}),
   }
   store.providers = [provider, ...store.providers.filter((item) => item.id !== id)]
@@ -101,9 +128,37 @@ export function saveProvider(input: AiProviderInput): AiProviderInfo {
   return publicProvider(provider)
 }
 
+/** Forget a provider and its key. The key goes first, so a crash in between leaves no orphaned secret. */
 export function removeProvider(id: string): void {
+  if (hasAiKey(id)) saveAiKeys({ [id]: null })
   const store = load()
   store.providers = store.providers.filter((item) => item.id !== id)
+  save(store)
+}
+
+/**
+ * agent.json held API keys as plain text before they were encrypted. Move them into the
+ * encrypted store and drop them from the file. Runs once per start, after app ready: before
+ * it, Linux reports no secure storage. The keys are written (fsync'd) and read back before
+ * agent.json loses them, so a crash in between leaves both copies and the next start repeats
+ * the move. Without secure storage they stay in agent.json and keep working (withKey).
+ */
+export function migratePlainApiKeys(): void {
+  const store = load()
+  const plain = store.providers.filter((provider) => typeof provider.apiKey === 'string')
+  if (!plain.length) return
+  const keys: Record<string, string> = {}
+  for (const provider of plain) if (provider.apiKey) keys[provider.id] = provider.apiKey
+  try {
+    saveAiKeys(keys)
+  } catch (error) {
+    console.warn('[ai] API keys stay in agent.json for now:', error instanceof Error ? error.message : String(error))
+    return
+  }
+  for (const [id, key] of Object.entries(keys)) {
+    if (getAiKey(id) !== key) throw new Error(`[ai] the encrypted API key of ${id} does not read back; agent.json keeps it`)
+  }
+  for (const provider of store.providers) delete provider.apiKey
   save(store)
 }
 
@@ -236,7 +291,7 @@ function openAIMessages(system: string, turns: Turn[]): unknown[] {
 }
 
 async function openAIChat(
-  provider: StoredProvider,
+  provider: KeyedProvider,
   system: string,
   turns: Turn[],
   tools: AiToolDefinition[],
@@ -371,7 +426,7 @@ function anthropicMessages(turns: Turn[]): unknown[] {
 }
 
 async function anthropicChat(
-  provider: StoredProvider,
+  provider: KeyedProvider,
   system: string,
   turns: Turn[],
   tools: AiToolDefinition[],
@@ -442,7 +497,7 @@ function geminiContents(turns: Turn[]): unknown[] {
 }
 
 async function geminiChat(
-  provider: StoredProvider,
+  provider: KeyedProvider,
   system: string,
   turns: Turn[],
   tools: AiToolDefinition[],
@@ -502,7 +557,7 @@ async function geminiChat(
 // ---------------------------------------------------------------- Ollama
 
 async function ollamaChat(
-  provider: StoredProvider,
+  provider: KeyedProvider,
   system: string,
   turns: Turn[],
   onDelta: (text: string) => void,
@@ -535,7 +590,7 @@ async function ollamaChat(
 }
 
 async function callProvider(
-  provider: StoredProvider,
+  provider: KeyedProvider,
   system: string,
   turns: Turn[],
   tools: AiToolDefinition[],
@@ -555,7 +610,7 @@ export async function complete(input: { providerId?: string; system: string; pro
   const providers = load().providers
   const provider = input.providerId ? providers.find((item) => item.id === input.providerId) : providers[0]
   if (!provider) throw new Error('还没有连接语言模型。请在 设置 › 语言模型 里连接一个。')
-  const { text } = await callProvider(provider, input.system, [{ role: 'user', content: input.prompt }], [], () => undefined)
+  const { text } = await callProvider(withKey(provider), input.system, [{ role: 'user', content: input.prompt }], [], () => undefined)
   if (!text.trim()) throw new Error('语言模型没有回答，请再试一次')
   return text
 }
@@ -573,6 +628,7 @@ export async function chat(
   const store = load()
   const provider = store.providers.find((item) => item.id === input.providerId)
   if (!provider) throw new Error('请先添加 AI Provider')
+  const keyed = withKey(provider)
   const now = new Date().toISOString()
   const existing = input.conversationId ? store.conversations.find((item) => item.id === input.conversationId) : undefined
   const conversation: AiConversationInfo = existing ?? {
@@ -608,7 +664,7 @@ export async function chat(
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
       const turns = toTurns(conversation.messages)
-      const { text, toolCalls } = await callProvider(provider, system, turns, options.tools, (delta) => {
+      const { text, toolCalls } = await callProvider(keyed, system, turns, options.tools, (delta) => {
         streamed += delta
         options.emit({ type: 'delta', conversationId: conversation.id, messageId: assistantId, text: delta })
       })
@@ -707,7 +763,7 @@ const NO_IMAGE_INPUT = new RegExp(
   'i',
 )
 
-function imageRequest(provider: StoredProvider, question: ImageQuestion): { url: string; headers: Record<string, string>; body: unknown } {
+function imageRequest(provider: KeyedProvider, question: ImageQuestion): { url: string; headers: Record<string, string>; body: unknown } {
   const base64 = Buffer.from(question.image.data).toString('base64')
   const { mime } = question.image
   if (provider.kind === 'anthropic') {
@@ -822,7 +878,7 @@ export function markNoImageInput(providerId: string): void {
 export async function askAboutImage(providerId: string, question: ImageQuestion, timeoutMs = 60_000): Promise<string> {
   const provider = load().providers.find((item) => item.id === providerId)
   if (!provider) throw new Error('请先添加 AI Provider')
-  const request = imageRequest(provider, question)
+  const request = imageRequest(withKey(provider), question)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {

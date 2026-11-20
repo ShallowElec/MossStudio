@@ -7,7 +7,7 @@ import { runProjectCanvasTests } from './projects.test'
 import { runStudioCanvasUiTests } from './studioCanvasUi.test'
 import { ensureDirs, paths } from './lib/paths'
 import { getBackendInfo, getWebAccessInfo, startBackend, stopBackend } from './services/backend'
-import { listProviders, removeProvider, saveProvider } from './services/ai'
+import { listProviders, migratePlainApiKeys, removeProvider, saveProvider } from './services/ai'
 import { gbcStatus, stopGbcProcesses } from './services/gbc'
 import { stopModelSourceDiscovery } from './services/modelSourceDiscovery'
 import type { JobRecord } from '@shared/types'
@@ -169,6 +169,11 @@ app
       await purgeLegacySimulationJobs()
     } catch (error) {
       console.error('[migration] simulation jobs', error)
+    }
+    try {
+      migratePlainApiKeys()
+    } catch (error) {
+      console.error('[migration] language model keys', error)
     }
     onJobCompleted((job) => {
       if (job.kind !== 'training') return

@@ -22,7 +22,13 @@ beforeEach(() => {
   )
 })
 
+/** A real keyring, as on a desktop (the mock defaults to plain text on Linux), so keys can be saved. */
+async function useKeyring() {
+  vi.spyOn((await import('electron')).safeStorage, 'getSelectedStorageBackend').mockReturnValue('gnome_libsecret')
+}
+
 async function setup(kind: AiProviderKind | null, trainingKind: 'person' | 'style' = 'person') {
+  await useKeyring()
   const ai = await import('@main/services/ai')
   if (kind) ai.saveProvider({ name: kind, kind, baseUrl: 'https://llm.example.test', model: 'vision', apiKey: 'k' })
   const store = await import('@main/services/training/store')
@@ -95,6 +101,7 @@ describe('automatic descriptions', () => {
   })
 
   it('asks the model 设置 › 语言模型 chose for 助手和漫画, not the newest one', async () => {
+    await useKeyring()
     const ai = await import('@main/services/ai')
     const chosen = ai.saveProvider({ name: 'chosen', kind: 'openai', baseUrl: 'https://chosen.example.test', model: 'v', apiKey: 'k' })
     ai.saveProvider({ name: 'newest', kind: 'openai', baseUrl: 'https://newest.example.test', model: 'v', apiKey: 'k' })

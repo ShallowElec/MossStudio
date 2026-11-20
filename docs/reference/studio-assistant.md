@@ -16,7 +16,7 @@ The 助手 button in the title bar opens the right sidebar; the panel stays moun
 
 ## 2. Providers
 
-连接设置 opens 连接语言模型 (`renderer/src/components/common/ProviderDialog.tsx`), the same dialog and the same list as 设置 › 语言模型 and as every action that asks for a model where it is clicked ([architecture.md](/docs/reference/architecture.md#routes)). The kinds are `AiProviderKind` in `shared/ai.ts`: `openai` (shown as OpenAI 兼容; also DeepSeek and Moonshot), `anthropic`, `gemini` and `ollama`; `AI_PROVIDER_PRESETS` fills name, address and model for each. Main (`main/services/ai.ts`) keeps providers and conversations in `ai/agent.json` under the data root and returns only `hasKey`; a key never reaches the renderer. The Ollama path (`ollamaChat`) sends no tools and returns no tool calls, so that assistant answers in text only.
+连接设置 opens 连接语言模型 (`renderer/src/components/common/ProviderDialog.tsx`), the same dialog and the same list as 设置 › 语言模型 and as every action that asks for a model where it is clicked ([architecture.md](/docs/reference/architecture.md#routes)). The kinds are `AiProviderKind` in `shared/ai.ts`: `openai` (shown as OpenAI 兼容; also DeepSeek and Moonshot), `anthropic`, `gemini` and `ollama`; `AI_PROVIDER_PRESETS` fills name, address and model for each. Main (`main/services/ai.ts`) keeps providers and conversations in `ai/agent.json` under the data root, and their API keys encrypted in `ai-credentials.json` (`main/services/aiCredentials.ts`, see [the data root](/docs/reference/architecture.md#the-data-root)); it returns only `hasKey`, so a key never reaches the renderer. The Ollama path (`ollamaChat`) sends no tools and returns no tool calls, so that assistant answers in text only.
 
 ## 3. What the model sees
 

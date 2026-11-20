@@ -139,7 +139,7 @@ The LAN page (`renderer/src/web/main.tsx` with `web/LayoutEditor.tsx`) is a sepa
 | `settings.json` | `Settings` (`shared/types.ts`) | `services/settings.ts` |
 | `hosts.json` | Remote hosts (`TrainingHost[]`) | `services/trainingHosts.ts` |
 | `announcements.json`, `diagnostics.json`, `control-adapters.json`, `engine-auto-update.json`, `remote-downloads.json` | Small state files, one per service | the service of that name |
-| `*-credentials.json`, `ssh/` | Saved tokens and passwords (SSH passwords through Electron `safeStorage`) and SSH host keys | `services/*Credentials.ts`, `sshHostKeys.ts` |
+| `*-credentials.json`, `ssh/` | Saved tokens, passwords and language model API keys, each encrypted with Electron `safeStorage` (saving one is refused when the OS has no encrypted store, Linux `basic_text`), and SSH host keys | `services/*Credentials.ts`, `sshHostKeys.ts` |
 | `projects/<id>/` | One folder per project with `assets/` for imported pictures and masks | `services/projects.ts`, `studioAssets.ts` |
 | `jobs/jobs.json`, `jobs/<id>.jsonl` | Job records and one log per job | `services/supervisor.ts` |
 | `outputs/` | Generated pictures with their JSON sidecars; the Library reads them | `services/gallery.ts` |
@@ -148,7 +148,7 @@ The LAN page (`renderer/src/web/main.tsx` with `web/LayoutEditor.tsx`) is a sepa
 | `cache/` | `mossinfer/` (the engine's cache), `previews/` (live previews) | various |
 | `trainer/` | Trainer git mirror, versions and runtimes ([ADR-0002](/docs/decisions/0002-trainer-backend.md)) | trainer services |
 | `training/<id>/` | One folder per training: `project.json`, its pictures, caches and runs ([training.md](/docs/reference/training.md#2-data-on-disk)) | `services/training/` |
-| `ai/agent.json`, `gbc/` | Language model connections (keys included; the renderer only ever sees `hasKey`) and assistant conversations; GBC runs | `services/ai.ts`, `gbc.ts` |
+| `ai/agent.json`, `gbc/` | Language model connections and assistant conversations; GBC runs. The API keys are in `ai-credentials.json` and the renderer only ever sees `hasKey`. Plain keys an older version left here are moved there at start (`migratePlainApiKeys`), or stay and keep working while the OS has no encrypted store | `services/ai.ts`, `aiCredentials.ts`, `gbc.ts` |
 | `logs/`, `downloads/` | Logs and in-flight downloads | |
 | `git/`, `instances/`, `runtimes/`, `launch-queue.json`, `cases.json` | Runner era; archived on first start by `services/legacyMigration.ts` | leftovers |
 

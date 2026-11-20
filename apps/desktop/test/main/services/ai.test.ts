@@ -10,8 +10,10 @@ type Reply = (url: string, body: Record<string, unknown>) => Response
 let replies: Reply[] = []
 let requests: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = []
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules()
+  // A real keyring, as on a desktop (the mock defaults to plain text on Linux), so keys can be saved.
+  vi.spyOn((await import('electron')).safeStorage, 'getSelectedStorageBackend').mockReturnValue('gnome_libsecret')
   replies = []
   requests = []
   vi.stubGlobal(
