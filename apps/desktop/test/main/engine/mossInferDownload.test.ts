@@ -261,9 +261,36 @@ describe('downloadMossInfer (stable)', () => {
   it('rejects an archive whose SHA256 does not match SHA256SUMS and activates nothing', async () => {
     sums = `${'0'.repeat(64)}  mossinfer-2.1.1-linux-cu13-x86_64-system-cuda.tar.gz\n`
     const state = await download.downloadMossInfer({ channel: 'stable', packages: [CU13_SYSTEM] })
-    expect(state).toMatchObject({ phase: 'error', error: '引擎包 sha256 校验失败（SHA256SUMS 不匹配）' })
+    // Failed after the download: another download line would not help.
+    expect(state).toMatchObject({ phase: 'error', error: '引擎包 sha256 校验失败（SHA256SUMS 不匹配）', failedPhase: 'verifying' })
     expect(settingsModule.getSettings().mossInferServerPath).toBeNull()
     expect(JSON.parse(readFileSync(join(engineRoot(), 'last-attempt.json'), 'utf8')).error).toContain('sha256')
+  })
+
+  it('records that it failed while downloading when the archive does not arrive', async () => {
+    stubGithub({ 'https://github.com/dl/mossinfer-2.1.1-linux-cu13-x86_64-system-cuda.tar.gz': () => new Response('', { status: 502 }) })
+    const state = await download.downloadMossInfer({ channel: 'stable', packages: [CU13_SYSTEM] })
+    expect(state).toMatchObject({ phase: 'error', failedPhase: 'downloading', error: 'HTTP 502' })
+  })
+
+  it('records the phase for a failure before anything was downloaded', async () => {
+    const state = await download.downloadMossInfer({ channel: 'stable', packages: [] })
+    expect(state).toMatchObject({ phase: 'error', failedPhase: 'querying', error: '没有需要安装的引擎包' })
+  })
+
+  it("forgets the last attempt's outcome when a new attempt starts, so quitting midway leaves no stale error", async () => {
+    mkdirSync(engineRoot(), { recursive: true })
+    writeFileSync(join(engineRoot(), 'last-attempt.json'), JSON.stringify({ at: 'earlier', error: '上次的错误' }))
+    let seen: unknown = 'not read'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        seen = existsSync(join(engineRoot(), 'last-attempt.json'))
+        throw new Error('offline')
+      }),
+    )
+    await download.downloadMossInfer({ channel: 'stable', packages: [CU13_SYSTEM] })
+    expect(seen).toBe(false)
   })
 
   it('names the missing asset for a pinned release instead of falling back', async () => {

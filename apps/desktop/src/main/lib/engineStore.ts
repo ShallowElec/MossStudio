@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { EngineInstallAttempt, EngineInstallProgress } from '@shared/types'
@@ -92,6 +92,14 @@ export function readEngineLastAttempt(root: string): EngineInstallAttempt | null
   } catch {
     return null
   }
+}
+
+/**
+ * An install starts: the last attempt's outcome no longer stands. Quitting
+ * midway then leaves no stale error behind, so first-run setup resumes it.
+ */
+export function clearEngineLastAttempt(root: string): void {
+  rmSync(join(root, 'last-attempt.json'), { force: true })
 }
 
 export function writeEngineLastAttempt(root: string, attempt: EngineInstallAttempt): void {

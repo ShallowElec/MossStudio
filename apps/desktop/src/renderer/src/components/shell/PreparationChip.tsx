@@ -1,7 +1,7 @@
 import { AlertTriangle } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { timeLeftLabel } from '../../lib/preparation'
+import { preparationChip, timeLeftLabel } from '../../lib/preparation'
 import { usePreparation } from '../../lib/usePreparation'
 import { useApp } from '../../store'
 import { cn, useToast } from '../ui'
@@ -37,27 +37,24 @@ export function PreparationChip(): React.JSX.Element | null {
 
   // The setup screen shows all of it itself.
   if (!progress || pathname.startsWith('/setup') || onboarding !== 'active') return null
-  if (!progress.active && !progress.failed) return null
+  const chip = preparationChip(progress)
+  if (!chip) return null
   const percent = Math.round(progress.percent)
   const left = timeLeftLabel(progress.secondsLeft)
-  // A part that failed shows even while the other keeps downloading.
-  const warn = progress.failed
   return (
     <button
       type="button"
       data-preparation-chip
       onClick={() => void navigate('/setup')}
-      title={warn ? '有一项没有下载完，点开重试' : '查看准备进度'}
+      title={chip.title}
       className={cn(
         'no-drag flex h-7 shrink-0 items-center gap-2 rounded-full px-3 text-caption transition-colors hover:bg-raised',
-        warn ? 'bg-warn-soft font-medium text-warn' : 'bg-well text-ink',
+        chip.warn ? 'bg-warn-soft font-medium text-warn' : 'bg-well text-ink',
       )}
     >
-      {warn ? <AlertTriangle className="size-3.5" strokeWidth={1.6} aria-hidden="true" /> : null}
-      {!progress.active ? (
-        '准备没有完成'
-      ) : warn ? (
-        <span className="tabular">准备中 {percent}% · 有一项没下载完</span>
+      {chip.warn ? <AlertTriangle className="size-3.5" strokeWidth={1.6} aria-hidden="true" /> : null}
+      {chip.text ? (
+        <span className="tabular">{chip.text}</span>
       ) : (
         <>
           <span className="tabular">准备中 {percent}%</span>

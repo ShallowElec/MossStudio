@@ -32,6 +32,8 @@ export interface SetupStep {
   detail: string
   /** 0–100 while there is measurable progress. */
   percent?: number
+  /** On error: what did not happen, as the notice's title (「运行组件没有下载完」, 「运行组件没有装好」). */
+  headline?: string
   /** It failed while downloading, so another download line (镜像 or 直连) may get it through. */
   switchMirror?: true
 }
@@ -162,11 +164,20 @@ function engineStep(input: SetupInput, gpuReady: boolean): SetupStep {
   if (input.engine?.state === 'ready' && missing.length === 0) return { ...base, state: 'done', detail: 'MossInfer 已安装' }
   const error = input.engineError ?? engineInstallError(input.engine, download)
   if (error && input.engine?.state !== 'ready') {
-    // A failure before the download started (an old driver) is not fixed by another line.
-    const downloadFailed = !input.engineError && download?.phase === 'error'
-    return { ...base, state: 'error', detail: error, ...(downloadFailed ? { switchMirror: true as const } : {}) }
+    // Mirrors carry only the download itself: a failure before it (an old driver, the release query)
+    // or after it (verifying, unpacking, checking the build on the GPU) is not fixed by another line.
+    const downloadFailed = !input.engineError && download?.phase === 'error' && download.failedPhase === 'downloading'
+    return {
+      ...base,
+      state: 'error',
+      detail: error,
+      headline: downloadFailed ? '运行组件没有下载完' : '运行组件没有装好',
+      ...(downloadFailed ? { switchMirror: true as const } : {}),
+    }
   }
-  if (download?.phase === 'canceled' && input.engine?.state !== 'ready') return { ...base, state: 'error', detail: '安装已取消' }
+  if (download?.phase === 'canceled' && input.engine?.state !== 'ready') {
+    return { ...base, state: 'error', detail: '安装已取消', headline: '运行组件没有装好' }
+  }
   if (!input.engine) return { ...base, state: 'waiting', detail: '正在检查…' }
   const plan = input.plan
   let detail = '推理引擎 MossInfer，会按你的显卡自动选择版本'
@@ -199,6 +210,11 @@ function modelStep(input: SetupInput, gpuReady: boolean): SetupStep {
   const failed = tasks.find((task) => task.state === 'error')
   const total = tasks.reduce((sum, task) => sum + task.totalBytes, 0)
   const done = tasks.reduce((sum, task) => sum + (task.state === 'done' ? task.totalBytes : task.bytes), 0)
+  // A file that failed shows even while the others still download: its own 重试 restarts only what is missing.
+  if (failed) {
+    const detail = input.modelError ?? failed.error ?? '下载失败'
+    return { ...base, state: 'error', detail, headline: `${name} 没有下载完`, ...(input.modelError ? {} : { switchMirror: true as const }) }
+  }
   if (active.length > 0) {
     const percent = total > 0 ? Math.max(0, Math.min(100, (done / total) * 100)) : undefined
     const label = active.every((task) => task.state === 'queued')
@@ -208,11 +224,17 @@ function modelStep(input: SetupInput, gpuReady: boolean): SetupStep {
         : '正在下载'
     return { ...base, state: 'running', detail: `${name} · ${label}`, ...(percent === undefined ? {} : { percent }) }
   }
-  const error = input.modelError ?? failed?.error ?? (failed ? '下载失败' : null)
-  if (error) return { ...base, state: 'error', detail: error, ...(!input.modelError && failed ? { switchMirror: true as const } : {}) }
-  if (tasks.some((task) => task.state === 'paused')) return { ...base, state: 'error', detail: `${name} · 下载已暂停` }
+  if (input.modelError) return { ...base, state: 'error', detail: input.modelError, headline: `${name} 没有下载完` }
+  if (tasks.some((task) => task.state === 'paused')) {
+    return { ...base, state: 'error', detail: `${name} · 下载已暂停`, headline: `${name} 没有下载完` }
+  }
   const size = step.sizeBytes ? ` · ${bytes(step.sizeBytes)}` : ''
   return { ...base, state: gpuReady ? 'waiting' : 'blocked', detail: `${name}${size}` }
+}
+
+/** Some file of the recommended model is still queued or downloading. */
+function modelActive(input: SetupInput): boolean {
+  return modelDownloads(input.onboarding, input.downloads).some((task) => ['queued', 'running', 'verifying'].includes(task.state))
 }
 
 export function deriveSetup(input: SetupInput): SetupView {
@@ -227,8 +249,9 @@ export function deriveSetup(input: SetupInput): SetupView {
   let phase: SetupPhase
   if (steps.every((step) => step.state === 'done')) phase = 'done'
   else if (gpu.state === 'blocked') phase = 'blocked'
-  // Detecting the GPU is part of checking; only installs and downloads count as running.
-  else if (steps.some((step) => step.id !== 'gpu' && step.state === 'running')) phase = 'running'
+  // Detecting the GPU is part of checking; only installs and downloads count as running,
+  // also the model's other files while one of them has failed.
+  else if (steps.some((step) => step.id !== 'gpu' && step.state === 'running') || modelActive(input)) phase = 'running'
   else if (steps.some((step) => step.state === 'error')) phase = 'error'
   else if (!input.gpu || input.plan === null || !input.onboarding || !input.engine) phase = 'checking'
   else phase = 'idle'

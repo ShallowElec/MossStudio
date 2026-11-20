@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localModelTasks, preparationAmount, preparationProgress, timeLeftLabel } from '@renderer/lib/preparation'
+import { localModelTasks, preparationAmount, preparationChip, preparationProgress, timeLeftLabel } from '@renderer/lib/preparation'
 import { downloadFixture, engineDownloadFixture } from '../../mocks/backend/fixtures'
 
 const MB = 1_000_000
@@ -83,5 +83,48 @@ describe('preparationAmount', () => {
 
   it('reads done of total once bytes arrive', () => {
     expect(preparationAmount(3 * 1024 ** 3, 25 * 1024 ** 3)).toBe('3.0 GB / 25 GB')
+  })
+})
+
+describe('a model with one failed file', () => {
+  it('keeps the model part active while its other files download; a pause is not a failure', () => {
+    const tasks = [
+      downloadFixture({ targetId: 'dit', state: 'running', bytes: 100 * MB, totalBytes: 600 * MB, speedBps: 20 * MB }),
+      downloadFixture({ targetId: 'vae', state: 'error', bytes: 10 * MB, totalBytes: 200 * MB, error: 'HTTP 502' }),
+    ]
+    expect(preparationProgress(null, tasks)!.parts[0]).toMatchObject({ id: 'model', failed: true, active: true, speedBps: 20 * MB })
+    const paused = preparationProgress(null, [
+      { ...tasks[0]!, state: 'running' },
+      { ...tasks[1]!, state: 'paused' },
+    ])!
+    expect(paused).toMatchObject({ failed: false, paused: true, active: true })
+  })
+})
+
+describe('preparationChip', () => {
+  const engineFailed = engineDownloadFixture({ phase: 'error', error: 'x', totalBytes: 200 * MB })
+  const running = downloadFixture({ targetId: 'dit', state: 'running', bytes: 100 * MB, totalBytes: 600 * MB, speedBps: 20 * MB })
+  const failedFile = downloadFixture({ targetId: 'vae', state: 'error', totalBytes: 200 * MB })
+
+  it('warns while the other part keeps going, and counts what failed', () => {
+    expect(preparationChip(preparationProgress(engineFailed, [running])!)).toMatchObject({
+      warn: true,
+      text: expect.stringMatching(/^准备中 \d+% · 有一项没下载完$/),
+      title: '有一项没下载完，点开重试',
+    })
+    expect(preparationChip(preparationProgress(engineFailed, [running, failedFile])!)).toMatchObject({
+      text: expect.stringContaining('有两项没下载完'),
+      title: '有两项没下载完，点开重试',
+    })
+  })
+
+  it('does not warn for a paused download while the rest goes on, and says so once everything stopped', () => {
+    expect(preparationChip(preparationProgress(null, [running, { ...failedFile, state: 'paused' }])!)).toEqual({
+      warn: false,
+      text: null,
+      title: '查看准备进度',
+    })
+    expect(preparationChip(preparationProgress(engineFailed, [failedFile])!)).toMatchObject({ warn: true, text: '准备没有完成' })
+    expect(preparationChip(preparationProgress(null, [{ ...running, state: 'done' }])!)).toBeNull()
   })
 })

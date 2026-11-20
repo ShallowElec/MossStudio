@@ -135,12 +135,19 @@ describe('deriveSetup', () => {
   it('keeps going while one part failed: the failed part has its reason, its own retry and another download line', () => {
     const view = deriveSetup(
       input({
-        engineDownload: engineDownloadFixture({ phase: 'error', error: '下载中断，请检查网络' }),
+        engineDownload: engineDownloadFixture({ phase: 'error', failedPhase: 'downloading', error: '下载中断，请检查网络' }),
         downloads: [downloadFixture({ targetId: SFT_BUNDLE_IDS[0], state: 'running', bytes: 2 * GiB, totalBytes: 8 * GiB })],
       }),
     )
     expect(view.phase).toBe('running')
-    expect(view.steps[1]).toEqual({ id: 'engine', title: '安装引擎', state: 'error', detail: '下载中断，请检查网络', switchMirror: true })
+    expect(view.steps[1]).toEqual({
+      id: 'engine',
+      title: '安装引擎',
+      state: 'error',
+      detail: '下载中断，请检查网络',
+      headline: '运行组件没有下载完',
+      switchMirror: true,
+    })
     expect(view.steps[2]!.state).toBe('running')
     expect(stepsToStart(view)).toEqual(['engine'])
   })
@@ -155,6 +162,35 @@ describe('deriveSetup', () => {
     expect(view.phase).toBe('running')
     expect(view.steps[2]).toMatchObject({ state: 'error', detail: 'HTTP 502', switchMirror: true })
     expect(stepsToStart(view)).toEqual(['model'])
+  })
+
+  it('shows a model file that failed while its other files still download, with 重试 for what is missing', () => {
+    const view = deriveSetup(
+      input({
+        engine: engineReadyFixture(),
+        downloads: [
+          downloadFixture({ targetId: SFT_BUNDLE_IDS[0], state: 'running', bytes: 2 * GiB, totalBytes: 8 * GiB }),
+          downloadFixture({ targetId: SFT_BUNDLE_IDS[2], state: 'error', error: 'HTTP 502' }),
+        ],
+      }),
+    )
+    expect(view.phase).toBe('running')
+    expect(view.steps[2]).toMatchObject({ state: 'error', detail: 'HTTP 502', headline: 'MossDiT SFT 没有下载完', switchMirror: true })
+    expect(stepsToStart(view)).toEqual(['model'])
+  })
+
+  it('offers another download line only for a failure while downloading, and names what did not happen', () => {
+    const failedIn = (failedPhase: 'querying' | 'downloading' | 'verifying' | 'extracting') =>
+      deriveSetup(input({ engineDownload: engineDownloadFixture({ phase: 'error', failedPhase, error: 'x' }) })).steps[1]!
+    expect(failedIn('downloading')).toMatchObject({ headline: '运行组件没有下载完', switchMirror: true })
+    for (const phase of ['querying', 'verifying', 'extracting'] as const) {
+      expect(failedIn(phase).headline).toBe('运行组件没有装好')
+      expect(failedIn(phase).switchMirror).toBeUndefined()
+    }
+    // A record from before the phase was kept says nothing about where it failed.
+    expect(
+      deriveSetup(input({ engineDownload: engineDownloadFixture({ phase: 'error', error: 'x' }) })).steps[1]!.switchMirror,
+    ).toBeUndefined()
   })
 
   it('does not offer another download line when the download never started or was paused', () => {

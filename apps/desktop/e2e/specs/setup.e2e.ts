@@ -151,7 +151,10 @@ describe('first run', () => {
             speedBps: 30_000_000,
           } satisfies DownloadTask)
         }
-        window.__mock.emit(Events.mossInferDownload, fixtures.engineDownloadFixture({ phase: 'error', error: '下载中断：连接被重置' }))
+        window.__mock.emit(
+          Events.mossInferDownload,
+          fixtures.engineDownloadFixture({ phase: 'error', failedPhase: 'downloading', error: '下载中断：连接被重置' }),
+        )
       })
       // The model keeps downloading; the engine says why it stopped, right on the progress screen.
       const failed = page.locator('[data-setup-failed="engine"]')
@@ -189,6 +192,61 @@ describe('first run', () => {
       await expect.poll(() => page.locator('[data-setup-failed]').count()).toBe(0)
       expect(await app.calls('models:download')).toHaveLength(modelCalls)
     }
+  })
+
+  it('one model file fails while the others keep downloading: its notice, 重试 for that file only, and the bytes keep moving', async () => {
+    const page = await app.open({ scenario: 'engineInstalling', route: '/setup', theme: 'light' })
+    await expect.poll(() => page.getByRole('heading', { name: '正在准备' }).isVisible()).toBe(true)
+    await expect.poll(() => app.calls('models:download').then((calls) => calls.length)).toBeGreaterThan(0)
+    // The VAE gets HTTP 502; the DiT and the rest are still downloading.
+    const failedId = await page.evaluate(() => {
+      const { Events, state } = window.__mock
+      const tasks = state.downloads
+      const failed = tasks.find((task) => task.targetId.includes('vae')) ?? tasks.at(-1)!
+      for (const task of tasks) {
+        window.__mock.emit(
+          Events.download,
+          task === failed
+            ? ({ ...task, state: 'error', error: 'HTTP 502', speedBps: 0 } satisfies DownloadTask)
+            : ({ ...task, state: 'running', bytes: Math.floor(task.totalBytes / 4), speedBps: 30_000_000 } satisfies DownloadTask),
+        )
+      }
+      return failed.targetId
+    })
+    const failed = page.locator('[data-setup-failed="model"]')
+    await expect.poll(() => failed.innerText()).toContain('MOSS-Image SFT 没有下载完')
+    expect(await failed.innerText()).toContain('HTTP 502')
+    expect(await failed.getByRole('button', { name: '换下载线路' }).isVisible()).toBe(true)
+    // The model row keeps its bytes and speed while its other files download.
+    const row = page.locator('[data-setup-progress]').getByRole('listitem').filter({ hasText: 'MOSS-Image SFT' })
+    expect(await row.innerText()).toMatch(/GB \/ .*GB · .*\/s/)
+    expect(await row.innerText()).not.toContain('没下载完')
+    await app.screenshot('setup-model-file-failed-light')
+
+    // 重试 asks again for the failed file only; the ones still downloading are left alone.
+    const before = (await app.calls<{ id: string }>('models:download')).length
+    await failed.getByRole('button', { name: '重试' }).click()
+    await expect
+      .poll(() => app.calls<{ id: string }>('models:download').then((calls) => calls.slice(before).map((call) => call.id)))
+      .toEqual([failedId])
+  })
+
+  it('an engine that fails after its download says it was not installed, without 换下载线路', async () => {
+    const page = await app.open({ scenario: 'engineInstalling', route: '/setup', theme: 'dark' })
+    await expect.poll(() => page.getByRole('heading', { name: '正在准备' }).isVisible()).toBe(true)
+    await expect.poll(() => app.calls('models:download').then((calls) => calls.length)).toBeGreaterThan(0)
+    await page.evaluate(() => {
+      const { fixtures, Events } = window.__mock
+      window.__mock.emit(
+        Events.mossInferDownload,
+        fixtures.engineDownloadFixture({ phase: 'error', failedPhase: 'verifying', error: '引擎包 sha256 校验失败（SHA256SUMS 不匹配）' }),
+      )
+    })
+    const failed = page.locator('[data-setup-failed="engine"]')
+    await expect.poll(() => failed.innerText()).toContain('运行组件没有装好')
+    expect(await failed.getByRole('button', { name: '换下载线路' }).count()).toBe(0)
+    expect(await failed.getByRole('button', { name: '重试' }).isVisible()).toBe(true)
+    await app.screenshot('setup-engine-not-installed-dark')
   })
 
   it('without a usable GPU: another computer or 重新检测, as two choices', async () => {

@@ -119,7 +119,7 @@ function Progress({ progress, modelName }: { progress: Preparation; modelName: s
             <span className="tabular">
               {part.finished
                 ? bytes(part.total)
-                : part.failed
+                : part.failed && !part.active
                   ? '没下载完'
                   : `${preparationAmount(part.done, part.total)}${part.speedBps > 0 ? ` · ${bytes(part.speedBps)}/s` : ''}`}
             </span>
@@ -371,7 +371,7 @@ export function SetupPage(): React.JSX.Element {
                   key={step.id}
                   tone="danger"
                   data-setup-failed={step.id}
-                  title={`${step.id === 'engine' ? '运行组件' : modelName}没有下载完`}
+                  title={step.headline}
                   action={
                     <>
                       {step.switchMirror ? (
