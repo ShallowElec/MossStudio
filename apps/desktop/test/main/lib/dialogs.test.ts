@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { showOpenDialogFor } from '@main/lib/dialogs'
+import { showOpenDialogFor, showSaveDialogFor } from '@main/lib/dialogs'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -22,5 +22,15 @@ describe('main/lib/dialogs', () => {
     ;(BrowserWindow as unknown as { reset: () => void }).reset()
     await showOpenDialogFor(sender, { title: '选择图片' })
     expect(open).toHaveBeenCalledWith({ title: '选择图片' })
+  })
+
+  it('attaches the save dialog to the window that asked, and stands alone without one', async () => {
+    const save = vi.spyOn(dialog, 'showSaveDialog')
+    const window = new BrowserWindow()
+    await showSaveDialogFor(window.webContents, { title: '另存为' })
+    expect(save).toHaveBeenCalledWith(window, { title: '另存为' })
+    ;(BrowserWindow as unknown as { reset: () => void }).reset()
+    await showSaveDialogFor(window.webContents, { title: '另存为' })
+    expect(save).toHaveBeenLastCalledWith({ title: '另存为' })
   })
 })

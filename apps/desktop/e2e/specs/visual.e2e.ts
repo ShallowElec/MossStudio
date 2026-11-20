@@ -189,6 +189,19 @@ const STOPS: Stop[] = [
   },
   {
     page: 'studio',
+    state: 'viewer-menu',
+    open: { scenario: 'ready', route: '/studio' },
+    seed: seedStudio,
+    prepare: async (page) => {
+      await page.locator('article[data-canvas-card="c1"] footer').getByRole('button', { name: '第 3 张' }).dblclick()
+      await page
+        .getByRole('dialog')
+        .locator('[data-picture-drag]')
+        .click({ button: 'right', position: { x: 120, y: 120 } })
+    },
+  },
+  {
+    page: 'studio',
     state: 'assistant',
     open: { scenario: 'ready', route: '/studio' },
     prepare: async (page) => {
@@ -258,6 +271,25 @@ const STOPS: Stop[] = [
     open: { scenario: 'ready', route: '/library' },
     prepare: async (page) => {
       await page.locator('[data-library-item]').first().click()
+    },
+  },
+  {
+    page: 'library',
+    state: 'picked',
+    open: { scenario: 'ready', route: '/library' },
+    prepare: async (page) => {
+      const tiles = page.locator('[data-library-item]')
+      await tiles.nth(0).click()
+      await tiles.nth(1).click({ modifiers: ['Control'] })
+      await page.getByRole('toolbar', { name: '已选作品' }).getByRole('button', { name: '导出内容' }).click()
+    },
+  },
+  {
+    page: 'library',
+    state: 'picture-menu',
+    open: { scenario: 'ready', route: '/library' },
+    prepare: async (page) => {
+      await page.locator('[data-library-item]').first().click({ button: 'right' })
     },
   },
   { page: 'library', state: 'empty', open: { scenario: 'firstRun', route: '/library', settings: { onboardingState: 'completed' } } },

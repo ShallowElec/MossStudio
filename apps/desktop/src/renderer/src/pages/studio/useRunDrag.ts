@@ -13,15 +13,24 @@ export interface RunDrag {
   at: Point
 }
 
+/** Whether the pointer has left the window (captured pointers keep reporting outside it while the button is held). */
+export function outsideWindow(point: { clientX: number; clientY: number }, size: { width: number; height: number }): boolean {
+  return point.clientX < 0 || point.clientY < 0 || point.clientX >= size.width || point.clientY >= size.height
+}
+
 /**
  * Pressing a filmstrip thumbnail: a click shows that picture on its 画面's
- * face; dragging it onto the board pins it there as a card of its own.
+ * face; dragging it onto the board pins it there as a card of its own;
+ * dragging it on out of the window hands the file to the system, for
+ * another app to take. The drag stays the board's own until it leaves the
+ * window, so pinning keeps working.
  */
 export function useRunDrag(options: {
   viewport: React.RefObject<HTMLDivElement | null>
   view: { readonly current: View }
   onShow: { readonly current: (layoutId: string, item: StripItem) => void }
   onDrop: { readonly current: (layoutId: string, item: StripItem, at: Point) => void }
+  onDragOut: { readonly current: (path: string) => void }
 }): {
   drag: RunDrag | null
   start: (layoutId: string, item: StripItem, event: React.PointerEvent<HTMLElement>) => void
@@ -56,6 +65,12 @@ export function useRunDrag(options: {
       if (next.pointerId !== pointerId || !draggable) return
       if (!moved && Math.hypot(next.clientX - origin.x, next.clientY - origin.y) < DRAG_START) return
       moved = true
+      if (item.path && outsideWindow(next, { width: window.innerWidth, height: window.innerHeight })) {
+        // Let go of the capture first, so the system drag takes the pointer over.
+        release()
+        options.onDragOut.current(item.path)
+        return
+      }
       setDrag({ layoutId, item, at: boardAt(next) })
     }
     const release = (): void => {

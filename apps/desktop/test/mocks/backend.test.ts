@@ -81,6 +81,19 @@ describe('mock backend', () => {
     expect(backend.state.settings.galleryRoots).toEqual([])
   })
 
+  it('exports pictures like main: progress after each one, then what was copied where', async () => {
+    const backend = createMockBackend()
+    const steps: unknown[] = []
+    backend.bridge.on(Events.galleryExport, (step) => steps.push(step))
+    const answer = await invoke(backend, Ipc.galleryExport, { paths: ['/a.png', '/b.png'], withParams: true })
+    expect(answer).toEqual({ ok: true, data: { folder: '/fixture/export', exported: 2, failed: 0 } })
+    expect(steps).toEqual([
+      { done: 0, total: 2 },
+      { done: 1, total: 2 },
+      { done: 2, total: 2 },
+    ])
+  })
+
   it('install() sets and restores the bridge on a target', () => {
     const target: { clover?: unknown } = { clover: 'previous' }
     const backend = createMockBackend()

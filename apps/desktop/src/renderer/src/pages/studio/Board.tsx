@@ -63,6 +63,7 @@ import {
   type StripItem,
 } from './runs'
 import { useRunDrag } from './useRunDrag'
+import { usePictureActions } from '../../lib/usePictureActions'
 import { useStableCallbacks } from './useStableCallbacks'
 import { boardPorts, type Point } from './wires'
 import { OutputImage } from './OutputImage'
@@ -391,7 +392,10 @@ export function Board(props: BoardProps): React.JSX.Element {
     if (at.x >= rect.x && at.x <= rect.x + rect.w && at.y >= rect.y && at.y <= rect.y + rect.h) return
     latest.current.onPinRun(run.id, { x: at.x - cardWidth(run) / 2, y: at.y - CARD_HEADER / 2 })
   })
-  const runDrag = useRunDrag({ viewport, view: viewRef, onShow: showRef, onDrop: dropRef })
+  const pictures = usePictureActions()
+  // The actions do not change between renders (they hang on the toast context only).
+  const dragOutRef = useRef((path: string) => pictures.dragOut([path]))
+  const runDrag = useRunDrag({ viewport, view: viewRef, onShow: showRef, onDrop: dropRef, onDragOut: dragOutRef })
   const wireSelection = useWireSelection(wires, (wire) => latest.current.onRemoveLink(wire.targetId, wire.role!, wire.at))
   const selectedWireId = wireSelection.selectedWireId
   const setSelectedWireId = wireSelection.select
@@ -923,6 +927,14 @@ export function Board(props: BoardProps): React.JSX.Element {
     const at = { x: clientX - (rect?.left ?? 0), y: clientY - (rect?.top ?? 0) }
     const cardId = target.closest<HTMLElement>('article[data-canvas-card]')?.dataset.canvasCard
     const card = cardId ? cards.find((canvas) => canvas.id === cardId) : undefined
+    // A filmstrip thumbnail is one picture: its menu gets the picture out of MossStudio.
+    const stripKey = target.closest<HTMLElement>('[data-strip-item]')?.dataset.stripItem
+    const stripped =
+      card && stripKey ? filmstripOf(card, props.canvases).items.find((item) => `${item.runId}/${item.output}` === stripKey) : undefined
+    if (stripped?.path) {
+      setContextMenu({ at, label: '图片操作', entries: pictures.menu(stripped.path) })
+      return
+    }
     const regionId = target.closest<HTMLElement>('[data-region-id]')?.dataset.regionId
     const region = card && regionId ? card.layers.find((layer) => layer.id === regionId) : undefined
     if (card && region) {

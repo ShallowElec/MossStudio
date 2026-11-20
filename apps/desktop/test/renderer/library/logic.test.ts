@@ -4,12 +4,15 @@ import {
   EMPTY_FILTERS,
   afterRemoval,
   baseName,
+  clickPick,
   countLabel,
   dayLabel,
   detailFacts,
   groupByDay,
   hasFilters,
+  joinPicks,
   listRequest,
+  listedPicks,
   mergeNewest,
   sinceFor,
   stepIndex,
@@ -177,5 +180,39 @@ describe('labels', () => {
     expect(countLabel(1284)).toBe('1,284 张')
     expect(baseName('C:\\loras\\Beauty.SAFETENSORS')).toBe('Beauty')
     expect(baseName('/x/y.ckpt')).toBe('y')
+  })
+})
+
+describe('picking several pictures', () => {
+  const order = ['a', 'b', 'c', 'd', 'e']
+  const plain = { toggle: false, range: false, anchor: null }
+
+  it('a plain click picks one alone, and a second click on it lets it go', () => {
+    expect(clickPick([], 'b', order, plain)).toEqual(['b'])
+    expect(clickPick(['a', 'c'], 'b', order, plain)).toEqual(['b'])
+    expect(clickPick(['b'], 'b', order, plain)).toEqual([])
+  })
+
+  it('Ctrl or ⌘ adds a picture, or takes it out when it is picked', () => {
+    expect(clickPick(['a'], 'c', order, { ...plain, toggle: true })).toEqual(['a', 'c'])
+    expect(clickPick(['a', 'c'], 'a', order, { ...plain, toggle: true })).toEqual(['c'])
+  })
+
+  it('Shift picks the run from the anchor, either way, and Ctrl+Shift adds it to the rest', () => {
+    expect(clickPick(['b'], 'd', order, { toggle: false, range: true, anchor: 'b' })).toEqual(['b', 'c', 'd'])
+    expect(clickPick(['d'], 'b', order, { toggle: false, range: true, anchor: 'd' })).toEqual(['b', 'c', 'd'])
+    expect(clickPick(['a'], 'e', order, { toggle: true, range: true, anchor: 'd' })).toEqual(['a', 'd', 'e'])
+    // Without an anchor still listed, Shift picks just the one clicked.
+    expect(clickPick(['x'], 'c', order, { toggle: false, range: true, anchor: 'gone' })).toEqual(['c'])
+  })
+
+  it('joins picks without repeating one', () => {
+    expect(joinPicks(['a', 'c'], ['b', 'c'])).toEqual(['a', 'c', 'b'])
+  })
+
+  it('keeps the picks still listed, in listing order, and the same array when none left', () => {
+    const current = ['b', 'd']
+    expect(listedPicks(current, order)).toBe(current)
+    expect(listedPicks(['d', 'gone', 'a'], order)).toEqual(['a', 'd'])
   })
 })

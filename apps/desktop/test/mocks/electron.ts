@@ -63,6 +63,7 @@ class FakeWebContents extends EventEmitter {
   send(channel: string, payload: unknown): void {
     this.sent.push({ channel, payload })
   }
+  startDrag(_item: { file: string; files?: string[]; icon: unknown }): void {}
   isDestroyed(): boolean {
     return false
   }
@@ -157,6 +158,13 @@ export const dialog = {
   showErrorBox: (): void => undefined,
 }
 
+export class ClipboardItem {
+  constructor(readonly items: Record<string, unknown>) {}
+  get types(): string[] {
+    return Object.keys(this.items)
+  }
+}
+
 export const clipboard = {
   text: '',
   writeText(value: string): void {
@@ -165,13 +173,27 @@ export const clipboard = {
   readText(): string {
     return clipboard.text
   },
+  async write(_items: ClipboardItem[]): Promise<void> {},
 }
 
 export const nativeTheme = { shouldUseDarkColors: true, themeSource: 'system', on: (): void => undefined }
 
+const emptyImage = () => ({
+  isEmpty: () => true,
+  getSize: () => ({ width: 0, height: 0 }),
+  resize: () => ({ toPNG: () => Buffer.alloc(0) }),
+  toPNG: () => Buffer.alloc(0),
+})
+
 export const nativeImage = {
-  createFromPath: () => ({ isEmpty: () => true, resize: () => ({ toPNG: () => Buffer.alloc(0) }), toPNG: () => Buffer.alloc(0) }),
-  createFromBuffer: () => ({ isEmpty: () => true, resize: () => ({ toPNG: () => Buffer.alloc(0) }), toPNG: () => Buffer.alloc(0) }),
+  createFromPath: emptyImage,
+  createFromBuffer: emptyImage,
+  createFromBitmap: (_buffer: Buffer, size: { width: number; height: number }) => ({
+    isEmpty: () => false,
+    getSize: () => size,
+    resize: () => ({ toPNG: () => Buffer.alloc(0) }),
+    toPNG: () => Buffer.alloc(0),
+  }),
   createEmpty: () => ({ isEmpty: () => true }),
 }
 
@@ -211,6 +233,7 @@ export default {
   shell,
   dialog,
   clipboard,
+  ClipboardItem,
   nativeTheme,
   nativeImage,
   protocol,

@@ -166,3 +166,41 @@ export function baseName(path: string): string {
 export function countLabel(total: number): string {
   return `${total.toLocaleString('en-US')} 张`
 }
+
+/** How a click on a tile was made: Ctrl or ⌘ held (`toggle`), Shift held (`range`). */
+export interface PickClick {
+  toggle: boolean
+  range: boolean
+  /** The tile the last plain or Ctrl click landed on, where a Shift range starts. */
+  anchor: string | null
+}
+
+/**
+ * The pictures picked after a click on `path`. `order` is the listing, top to
+ * bottom. A plain click picks that one alone, or nothing when it was the only
+ * one; Ctrl or ⌘ adds or removes it; Shift picks the run from the anchor,
+ * added to the rest with Ctrl or ⌘ also held.
+ */
+export function clickPick(current: readonly string[], path: string, order: readonly string[], click: PickClick): string[] {
+  if (click.range) {
+    const to = order.indexOf(path)
+    const from = click.anchor ? order.indexOf(click.anchor) : -1
+    const run = from < 0 || to < 0 ? [path] : order.slice(Math.min(from, to), Math.max(from, to) + 1)
+    return click.toggle ? joinPicks(current, run) : run
+  }
+  if (click.toggle) return current.includes(path) ? current.filter((item) => item !== path) : [...current, path]
+  return current.length === 1 && current[0] === path ? [] : [path]
+}
+
+/** `base` followed by what `added` has that it does not. */
+export function joinPicks(base: readonly string[], added: readonly string[]): string[] {
+  const known = new Set(base)
+  return [...base, ...added.filter((path) => !known.has(path))]
+}
+
+/** The picked pictures that are still listed, in listing order; the same array when nothing changed. */
+export function listedPicks(current: string[], order: readonly string[]): string[] {
+  const picked = new Set(current)
+  const kept = order.filter((path) => picked.has(path))
+  return kept.length === current.length && kept.every((path, index) => path === current[index]) ? current : kept
+}

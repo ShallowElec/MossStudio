@@ -137,4 +137,118 @@ describe('library', () => {
     await expect.poll(() => tiles(page).count()).toBe(3)
     await expect.poll(() => page.getByText('3 张').isVisible()).toBe(true)
   })
+
+  const pathOf = (index: number): string => `/fixture/outputs/moss_000${index}.png`
+  const bar = (page: Page) => page.getByRole('toolbar', { name: '已选作品' })
+  const pickedPaths = (page: Page) =>
+    page
+      .locator('[data-library-item][aria-pressed="true"]')
+      .evaluateAll((items) => items.map((item) => item.getAttribute('data-library-item')))
+
+  it('picks several with Shift and Ctrl clicks; the bar takes the panel’s place and Esc lets go', async () => {
+    const page = await openLibrary()
+    await tiles(page).nth(0).click()
+    const detail = page.getByRole('complementary', { name: '作品详情' })
+    await expect.poll(() => detail.count()).toBe(1)
+
+    await tiles(page)
+      .nth(2)
+      .click({ modifiers: ['Shift'] })
+    await expect.poll(() => pickedPaths(page)).toEqual([pathOf(0), pathOf(1), pathOf(2)])
+    await expect.poll(() => bar(page).getByText('已选 3 张').isVisible()).toBe(true)
+    expect(await detail.count()).toBe(0)
+    // Each picked tile carries the accent ring and a check.
+    expect(await page.locator('[data-library-item] [data-picked-badge]').count()).toBe(3)
+
+    await tiles(page)
+      .nth(1)
+      .click({ modifiers: ['Control'] })
+    await expect.poll(() => pickedPaths(page)).toEqual([pathOf(0), pathOf(2)])
+    await expect.poll(() => bar(page).getByText('已选 2 张').isVisible()).toBe(true)
+    // No 复制 for several pictures: several files on the clipboard do not paste alike everywhere.
+    expect(await bar(page).getByRole('button', { name: /复制/ }).count()).toBe(0)
+
+    await page.keyboard.press('Escape')
+    await expect.poll(() => pickedPaths(page)).toEqual([])
+    expect(await bar(page).count()).toBe(0)
+  })
+
+  it('draws a box from empty space to pick the tiles it touches', async () => {
+    const page = await openLibrary()
+    const first = (await tiles(page).nth(0).boundingBox())!
+    const second = (await tiles(page).nth(1).boundingBox())!
+    // From below the row, up across the first two tiles.
+    await page.mouse.move(first.x + 10, first.y + first.height + 40)
+    await page.mouse.down()
+    await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 6 })
+    await expect.poll(() => pickedPaths(page)).toEqual([pathOf(0), pathOf(1)])
+    await page.mouse.up()
+    await expect.poll(() => bar(page).getByText('已选 2 张').isVisible()).toBe(true)
+    // A click on empty space lets them go.
+    await page.mouse.click(first.x + 10, first.y + first.height + 40)
+    await expect.poll(() => pickedPaths(page)).toEqual([])
+  })
+
+  it('exports the picked pictures to a folder, with their 生成参数 when asked', async () => {
+    const page = await openLibrary()
+    await tiles(page).nth(1).click()
+    await tiles(page)
+      .nth(3)
+      .click({ modifiers: ['Control'] })
+    const menu = bar(page).getByRole('button', { name: '导出内容' })
+    await menu.click()
+    const choices = page.getByRole('menu', { name: '导出内容' })
+    // 只导出图片 is the default.
+    expect(await choices.getByRole('menuitem', { name: '只导出图片' }).getAttribute('aria-current')).toBe('true')
+    await app.screenshot('library-export-menu-light')
+    await choices.getByRole('menuitem', { name: '连同生成参数' }).click()
+    await bar(page).getByRole('button', { name: '导出到文件夹…' }).click()
+    await expect.poll(() => app.calls('gallery:export')).toEqual([{ paths: [pathOf(1), pathOf(3)], withParams: true }])
+    await expect.poll(() => page.getByText('已导出 2 张').isVisible()).toBe(true)
+  })
+
+  it('deletes the picked pictures after one confirmation', async () => {
+    const page = await openLibrary()
+    await tiles(page).nth(0).click()
+    await tiles(page)
+      .nth(1)
+      .click({ modifiers: ['Control'] })
+    await bar(page).getByRole('button', { name: '删除' }).click()
+    const confirm = page.getByRole('dialog')
+    await expect.poll(() => confirm.getByText('删除这 2 张图片？').isVisible()).toBe(true)
+    await confirm.getByRole('button', { name: /^移到/ }).click()
+    await expect.poll(() => app.calls<{ path: string }>('gallery:trash')).toEqual([{ path: pathOf(0) }, { path: pathOf(1) }])
+    await expect.poll(() => tiles(page).count()).toBe(2)
+    expect(await bar(page).count()).toBe(0)
+  })
+
+  it('drags pictures out as files: the picks when the tile is one of them, else that tile', async () => {
+    const page = await openLibrary()
+    await tiles(page).nth(0).click()
+    await tiles(page)
+      .nth(2)
+      .click({ modifiers: ['Control'] })
+    await tiles(page).nth(2).dispatchEvent('dragstart')
+    await tiles(page).nth(3).dispatchEvent('dragstart')
+    await expect.poll(() => app.calls('gallery:start-drag')).toEqual([{ paths: [pathOf(0), pathOf(2)] }, { paths: [pathOf(3)] }])
+  })
+
+  it('right-click on a picture: 复制图片, 另存为… and 在文件夹中显示', async () => {
+    const page = await openLibrary()
+    await tiles(page).nth(1).click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: '图片操作' })
+    expect(await menu.getByRole('menuitem').allTextContents()).toEqual(['复制图片', '另存为…', '在文件夹中显示'])
+    // The picture right-clicked becomes the pick.
+    expect(await pickedPaths(page)).toEqual([pathOf(1)])
+    await menu.getByRole('menuitem', { name: '复制图片' }).click()
+    await expect.poll(() => app.calls('gallery:copy-image')).toEqual([{ path: pathOf(1) }])
+    await expect.poll(() => page.getByText('已复制图片').isVisible()).toBe(true)
+
+    await tiles(page).nth(1).click({ button: 'right' })
+    await page.getByRole('menu', { name: '图片操作' }).getByRole('menuitem', { name: '另存为…' }).click()
+    await expect.poll(() => app.calls('gallery:save-as')).toEqual([{ path: pathOf(1) }])
+    await tiles(page).nth(1).click({ button: 'right' })
+    await page.getByRole('menu', { name: '图片操作' }).getByRole('menuitem', { name: '在文件夹中显示' }).click()
+    await expect.poll(() => app.calls('gallery:reveal')).toEqual([{ path: pathOf(1) }])
+  })
 })

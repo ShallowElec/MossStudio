@@ -225,6 +225,14 @@ export const Ipc = {
   galleryReveal: 'gallery:reveal',
   /** Move one gallery image (and its JSON sidecar) to the OS trash. */
   galleryTrash: 'gallery:trash',
+  /** Put one gallery picture on the clipboard as an image: `{ path }` → true. */
+  galleryCopyImage: 'gallery:copy-image',
+  /** Copy one gallery picture where the person picks in a save dialog: `{ path }` → GallerySaveResult | null. */
+  gallerySaveAs: 'gallery:save-as',
+  /** Copy gallery pictures (and, with `withParams`, their sidecars) into a picked folder: → GalleryExportResult | null. */
+  galleryExport: 'gallery:export',
+  /** Hand gallery pictures to the OS drag, so they can be dropped in another app: `{ paths }` → true. */
+  galleryStartDrag: 'gallery:start-drag',
   pickDialog: 'dialog:pick',
   pickImages: 'dialog:pick-images',
   openPath: 'app:open-path',
@@ -290,6 +298,8 @@ export const Events = {
   download: 'event:download',
   /** The Library's images changed (a generation's outputs were recorded). */
   galleryChanged: 'event:gallery-changed',
+  /** GalleryExportProgress while `gallery:export` copies. */
+  galleryExport: 'event:gallery-export',
   instancesChanged: 'event:instances-changed',
   hostsChanged: 'event:hosts-changed',
   modelsChanged: 'event:models-changed',

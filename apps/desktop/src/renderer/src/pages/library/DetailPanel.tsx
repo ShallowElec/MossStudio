@@ -13,7 +13,8 @@ import { Button, ConfirmDialog, FieldLabel, IconButton, LoadingRow, Spinner, use
 import { detailFacts } from './logic'
 
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause))
-const trashName = (): string => (window.clover.platform === 'darwin' ? '废纸篓' : '回收站')
+/** What the system calls its trash, in the words of the platform. */
+export const trashName = (): string => (window.clover.platform === 'darwin' ? '废纸篓' : '回收站')
 
 /** Right-hand panel for the selected image: preview, prompt, parameters and actions. */
 export function DetailPanel({

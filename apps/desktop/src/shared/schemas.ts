@@ -888,6 +888,18 @@ export const schemas = {
 
   galleryTrash: z.object({ path: pathLike }),
 
+  galleryCopyImage: z.object({ path: pathLike }),
+
+  gallerySaveAs: z.object({ path: pathLike }),
+
+  galleryExport: z.object({
+    paths: z.array(pathLike).min(1).max(10_000),
+    /** Also copy each picture's JSON sidecar (生成参数). */
+    withParams: z.boolean().default(false),
+  }),
+
+  galleryStartDrag: z.object({ paths: z.array(pathLike).min(1).max(1000) }),
+
   pickImages: z.object({ title: z.string().max(120).optional() }),
 
   pickDialog: z.object({

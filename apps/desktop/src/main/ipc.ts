@@ -32,6 +32,7 @@ import { deleteCombination, listCombinations, saveCombination } from './services
 import { forgetBundle, modelImportState, relocateBundle, resumeModelImport, startModelImport } from './services/modelImport'
 import { deleteSeries, getSeries, listSeries, saveSeries, writeChapterPages } from './services/manga'
 import { galleryDetail, listGallery, recordJobOutputs, revealInFolder, trashGalleryItem } from './services/gallery'
+import { copyPictureToClipboard, exportPictures, savePictureAs, startPictureDrag } from './services/pictureExport'
 import { activeJobInputPaths, cancelJob, getJob, getJobLogs, inputJob, listJobs, onJobCompleted } from './services/supervisor'
 import { clearDiagnostics, dismissDiagnostic, listDiagnostics } from './services/diagnostics'
 import { clearLegacyGithubToken, getSettings, updateSettings } from './services/settings'
@@ -967,6 +968,16 @@ export function registerIpc(): void {
   handle(Ipc.galleryReveal, schemas.galleryReveal, ({ path }) => revealInFolder(path))
 
   handle(Ipc.galleryTrash, schemas.galleryTrash, ({ path }) => trashGalleryItem(path))
+
+  handle(Ipc.galleryCopyImage, schemas.galleryCopyImage, ({ path }) => copyPictureToClipboard(path))
+
+  handle(Ipc.gallerySaveAs, schemas.gallerySaveAs, ({ path }, event) => savePictureAs(event.sender, path))
+
+  handle(Ipc.galleryExport, schemas.galleryExport, ({ paths, withParams }, event) =>
+    exportPictures(event.sender, paths, withParams, (progress) => emit(Events.galleryExport, progress)),
+  )
+
+  handle(Ipc.galleryStartDrag, schemas.galleryStartDrag, ({ paths }, event) => startPictureDrag(event.sender, paths))
 
   // Keep each output's generation details (project, model, steps…) next to the image.
   onJobCompleted((job) => {

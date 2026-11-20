@@ -1042,6 +1042,22 @@ const cases = {
     output: { path: '/g/a.png' },
     rejects: { 'blank path': { path: ' ' }, 'missing path': {} },
   },
+  galleryCopyImage: { valid: { path: '/g/a.png' }, rejects: { 'blank path': { path: ' ' }, 'missing path': {} } },
+  gallerySaveAs: { valid: { path: '/g/a.png' }, rejects: { 'blank path': { path: '' }, 'missing path': {} } },
+  galleryExport: {
+    valid: { paths: ['/g/a.png', '/g/b.png'] },
+    output: { paths: ['/g/a.png', '/g/b.png'], withParams: false },
+    accepts: { 'with parameters': { paths: ['/g/a.png'], withParams: true } },
+    rejects: {
+      'no pictures': { paths: [] },
+      'a blank path': { paths: ['/g/a.png', ' '] },
+      'a non-boolean choice': { paths: ['/g/a.png'], withParams: 'yes' },
+    },
+  },
+  galleryStartDrag: {
+    valid: { paths: ['/g/a.png'] },
+    rejects: { 'no pictures': { paths: [] }, 'a single path, not a list': { paths: '/g/a.png' } },
+  },
 
   pickImages: {
     valid: {},

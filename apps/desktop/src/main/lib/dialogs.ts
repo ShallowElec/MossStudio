@@ -12,3 +12,12 @@ export function showOpenDialogFor(
   const owner = BrowserWindow.fromWebContents(sender)
   return owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
 }
+
+/** A save dialog attached to the window that asked for it, like `showOpenDialogFor`. */
+export function showSaveDialogFor(
+  sender: Electron.WebContents,
+  options: Electron.SaveDialogOptions,
+): Promise<Electron.SaveDialogReturnValue> {
+  const owner = BrowserWindow.fromWebContents(sender)
+  return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options)
+}

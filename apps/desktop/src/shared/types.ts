@@ -1205,6 +1205,25 @@ export interface GalleryDetail extends GalleryItem {
   generation?: GalleryGeneration
 }
 
+/** A picture saved under a name the person chose (`gallery:save-as`). */
+export interface GallerySaveResult {
+  path: string
+}
+
+/** What `gallery:export` copied into the chosen folder. */
+export interface GalleryExportResult {
+  folder: string
+  exported: number
+  /** Pictures that were gone or could not be copied. */
+  failed: number
+}
+
+/** `event:gallery-export`, after every picture an export copies. */
+export interface GalleryExportProgress {
+  done: number
+  total: number
+}
+
 import type { BackendInfo } from './backend'
 
 export interface AppInfo {

@@ -773,6 +773,18 @@ function defaultHandlers(): Map<string, Handler> {
     state.gallery = state.gallery.filter((item) => item.path !== path)
     return { trashed: [path] }
   })
+  // Getting pictures out: the save and folder dialogs answer at once, as if the person picked a place.
+  h.set(Ipc.galleryCopyImage, () => true)
+  h.set(Ipc.galleryStartDrag, () => true)
+  h.set(Ipc.gallerySaveAs, (payload) => {
+    const { path } = p<{ path: string }>(payload)
+    return { path: `/fixture/saved/${path.split('/').pop()}` }
+  })
+  h.set(Ipc.galleryExport, (payload, { emit }) => {
+    const { paths } = p<{ paths: string[]; withParams?: boolean }>(payload)
+    for (let done = 0; done <= paths.length; done += 1) emit(Events.galleryExport, { done, total: paths.length })
+    return { folder: '/fixture/export', exported: paths.length, failed: 0 }
+  })
 
   // Studio inputs: engine features, imported pictures, painted masks, control adapters
   // Like main: an SSH host gets uploaded image inputs, but no control adapters or live previews yet.

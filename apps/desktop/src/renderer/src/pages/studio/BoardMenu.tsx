@@ -58,6 +58,8 @@ export function BoardMenu({
     }
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
+      // Esc closes the menu only, not the dialog it may sit in (the picture viewer).
+      event.preventDefault()
       event.stopPropagation()
       close.current()
     }

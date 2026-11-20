@@ -1,11 +1,13 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useEffect } from 'react'
+import { Check, ChevronLeft, ChevronRight, Copy } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import type { Catalog, JobRecord, ProjectCanvas } from '@shared/types'
 import { Ipc } from '@shared/channels'
 import { PromptBlock } from '../../components/common/PromptBlock'
 import { Button, IconButton, Modal, cn, useToast } from '../../components/ui'
 import { call } from '../../lib/api'
 import { dimensions, duration } from '../../lib/format'
+import { usePictureActions } from '../../lib/usePictureActions'
+import { BoardMenu } from './BoardMenu'
 import { OutputImage } from './OutputImage'
 import { qualityFor, qualityPreset } from './defaults'
 import { canvasDescription } from './prompt'
@@ -42,8 +44,25 @@ export function OutputViewer({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, index, count, onIndex])
 
-  const run = (channel: string, path: string): void => {
-    void call(channel, { path }).catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
+  const pictures = usePictureActions()
+  const well = useRef<HTMLDivElement>(null)
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; bounds: { width: number; height: number } } | null>(null)
+  // 复制图片 reads 已复制 for a moment, for the picture it copied.
+  const [copied, setCopied] = useState<string | null>(null)
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(null), 1600)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+  useEffect(() => setMenu(null), [current?.path, open])
+
+  const openPath = (path: string): void => {
+    void call(Ipc.openPath, { path }).catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
+  }
+  const copy = (path: string): void => {
+    void pictures.copy(path).then((done) => {
+      if (done) setCopied(path)
+    })
   }
   const quality = canvas ? qualityFor(canvas.steps) : 'custom'
   const model = canvas?.modelBundleId
@@ -62,14 +81,29 @@ export function OutputViewer({
       footer={
         current ? (
           <>
-            <Button tone="ghost" size="md" onClick={() => run(Ipc.galleryReveal, current.path)}>
+            {/* Going elsewhere on the left; what is done with the picture itself on the right. */}
+            <Button tone="ghost" size="md" onClick={() => pictures.reveal(current.path)}>
               在文件夹中显示
             </Button>
-            <Button tone="secondary" size="md" onClick={() => run(Ipc.openPath, current.path)}>
+            <Button tone="ghost" size="md" className="mr-auto" onClick={() => openPath(current.path)}>
               用默认程序打开
             </Button>
             <Button tone="ghost" size="md" onClick={onClose}>
               关闭
+            </Button>
+            <Button tone="secondary" size="md" onClick={() => void pictures.saveAs(current.path)}>
+              另存为…
+            </Button>
+            <Button tone="primary" size="md" className="min-w-[104px]" onClick={() => copy(current.path)}>
+              {copied === current.path ? (
+                <>
+                  <Check className="size-4" strokeWidth={1.6} /> 已复制
+                </>
+              ) : (
+                <>
+                  <Copy className="size-4" strokeWidth={1.6} /> 复制图片
+                </>
+              )}
             </Button>
           </>
         ) : null
@@ -77,9 +111,28 @@ export function OutputViewer({
     >
       {canvas && current ? (
         <div className="flex flex-col gap-4">
-          <div className="relative flex items-center justify-center rounded-lg bg-well p-2">
+          <div
+            ref={well}
+            className="relative flex items-center justify-center rounded-lg bg-well p-2"
+            onContextMenu={(event) => {
+              event.preventDefault()
+              const rect = well.current?.getBoundingClientRect()
+              if (!rect) return
+              setMenu({
+                at: { x: event.clientX - rect.left, y: event.clientY - rect.top },
+                bounds: { width: rect.width, height: rect.height },
+              })
+            }}
+          >
             {/* Leaves room for the thumbnails, the prompt and the parameters below without scrolling, down to the 760px minimum window. */}
             <div
+              data-picture-drag
+              draggable
+              onDragStart={(event) => {
+                // The OS drag carries the file itself, so another app (a chat, an editor, a folder) can take it.
+                event.preventDefault()
+                pictures.dragOut([current.path])
+              }}
               style={{
                 aspectRatio: `${current.width || canvas.width} / ${current.height || canvas.height}`,
                 height: 'max(200px, calc(100vh - 580px))',
@@ -105,6 +158,15 @@ export function OutputViewer({
                   <ChevronRight className="size-5" strokeWidth={1.6} />
                 </IconButton>
               </>
+            ) : null}
+            {menu ? (
+              <BoardMenu
+                label="图片操作"
+                entries={pictures.menu(current.path)}
+                at={menu.at}
+                bounds={menu.bounds}
+                onClose={() => setMenu(null)}
+              />
             ) : null}
           </div>
           {count > 1 ? (

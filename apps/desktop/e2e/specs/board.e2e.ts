@@ -1209,6 +1209,58 @@ describe('filmstrip, 用作起始图 and recipes', () => {
     await expect.poll(() => cardIds(page)).toEqual(['img-1', 'canvas-1', 'kept'])
   })
 
+  it('a strip picture dragged out of the window goes to the system as a file; dropped on the board it still pins', async () => {
+    const page = await openWithRuns()
+    const strip = card(page).locator('[data-filmstrip]')
+    const thumb = (await strip.getByRole('button', { name: '第 2 张' }).boundingBox())!
+    await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(thumb.x + 40, thumb.y + 40, { steps: 4 })
+    await expect.poll(() => page.locator('[data-run-drag]').count()).toBe(1)
+    // On out past the left edge of the window: the board lets go and the system drag takes the file.
+    await page.mouse.move(-30, thumb.y + 40, { steps: 6 })
+    await expect.poll(() => app.calls('gallery:start-drag')).toEqual([{ paths: ['/fixture/outputs/run-2-1024x1024.png'] }])
+    await expect.poll(() => page.locator('[data-run-drag]').count()).toBe(0)
+    await page.mouse.up()
+    // Nothing was pinned.
+    expect(await cardIds(page)).toEqual(['img-1', 'canvas-1', 'kept'])
+  })
+
+  it('right-click on a strip picture gets it out of MossStudio; the viewer copies, saves and drags it', async () => {
+    const page = await openWithRuns()
+    const strip = card(page).locator('[data-filmstrip]')
+    await strip.getByRole('button', { name: '第 1 张' }).click({ button: 'right' })
+    const menu = page.getByRole('menu', { name: '图片操作' })
+    expect(await menu.getByRole('menuitem').allTextContents()).toEqual(['复制图片', '另存为…', '在文件夹中显示'])
+    await menu.getByRole('menuitem', { name: '复制图片' }).click()
+    await expect.poll(() => app.calls('gallery:copy-image')).toEqual([{ path: '/fixture/outputs/run-1-1024x1024.png' }])
+
+    await strip.getByRole('button', { name: '第 2 张' }).dblclick()
+    const viewer = page.getByRole('dialog')
+    await viewer.getByRole('button', { name: '复制图片' }).click()
+    await expect
+      .poll(() => app.calls('gallery:copy-image'))
+      .toEqual([{ path: '/fixture/outputs/run-1-1024x1024.png' }, { path: '/fixture/outputs/run-2-1024x1024.png' }])
+    // The button says it worked, then goes back.
+    await expect.poll(() => viewer.getByRole('button', { name: '已复制' }).isVisible()).toBe(true)
+    await expect.poll(() => viewer.getByRole('button', { name: '复制图片' }).isVisible(), { timeout: 5_000 }).toBe(true)
+
+    await viewer.getByRole('button', { name: '另存为…' }).click()
+    await expect.poll(() => app.calls('gallery:save-as')).toEqual([{ path: '/fixture/outputs/run-2-1024x1024.png' }])
+    await viewer.getByRole('button', { name: '在文件夹中显示' }).click()
+    await expect.poll(() => app.calls('gallery:reveal')).toEqual([{ path: '/fixture/outputs/run-2-1024x1024.png' }])
+
+    await viewer.locator('[data-picture-drag]').dispatchEvent('dragstart')
+    await expect.poll(() => app.calls('gallery:start-drag')).toEqual([{ paths: ['/fixture/outputs/run-2-1024x1024.png'] }])
+
+    // Right-click on the big picture; Esc closes the menu and leaves the viewer open.
+    await viewer.locator('[data-picture-drag]').click({ button: 'right' })
+    await expect.poll(() => viewer.getByRole('menu', { name: '图片操作' }).isVisible()).toBe(true)
+    await page.keyboard.press('Escape')
+    await expect.poll(() => viewer.getByRole('menu', { name: '图片操作' }).count()).toBe(0)
+    expect(await viewer.isVisible()).toBe(true)
+  })
+
   it('用作起始图: a new 画面 to the right, wired from the picture on the face', async () => {
     const page = await openWithRuns()
     await card(page).locator('[data-filmstrip]').getByRole('button', { name: '第 2 张' }).click()

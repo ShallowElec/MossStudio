@@ -1,7 +1,7 @@
 ---
 status: current
 last-verified: 2026-11-08 (fec4fe3)
-code: apps/desktop/src/renderer/src/pages/studio/, apps/desktop/src/renderer/src/lib/preparation.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/canvasJobBranch.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/shared/generationError.ts
+code: apps/desktop/src/renderer/src/pages/studio/, apps/desktop/src/renderer/src/lib/preparation.ts, apps/desktop/src/renderer/src/lib/usePictureActions.ts, apps/desktop/src/main/services/pictureExport.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/canvasJobBranch.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/shared/generationError.ts
 ---
 
 # Studio node board
@@ -36,6 +36,7 @@ Right-click menus (`studio/BoardMenu.tsx`, entries built in `studio/Board.tsx`):
 | Empty board 画板 | 新建画面, the picture recipes (section 7), 新建风格, 一组同风格的图, 导入图片…, 从作品选择…, 显示全部 |
 | A card (same as its ⋯ button) | The picture actions of section 6; on a 画面 (not a 放大), 描图… and, while it has one, 不用描图; 复制 or 复制为新画面, 查看详情 (opens the Activity panel on the job), then 删除 / 删除风格 / 删除画面 |
 | A wire 连线 | 断开连线 |
+| A filmstrip thumbnail with a picture | 复制图片, 另存为…, 在文件夹中显示 (section 6) |
 | A region 区域 | 改描述, 删除 |
 
 ## 3. Canvas kinds
@@ -93,7 +94,8 @@ Wires (`studio/wires.ts`, drawn by `studio/WireLayer.tsx`) are of two kinds: `in
 ## 6. Runs and the filmstrip
 
 - A run (`studio/useGenerate.ts`) resolves the 画面 with its 风格 nodes (`generationCanvas`), resolves inputs, picks the seed (`studio/defaults.ts` `seedForRun`: a new random seed unless 种子 is locked), and writes into a new result canvas (`taskCanvasFor`). The 画面's face follows the newest run.
-- The filmstrip (`studio/runs.ts`, `studio/Filmstrip.tsx`) lists every run of a 画面, oldest left. A run stays folded in the strip unless it is pinned, feeds another canvas, or is itself the source of a result (`foldedRunIds`). Click a thumbnail to show it on the face (and on the wires), double-click to open the viewer (`studio/OutputViewer.tsx`), drag it onto the board to pin it where it lands (`studio/useRunDrag.ts`). Runs that do not fit sit behind +N. A run without a picture (running, 失败, 停止) shows only while it is the newest; the next run clears such leftovers (`staleRunIds`). A finished card reads N 张, then 排队 N 张 when jobs were ahead of it and 实跑 with the engine's own time (`studio/jobStatus.ts`, from `JobRecord.queuedBehind` and `runStartedAt`).
+- The filmstrip (`studio/runs.ts`, `studio/Filmstrip.tsx`) lists every run of a 画面, oldest left. A run stays folded in the strip unless it is pinned, feeds another canvas, or is itself the source of a result (`foldedRunIds`). Click a thumbnail to show it on the face (and on the wires), double-click to open the viewer (`studio/OutputViewer.tsx`), drag it onto the board to pin it where it lands (`studio/useRunDrag.ts`), or on out of the window to hand the file to another app. The drag stays the board's own until the pointer leaves the window (`outsideWindow`), so pinning keeps working; only then does it become the system's drag (`Ipc.galleryStartDrag`). The card face does not drag out: dragging it moves the card. Right-click on a thumbnail gives 复制图片, 另存为… and 在文件夹中显示. Runs that do not fit sit behind +N. A run without a picture (running, 失败, 停止) shows only while it is the newest; the next run clears such leftovers (`staleRunIds`). A finished card reads N 张, then 排队 N 张 when jobs were ahead of it and 实跑 with the engine's own time (`studio/jobStatus.ts`, from `JobRecord.queuedBehind` and `runStartedAt`).
+- The viewer (`studio/OutputViewer.tsx`) shows a run's pictures one at a time with its description and parameters. Its footer has 在文件夹中显示 and 用默认程序打开 on the left, 关闭, 另存为… and 复制图片 on the right; 复制图片 reads 已复制 for a moment after it worked. The big picture drags out of the window as a file and has the same right-click menu as a thumbnail. The three picture actions are `lib/usePictureActions.ts`, shared with 作品; main checks every path against the gallery roots (`main/services/pictureExport.ts`, see [architecture.md](/docs/reference/architecture.md#ipc-and-events)).
 - A failed run says what happened in plain words, from the code the engine returned (`shared/generationError.ts`); the engine's own text stays in the job log, behind 查看详情 (on the face of a 画面, in the footer of a result). Out of GPU memory (`E_OOM`) reads 显存不够这个尺寸, and 重试, which would fail the same way, becomes 改小一点再试: the 画面 goes one size step down (`smallerSize` in `studio/defaults.ts`, about half the pixels, regions scaled along by `smallerCanvas`) and runs again. A 放大, whose size comes from its start picture, and a 画面 already at the smallest size keep 重试. The same words show in 活动 and the failure notification, and in 漫画's retry line.
 - Busy branches (`shared/canvasJobBranch.ts`): while a job is active, its canvas and every canvas upstream in its `sourceCanvasId` chain count as busy, so 生成 and 重新生成 are disabled with 这个画面或它的结果正在生成. Main checks the same lineage before starting a job.
 
