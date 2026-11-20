@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { PICTURE_KINDS, presetsFor, seesPictures, type AiProviderInfo, type AiProviderKind } from '@shared/ai'
 import { Ipc } from '@shared/channels'
@@ -70,9 +70,14 @@ export function ProviderDialog({
   const kinds = visionOnly ? PICTURE_KINDS : ALL_KINDS
   const [draft, setDraft] = useState<Draft>(() => draftFor(editing, kinds[0]!))
   const [saving, setSaving] = useState(false)
-  useEffect(() => {
-    if (open) setDraft(draftFor(editing, (visionOnly ? PICTURE_KINDS : ALL_KINDS)[0]!))
-  }, [open, editing, visionOnly])
+  // The form is filled while the opening renders, not in an effect after it: the effect left the
+  // first frame on the previous, empty form, and a keystroke then wrote over the model being edited.
+  const opening = open ? `${editing?.id ?? ''}|${visionOnly}` : null
+  const [filledFor, setFilledFor] = useState<string | null>(null)
+  if (opening !== filledFor) {
+    setFilledFor(opening)
+    if (opening !== null) setDraft(draftFor(editing, kinds[0]!))
+  }
 
   async function save(): Promise<void> {
     if (!draft.name.trim() || !draft.baseUrl.trim() || !draft.model.trim()) {
@@ -159,7 +164,15 @@ export function ProviderDialog({
                   key={preset.name}
                   tone="secondary"
                   size="sm"
-                  onClick={() => setDraft({ ...draft, name: preset.name, kind: preset.kind, baseUrl: preset.baseUrl, model: preset.model })}
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      name: preset.name,
+                      kind: preset.kind,
+                      baseUrl: preset.baseUrl,
+                      model: preset.model,
+                    }))
+                  }
                 >
                   {preset.name}
                 </Button>
@@ -168,10 +181,22 @@ export function ProviderDialog({
           ) : null}
           <div className="grid grid-cols-2 gap-3">
             <Field label="名称">
-              <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+              <Input
+                value={draft.name}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setDraft((current) => ({ ...current, name: value }))
+                }}
+              />
             </Field>
             <Field label="接口类型">
-              <Select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as AiProviderKind })}>
+              <Select
+                value={draft.kind}
+                onChange={(event) => {
+                  const value = event.target.value as AiProviderKind
+                  setDraft((current) => ({ ...current, kind: value }))
+                }}
+              >
                 {kinds.map((kind) => (
                   <option key={kind} value={kind}>
                     {KIND_LABELS[kind]}
@@ -182,18 +207,30 @@ export function ProviderDialog({
             <Field label="地址" className="col-span-2">
               <Input
                 value={draft.baseUrl}
-                onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setDraft((current) => ({ ...current, baseUrl: value }))
+                }}
                 placeholder="https://api.openai.com/v1"
               />
             </Field>
             <Field label="模型">
-              <Input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} />
+              <Input
+                value={draft.model}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setDraft((current) => ({ ...current, model: value }))
+                }}
+              />
             </Field>
             <Field label="API Key">
               <Input
                 type="password"
                 value={draft.apiKey}
-                onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setDraft((current) => ({ ...current, apiKey: value }))
+                }}
                 placeholder={draft.id ? '留空则保留原来的' : 'sk-...'}
               />
             </Field>
