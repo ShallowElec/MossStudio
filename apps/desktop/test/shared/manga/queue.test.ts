@@ -105,6 +105,11 @@ describe('a job ending', () => {
     expect(panel).toMatchObject({ state: 'failed', attempts: MAX_ATTEMPTS, error: '生成失败了', retryAt: undefined })
   })
 
+  it("words an out-of-memory failure plainly, not in the engine's English", () => {
+    const panel = applyJob(running, { id: 'job-1', state: 'failed', error: { code: 'E_OOM', message: 'CUDA out of memory' } }, Date.now())
+    expect(panel.error).toBe('显存不够这个尺寸')
+  })
+
   it('does not retry a run a person stopped, nor a submit that cannot work', () => {
     expect(applyJob(running, { id: 'job-1', state: 'canceled' }).state).toBe('draft')
     expect(markSubmitFailed(running, '还没有可用的模型', false)).toMatchObject({ state: 'failed', error: '还没有可用的模型' })

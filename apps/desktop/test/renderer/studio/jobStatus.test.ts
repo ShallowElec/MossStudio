@@ -113,17 +113,23 @@ describe('studio/jobStatus cardJobView', () => {
   })
 
   it('offers 重试 with the message when a run failed, and says 已取消 when canceled', () => {
-    expect(cardJobView(canvas({ jobId: 'j1' }), job({ state: 'failed', error: { code: 'E_OOM', message: '显存不够' } }))).toMatchObject({
-      state: 'failed',
-      active: false,
-      label: '失败',
-      error: '显存不够',
-      retry: true,
-    })
+    const failed = cardJobView(canvas({ jobId: 'j1' }), job({ state: 'failed', error: { code: 'E_MODEL', message: '模型文件不完整' } }))
+    expect(failed).toMatchObject({ state: 'failed', active: false, label: '失败', error: '模型文件不完整', retry: true })
+    expect(failed.smaller).toBeUndefined()
     expect(cardJobView(canvas({ jobId: 'j1' }), job({ state: 'failed' }))).toMatchObject({ error: '生成失败', retry: true })
     const canceled = cardJobView(canvas({ jobId: 'j1' }), job({ state: 'canceled' }))
     expect(canceled).toMatchObject({ state: 'canceled', active: false, label: '已取消' })
     expect(canceled.retry).toBeUndefined()
+  })
+
+  it('says plainly that the GPU ran out of memory, and that a smaller picture gets through', () => {
+    const engine = cardJobView(canvas({ jobId: 'j1' }), job({ state: 'failed', error: { code: 'E_OOM', message: 'CUDA out of memory' } }))
+    expect(engine).toMatchObject({ state: 'failed', error: '显存不够这个尺寸', retry: true, smaller: true })
+    // A card whose job is gone words it from what it recorded.
+    expect(cardJobView(canvas({ jobState: 'failed', error: { code: 'E_OOM', message: 'CUDA out of memory' } }), undefined)).toMatchObject({
+      error: '显存不够这个尺寸',
+      smaller: true,
+    })
   })
 
   it('counts every output and the time it took', () => {

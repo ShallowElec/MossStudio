@@ -13,6 +13,7 @@ import {
   nextCanvasTitle,
   nextNodeTitle,
   qualityPreset,
+  smallerSize,
 } from './defaults'
 import { DEFAULT_INIT_STRENGTH, dropLinksTo, linksOf, setLink, type LinkRole } from './links'
 import { boardCanvases, foldedRunIds, givesPicture, pictureLink, pinRun, spotBeside } from './runs'
@@ -582,6 +583,23 @@ export function resizeCanvas<T extends Pick<ProjectCanvas, 'width' | 'height' | 
   }
   if (canvas.sampling?.hires) next.sampling = scaleHires(canvas.sampling, canvas, { width, height })
   return next
+}
+
+/**
+ * A 画面 one size step down (see smallerSize), its regions scaled with it.
+ * Null when it cannot go smaller, or when its start picture sets its size (放大).
+ */
+export function smallerCanvas(canvas: ProjectCanvas): ProjectCanvas | null {
+  if (canvas.kind !== 'layout' || canvas.upscale) return null
+  const size = smallerSize(canvas.width, canvas.height)
+  if (!size) return null
+  const x = size.width / canvas.width
+  const y = size.height / canvas.height
+  const layers = canvas.layers.map((layer) => {
+    const [x1, y1, x2, y2] = layer.bbox
+    return { ...layer, bbox: [x1 * x, y1 * y, x2 * x, y2 * y] as ProjectLayer['bbox'] }
+  })
+  return resizeCanvas({ ...canvas, layers }, size.width, size.height)
 }
 
 /** The canvases deleting `id` removes: the canvas, and the runs folded into its filmstrip. */

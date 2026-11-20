@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { BOARD_GAP, cardRect } from '@renderer/pages/studio/boardLayout'
-import { boundsOf, boxBetween, cardsInBox, minimapFit, readingOrder, tidyPlaces, toggled } from '@renderer/pages/studio/selection'
+import {
+  MINIMAP_MIN_BOARD,
+  boundsOf,
+  boxBetween,
+  cardsInBox,
+  minimapFit,
+  minimapHelps,
+  readingOrder,
+  tidyPlaces,
+  toggled,
+} from '@renderer/pages/studio/selection'
 
 // A 1024 px picture is a 256 px card (BOARD_UNIT 0.25).
 const card = (id: string, x: number, y: number, width = 1024, height = 1024) => ({ id, x, y, width, height })
@@ -57,5 +67,26 @@ describe('studio/selection', () => {
     const top = bounds.y * fit.scale + fit.offset.y
     const bottom = (bounds.y + bounds.h) * fit.scale + fit.offset.y
     expect(top + bottom).toBeCloseTo(128)
+  })
+})
+
+describe('studio/selection minimap', () => {
+  const view = { zoom: 1, pan: { x: 0, y: 0 } }
+  const board = { width: 1000, height: 700 }
+
+  it('shows only once the cards reach past the part of the board on screen', () => {
+    // One card, all of it on screen: the minimap would only cover the board.
+    expect(minimapHelps([card('a', 100, 100)], view, board)).toBe(false)
+    expect(minimapHelps([], view, board)).toBe(false)
+    // A card past the right edge, or above the top once panned, or everything once zoomed in.
+    expect(minimapHelps([card('a', 100, 100), card('b', 900, 100)], view, board)).toBe(true)
+    expect(minimapHelps([card('a', 100, 100)], { zoom: 1, pan: { x: 0, y: -200 } }, board)).toBe(true)
+    expect(minimapHelps([card('a', 100, 100), card('b', 600, 300)], { zoom: 2, pan: { x: 0, y: 0 } }, board)).toBe(true)
+  })
+
+  it('stays away on a narrow board, where it would cover too much of it', () => {
+    const narrow = { width: MINIMAP_MIN_BOARD - 1, height: 700 }
+    expect(minimapHelps([card('a', 100, 100), card('b', 2000, 100)], view, narrow)).toBe(false)
+    expect(minimapHelps([card('a', 100, 100), card('b', 2000, 100)], view, { width: MINIMAP_MIN_BOARD, height: 700 })).toBe(true)
   })
 })

@@ -1,13 +1,13 @@
-import type { CanvasImageLink, ProjectCanvas } from '@shared/types'
+import type { CanvasImageLink, ProjectCanvas, ProjectLayer } from '@shared/types'
 import { normalizeCanvasAdapters } from '@shared/adapters'
 import { nextFreeSpot } from './boardLayout'
-import { createLayoutCanvas, settingsFrom, type CanvasSettings } from './canvases'
+import { createLayoutCanvas, resizeCanvas, settingsFrom, type CanvasSettings } from './canvases'
 import { MAX_DIMENSION, MIN_DIMENSION, DIMENSION_STEP, nextNodeTitle } from './defaults'
 import { linkSourceCanvas, setLink } from './links'
 import { canvasDescription, withDescription } from './prompt'
 import type { Blocker } from './readiness'
 import { cleanSampling } from './sampling'
-import { boardCanvases, givesPicture, pictureLink, pinRun, spotBeside } from './runs'
+import { boardCanvases, givesPicture, pictureLink, pinRun, runsOf, spotBeside } from './runs'
 
 /**
  * The 风格 and 放大 nodes. A 风格 (`kind: 'style'`) holds a description and
@@ -75,6 +75,65 @@ export function withUpscaleSize(canvas: ProjectCanvas, canvases: readonly Projec
   if (!canvas.upscale || !size) return canvas
   const target = upscaleSize(size, canvas.upscale.scale)
   return target.width === canvas.width && target.height === canvas.height ? canvas : { ...canvas, ...target }
+}
+
+/**
+ * A size of `picture`'s shape with about the pixels of `current`, on the
+ * engine's grid and within MAX_DIMENSION. Grid sizes rarely match a shape
+ * exactly, so of the short edges within 10% of the ideal one it takes the
+ * closest shape, then the closest pixel count (4:3 at 1024 × 1024 is 1152 × 864).
+ */
+export function shapedSize(
+  picture: { width: number; height: number },
+  current: { width: number; height: number },
+): { width: number; height: number } {
+  // The search runs over the short edge, so a portrait picture is sized as its landscape twin turned on end.
+  if (picture.height > picture.width) {
+    const turned = shapedSize({ width: picture.height, height: picture.width }, { width: current.height, height: current.width })
+    return { width: turned.height, height: turned.width }
+  }
+  const ratio = picture.width / picture.height
+  const fit = Math.min(1, MAX_DIMENSION / Math.sqrt(current.width * current.height * Math.max(ratio, 1 / ratio)))
+  const area = current.width * current.height * fit * fit
+  const ideal = Math.sqrt(area / ratio)
+  let best = { width: current.width, height: current.height }
+  let bestShape = Infinity
+  let bestArea = Infinity
+  for (let tried = step(ideal * 0.9); tried <= step(ideal * 1.1); tried += DIMENSION_STEP) {
+    const height = Math.min(MAX_DIMENSION, tried)
+    const width = Math.min(MAX_DIMENSION, step(height * ratio))
+    const shape = Math.abs(Math.log(width / height / ratio))
+    const off = Math.abs(width * height - area)
+    if (shape < bestShape - 1e-9 || (shape <= bestShape + 1e-9 && off < bestArea)) {
+      best = { width, height }
+      bestShape = shape
+      bestArea = off
+    }
+  }
+  return best
+}
+
+/**
+ * A 画面 that has never run takes the shape of its first 起始图, so the
+ * picture is not cropped to the default square. `before` is the 画面 before
+ * the link (absent for a new one); a 放大 sizes itself (withUpscaleSize).
+ */
+export function withStartPictureShape(canvas: ProjectCanvas, canvases: readonly ProjectCanvas[], before?: ProjectCanvas): ProjectCanvas {
+  const link = canvas.inputs?.init?.link
+  if (canvas.kind !== 'layout' || canvas.upscale || !link || before?.inputs?.init || runsOf(canvas, canvases).length) return canvas
+  const size = pictureSize(canvases, link)
+  if (!size) return canvas
+  const target = shapedSize(size, canvas)
+  if (target.width === canvas.width && target.height === canvas.height) return canvas
+  // Regions keep their place in the picture: scaled with it, not cut off at the new edges. A 画面 that
+  // never had a 起始图 has no 遮罩, so the boxes are the only geometry to carry over.
+  const sx = target.width / canvas.width
+  const sy = target.height / canvas.height
+  const layers = canvas.layers.map((layer) => {
+    const [x1, y1, x2, y2] = layer.bbox
+    return { ...layer, bbox: [x1 * sx, y1 * sy, x2 * sx, y2 * sy] as ProjectLayer['bbox'] }
+  })
+  return resizeCanvas({ ...canvas, layers }, target.width, target.height)
 }
 
 /** Why a 放大 cannot run yet, beyond what every 画面 checks (resolveJobInputs). */

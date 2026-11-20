@@ -3,7 +3,7 @@ import type { ControlAdapterEntry, EngineFeatures, ProjectCanvas } from '@shared
 import { cardRect, overlaps } from '@renderer/pages/studio/boardLayout'
 import { canvasFromPicture, defaultSettings, migrateCanvas, removeCanvasFrom, removedWith } from '@renderer/pages/studio/canvases'
 import { newCanvasMenu } from '@renderer/pages/studio/connect'
-import { recipes } from '@renderer/pages/studio/recipes'
+import { recipes, starterCanvas } from '@renderer/pages/studio/recipes'
 import {
   boardCanvases,
   canDropRun,
@@ -276,7 +276,8 @@ describe('studio/recipes', () => {
   }
   const brief = (list: ReturnType<typeof recipes>) => list.map((recipe) => [recipe.id, recipe.role ?? null, recipe.disabled ?? null])
 
-  it('offers every recipe the engine can do, and says why the others are off', () => {
+  it('offers only the recipes this computer can run, and says why while no engine is ready', () => {
+    const ids = (list: ReturnType<typeof recipes>) => list.map((recipe) => recipe.id)
     expect(brief(recipes(features(), [adapter]))).toEqual([
       ['edit', 'init', null],
       ['inpaint', 'init', null],
@@ -285,8 +286,12 @@ describe('studio/recipes', () => {
       ['upscale', 'init', null],
       ['series', null, null],
     ])
-    expect(recipes(features(), [])[2]!.disabled).toBe('需要先在模型页添加控制适配器')
-    expect(recipes(features({ references: false }), [adapter])[3]!.disabled).toBe('现在的引擎不支持这个做法')
+    // No 控制适配器 installed: 按构图生成 is left out, not shown off.
+    expect(ids(recipes(features(), []))).toEqual(['edit', 'inpaint', 'style', 'upscale', 'series'])
+    expect(ids(recipes(features({ references: false }), [adapter]))).toEqual(['edit', 'inpaint', 'compose', 'upscale', 'series'])
+    // A text-only engine (兼容模式, AMD 原生) reports every flag off: only the series is left.
+    const textOnly = features({ imageInput: false, control: false, references: false })
+    expect(brief(recipes(textOnly, [adapter]))).toEqual([['series', null, null]])
     const noEngine = recipes(null, [], [{ id: 'engine', message: '引擎还没装好' }])
     expect(noEngine[0]!.disabled).toBe('引擎还没装好，就绪后才能使用')
     // A 风格 and three 画面 are only laid out: no engine needed.
@@ -304,5 +309,21 @@ describe('studio/recipes', () => {
     expect(newCanvasMenu(features({ imageInput: false, references: false }))).toEqual([
       { type: 'note', label: '现在的引擎不能把图片接进新画面' },
     ])
+  })
+
+  it('a new project’s only, blank 画面 is the one a picture recipe fills', () => {
+    const blank = canvas({ id: 'blank', prompt: '海边的灯塔' })
+    expect(starterCanvas([blank])).toBe(blank)
+    // Anything else on the board, a picture in it, or a run of it: recipes make a 画面 of their own.
+    expect(starterCanvas([blank, canvas({ id: 'other' })])).toBeNull()
+    expect(
+      starterCanvas([
+        { ...blank, layers: [{ id: 'r', kind: 'object', caption: '猫', bbox: [0, 0, 64, 64], visible: true, locked: false, opacity: 1 }] },
+      ]),
+    ).toBeNull()
+    expect(starterCanvas([{ ...blank, inputs: { init: { link: { canvasId: 'p' }, strength: 0.6 } } }])).toBeNull()
+    expect(starterCanvas([blank, canvas({ id: 'run', kind: 'result', sourceCanvasId: 'blank', jobState: 'running' })])).toBeNull()
+    expect(starterCanvas([canvas({ id: 's', kind: 'style' })])).toBeNull()
+    expect(starterCanvas([])).toBeNull()
   })
 })

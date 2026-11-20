@@ -7,7 +7,7 @@ import { preparationProgress, type Preparation } from '../../lib/preparation'
 import { useGpuInventory } from '../../lib/useGpuInventory'
 import { useApp } from '../../store'
 import { useAppInfo } from '../settings/useAppInfo'
-import { deriveSetup, modelDownloads, stepsToStart, type SetupView } from './setupState'
+import { deriveSetup, modelDownloads, stepsToStart, type SetupStepId, type SetupView } from './setupState'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -25,7 +25,8 @@ export function useSetup(): {
   /** The recommended model's name. */
   modelName: string
   starting: boolean
-  start: () => Promise<void>
+  /** Start what is waiting or failed; `only` retries just those parts. */
+  start: (only?: SetupStepId[]) => Promise<void>
   installEngine: () => Promise<void>
   gpu: ReturnType<typeof useGpuInventory>
   /** Detect the GPUs again (and re-plan). */
@@ -191,19 +192,22 @@ export function useSetup(): {
     for (const id of missing) await downloadModel(id)
   }, [downloadModel, loadStatus])
 
-  const start = useCallback(async () => {
-    setStarting(true)
-    setEngineError(null)
-    setModelError(null)
-    try {
-      const steps = stepsToStart(view)
-      // Engine and model download at the same time, so leaving the page loses nothing.
-      if (steps.includes('engine') && !engineDownloadActive(useApp.getState().mossInferDownload)) await installEngine()
-      if (steps.includes('model')) await downloadModels().catch((error: unknown) => setModelError(message(error)))
-    } finally {
-      setStarting(false)
-    }
-  }, [view, installEngine, downloadModels])
+  const start = useCallback(
+    async (only?: SetupStepId[]) => {
+      setStarting(true)
+      if (!only || only.includes('engine')) setEngineError(null)
+      if (!only || only.includes('model')) setModelError(null)
+      try {
+        const steps = stepsToStart(view).filter((id) => !only || only.includes(id))
+        // Engine and model download at the same time, so leaving the page loses nothing.
+        if (steps.includes('engine') && !engineDownloadActive(useApp.getState().mossInferDownload)) await installEngine()
+        if (steps.includes('model')) await downloadModels().catch((error: unknown) => setModelError(message(error)))
+      } finally {
+        setStarting(false)
+      }
+    },
+    [view, installEngine, downloadModels],
+  )
 
   const redetect = useCallback(async () => {
     setRedetecting(true)

@@ -274,6 +274,18 @@ describe('local jobs on a CLI engine', () => {
     }
   })
 
+  it("logs a CLI failure's stderr once: its message, built from those lines, is not added again", async () => {
+    const job = await supervisor.startEngineJob(request({ deviceUuid: arc.uuid }))
+    await vi.waitFor(() => expect(sinks.has(job.id)).toBe(true))
+    const sink = sinks.get(job.id)!
+    const raw = 'ggml_vulkan: Device memory allocation of size 2147483648 failed (out of device memory)'
+    sink.stderr(raw)
+    sink.event({ type: 'error', code: 'E_OOM', message: `显存不够这次生成，请把画面调小一些再试：${raw}`, fatal: true })
+    sink.done(1)
+    const texts = (await supervisor.getJobLogs(job.id)).map((line) => line.text)
+    expect(texts.filter((text) => text.includes(raw))).toEqual([raw])
+  })
+
   it('a second job on the same CLI GPU waits in the queue', async () => {
     const first = await supervisor.startEngineJob(request({ deviceUuid: arc.uuid }))
     const second = await supervisor.startEngineJob(request({ deviceUuid: arc.uuid, prompt: 'second' }))

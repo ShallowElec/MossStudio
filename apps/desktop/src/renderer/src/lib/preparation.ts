@@ -1,5 +1,6 @@
 import type { DownloadTask, MossInferDownloadState } from '@shared/types'
 import { engineDownloadActive } from './engineInstall'
+import { bytes } from './format'
 
 /** One thing being prepared: the runtime (engine packages) or the model files. */
 export interface PreparationPart {
@@ -8,7 +9,12 @@ export interface PreparationPart {
   total: number
   speedBps: number
   finished: boolean
+  /** Some of it failed (other files of the model may still be downloading). */
   failed: boolean
+  /** Still downloading or installing, also next to a failed file. */
+  active: boolean
+  /** A download was paused: stopped on purpose, not a failure. */
+  paused: boolean
 }
 
 /** Everything being prepared, as one number to watch. */
@@ -22,8 +28,10 @@ export interface Preparation {
   secondsLeft: number | null
   /** Still downloading or installing. */
   active: boolean
-  /** A part stopped with an error or was paused. */
+  /** A part, or a file of it, stopped with an error. */
   failed: boolean
+  /** A download was paused. */
+  paused: boolean
   parts: PreparationPart[]
 }
 
@@ -37,8 +45,8 @@ function enginePart(download: MossInferDownloadState | null | undefined): Prepar
   const index = download.step?.index ?? 0
   const each = download.totalBytes
   const total = each * count
-  // Past the download (verifying, unpacking) the current package counts as fetched.
-  const current = download.phase === 'downloading' ? download.bytes : each
+  // Past the download (verifying, unpacking) the current package counts as fetched; a failed one counts what arrived.
+  const current = download.phase === 'downloading' || download.phase === 'error' ? download.bytes : each
   const done = download.phase === 'done' ? total : Math.min(total, each * index + current)
   if (total <= 0 && !active) return null
   return {
@@ -48,6 +56,8 @@ function enginePart(download: MossInferDownloadState | null | undefined): Prepar
     speedBps: download.phase === 'downloading' ? download.speedBps : 0,
     finished: download.phase === 'done',
     failed: download.phase === 'error',
+    active,
+    paused: false,
   }
 }
 
@@ -62,7 +72,9 @@ function modelPart(tasks: readonly DownloadTask[]): PreparationPart | null {
     total,
     speedBps,
     finished: tasks.every((task) => task.state === 'done'),
-    failed: tasks.some((task) => task.state === 'error' || task.state === 'paused'),
+    failed: tasks.some((task) => task.state === 'error'),
+    active: tasks.some((task) => ACTIVE_TASK.has(task.state)),
+    paused: tasks.some((task) => task.state === 'paused'),
   }
 }
 
@@ -91,6 +103,7 @@ export function preparationProgress(
     secondsLeft: active && speedBps > 0 ? left / speedBps : null,
     active,
     failed: parts.some((part) => part.failed),
+    paused: parts.some((part) => part.paused),
     parts,
   }
 }
@@ -109,4 +122,24 @@ export function timeLeftLabel(seconds: number | null): string | null {
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
   return rest ? `约 ${hours} 小时 ${rest} 分钟` : `约 ${hours} 小时`
+}
+
+/** "1.2 GB / 25 GB"; 准备中 until the first bytes arrive, so it never reads 未知. */
+export function preparationAmount(done: number, total: number): string {
+  if (done <= 0 || total <= 0) return '准备中'
+  return `${bytes(done)} / ${bytes(total)}`
+}
+
+/**
+ * What the title bar chip says, or null when there is nothing to say. `text`
+ * replaces the percentage and bar: when preparation stopped, or a part failed
+ * while the other keeps going. A pause is not a failure.
+ */
+export function preparationChip(progress: Preparation): { warn: boolean; text: string | null; title: string } | null {
+  if (!progress.active && !progress.failed && !progress.paused) return null
+  if (!progress.active) return { warn: true, text: '准备没有完成', title: '准备没有完成，点开查看' }
+  const failed = progress.parts.filter((part) => part.failed).length
+  if (failed === 0) return { warn: false, text: null, title: '查看准备进度' }
+  const failure = failed > 1 ? '有两项没下载完' : '有一项没下载完'
+  return { warn: true, text: `准备中 ${Math.round(progress.percent)}% · ${failure}`, title: `${failure}，点开重试` }
 }

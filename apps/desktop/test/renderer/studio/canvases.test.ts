@@ -20,6 +20,7 @@ import {
   resizeFrom,
   sceneCanvas,
   settingsFrom,
+  smallerCanvas,
   taskCanvasFor,
 } from '@renderer/pages/studio/canvases'
 import { canvas, layer } from './fixtures'
@@ -155,6 +156,18 @@ describe('studio/canvases regions', () => {
   it('pulls regions back inside when the picture shrinks', () => {
     const resized = resizeCanvas(canvas({ layers: [layer({ bbox: [600, 600, 1000, 1000] })] }), 512, 512)
     expect(resized.layers[0]!.bbox).toEqual([511, 511, 512, 512])
+  })
+
+  it('takes a 画面 one size step down with its regions scaled along', () => {
+    const smaller = smallerCanvas(canvas({ layers: [layer({ bbox: [512, 256, 1024, 768] })] }))!
+    expect(smaller).toMatchObject({ width: 768, height: 768 })
+    expect(smaller.layers[0]!.bbox).toEqual([384, 192, 768, 576])
+  })
+
+  it('does not shrink a 放大, a picture, or a 画面 already at the smallest size', () => {
+    expect(smallerCanvas(canvas({ upscale: { scale: 2 } }))).toBeNull()
+    expect(smallerCanvas(canvas({ kind: 'result' }))).toBeNull()
+    expect(smallerCanvas(canvas({ width: 256, height: 256 }))).toBeNull()
   })
 
   it('creates a text region already carrying its words', () => {

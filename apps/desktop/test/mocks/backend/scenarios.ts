@@ -310,10 +310,16 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
           id: 'job-failed',
           state: 'failed',
           stage: 'denoise',
-          error: { code: 'E_CUDA_OOM', message: 'CUDA out of memory' },
+          // As main records it: the engine's code, and its own words (also in the job log).
+          error: { code: 'E_OOM', message: 'CUDA out of memory. Tried to allocate 2.00 GiB' },
           endedAt: FIXTURE_NOW,
         }),
       ],
+      jobLogs: {
+        'job-failed': [
+          { jobId: 'job-failed', seq: 1, at: FIXTURE_NOW, stream: 'stderr', text: 'CUDA out of memory. Tried to allocate 2.00 GiB' },
+        ],
+      },
       diagnostics: [diagnosticFixture({ jobId: 'job-failed' })],
     }),
     /** Ready, and a newer release is published. */

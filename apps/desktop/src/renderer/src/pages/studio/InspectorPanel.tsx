@@ -203,7 +203,7 @@ export function InspectorPanel({
         open={clearing}
         onClose={() => setClearing(false)}
         title="清空所有区域？"
-        description={`这个画面的 ${layers.length} 个区域都会删除，描述和底图会保留。`}
+        description={`这个画面的 ${layers.length} 个区域都会删除，描述和描图会保留。`}
         confirmLabel="清空区域"
         onConfirm={() => {
           onChangeLayers(() => [])

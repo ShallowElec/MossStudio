@@ -401,6 +401,8 @@ export interface MossInferDownloadState {
   note?: string
   cublaslt?: unknown
   error?: string
+  /** On error: the phase it failed in. Only a failure while `downloading` can be helped by another download line. */
+  failedPhase?: MossInferDownloadState['phase']
   updatedAt: string
 }
 

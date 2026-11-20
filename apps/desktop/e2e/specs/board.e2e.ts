@@ -298,11 +298,11 @@ describe('studio board', () => {
     expect(await page.locator('[data-new-canvas]').count()).toBe(0)
     // With room around the click, the new card's corner is right there.
     const at = await openBlankMenu(page, { right: 360, top: 140 })
+    // No 控制适配器 installed: 按构图生成 cannot run here, so it is not offered.
     expect(await page.getByRole('menu', { name: '画板' }).getByRole('menuitem').allTextContents()).toEqual([
       '新建画面',
       '改一张图',
       '局部重绘',
-      '按构图生成',
       '参考风格',
       '放大一张图',
       '新建风格',
@@ -320,6 +320,9 @@ describe('studio board', () => {
     expect(Math.abs(box.y - at.y)).toBeLessThan(4)
 
     // Near the corner of the view, the new card moves back inside it; 从作品选择… puts a picture there.
+    // The minimap, turned on by hand while every card is on screen, holds that corner too.
+    await page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: '小地图' }).click()
+    await page.locator('[data-minimap]').waitFor()
     await openBlankMenu(page)
     await page.getByRole('menuitem', { name: '从作品选择…' }).click()
     await page.getByRole('dialog', { name: '选择图片' }).getByRole('button', { name: 'prompt 0' }).click()
@@ -611,10 +614,18 @@ describe('studio board', () => {
   })
 
   for (const theme of ['light', 'dark'] as const) {
-    it(`shows the whole board in a minimap (${theme}); a press there moves the view, and it can be hidden`, async () => {
+    it(`shows the whole board in a minimap once the cards reach past the view (${theme}); a press there moves the view, and it can be hidden`, async () => {
       const page = await openBoard(app, { theme })
       const minimap = page.getByRole('group', { name: '小地图' })
+      const tools = page.getByRole('toolbar', { name: '画布工具' })
+      const toggle = tools.getByRole('button', { name: '小地图' })
+      // Every card is on screen: the minimap would only cover the board.
+      expect(await minimap.count()).toBe(0)
+      expect(await toggle.getAttribute('aria-pressed')).toBe('false')
+      // Zoomed in, the cards reach past the view, and it shows.
+      for (let step = 0; step < 3; step += 1) await tools.getByRole('button', { name: '放大' }).click()
       await minimap.waitFor()
+      expect(await toggle.getAttribute('aria-pressed')).toBe('true')
       expect(await minimap.locator('[data-minimap-card]').count()).toBe(3)
       await page.keyboard.press('Control+a')
       await page.getByRole('toolbar', { name: '已选 3 张' }).waitFor()
@@ -634,13 +645,61 @@ describe('studio board', () => {
       expect(Math.abs(target.x - (board.x + board.width / 2))).toBeLessThan(20)
       expect(Math.abs(target.y - (board.y + board.height / 2))).toBeLessThan(20)
 
-      const toggle = page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: '小地图' })
-      expect(await toggle.getAttribute('aria-pressed')).toBe('true')
+      // Hidden by hand, it stays hidden however far the cards reach.
       await toggle.click()
       expect(await minimap.count()).toBe(0)
       expect(await toggle.getAttribute('aria-pressed')).toBe('false')
+      await tools.getByRole('button', { name: '放大' }).click()
+      await settle(page)
+      expect(await minimap.count()).toBe(0)
     })
   }
+
+  for (const theme of ['light', 'dark'] as const) {
+    it(`描图 is in a 画面's menu, not on its toolbar: a picture from 作品 to trace over (${theme})`, async () => {
+      const page = await openBoard(app, { theme })
+      // The card toolbar keeps one tool, 遮罩.
+      const tools = page.getByRole('toolbar', { name: '画面工具' })
+      await tools.waitFor()
+      expect(await tools.getByRole('button').allTextContents()).toEqual(['遮罩'])
+      const layout = page.locator('article[data-canvas-card="canvas-1"]')
+      const openMenu = async () => {
+        await layout.hover()
+        await layout.getByRole('button', { name: '画面 1 更多操作' }).click()
+        return page.getByRole('menu', { name: '画面 1 操作' })
+      }
+      let menu = await openMenu()
+      expect(await menu.getByRole('menuitem', { name: '描图…' }).count()).toBe(1)
+      expect(await menu.getByRole('menuitem', { name: '不用描图' }).count()).toBe(0)
+      await menu.getByRole('menuitem', { name: '描图…' }).click()
+      await page.getByRole('dialog', { name: '选择描图' }).getByRole('button', { name: 'prompt 0' }).click()
+      const traced = () =>
+        page.evaluate(() => window.__mock.state.projects[0]?.canvases.find((canvas) => canvas.id === 'canvas-1')?.backgroundPath ?? null)
+      await expect.poll(traced, { timeout: 10_000 }).toMatch(/\.png$/)
+      await settle(page, 300)
+      await app.screenshot(`board-trace-${theme}`)
+
+      // Taken away from the same menu.
+      menu = await openMenu()
+      await menu.getByRole('menuitem', { name: '不用描图' }).click()
+      await expect.poll(traced, { timeout: 10_000 }).toBeNull()
+    })
+  }
+
+  it('keeps the minimap off a narrow board unless it is turned on by hand', async () => {
+    const page = await openBoard(app)
+    const minimap = page.getByRole('group', { name: '小地图' })
+    const tools = page.getByRole('toolbar', { name: '画布工具' })
+    await app.resize(1024, 640)
+    await page.getByRole('button', { name: '助手', exact: true }).click()
+    await expect.poll(async () => (await page.locator('[data-board]').boundingBox())!.width).toBeLessThan(640)
+    for (let step = 0; step < 3; step += 1) await tools.getByRole('button', { name: '放大' }).click()
+    await settle(page)
+    expect(await minimap.count()).toBe(0)
+    await tools.getByRole('button', { name: '小地图' }).click()
+    await minimap.waitFor()
+    expect(await tools.getByRole('button', { name: '小地图' }).getAttribute('aria-pressed')).toBe('true')
+  })
 
   it("pulls a wire from anywhere along a picture's right edge", async () => {
     const page = await openBoard(app)
@@ -830,10 +889,54 @@ describe('studio board', () => {
     await emitJob(page, id, { stage: 'decode', progress: { stage: 'decode', current: 30, total: 30, percent: 100 } })
     await expect.poll(() => card.locator('[data-card-progress]').textContent()).toBe('还原图像')
 
-    await emitJob(page, id, { state: 'failed', preview: undefined, error: { code: 'E_OOM', message: '显存不够，换小一点的尺寸再试' } })
-    await expect.poll(() => card.getByRole('alert').textContent()).toBe('显存不够，换小一点的尺寸再试')
+    // A failure the app has no words of its own for shows its message, with 重试 (out of memory has its own test below).
+    await emitJob(page, id, { state: 'failed', preview: undefined, error: { code: 'E_MODEL', message: '模型文件不完整，请重新下载' } })
+    await expect.poll(() => card.getByRole('alert').textContent()).toBe('模型文件不完整，请重新下载')
     expect(await card.getByRole('button', { name: '重试 画面 1' }).isVisible()).toBe(true)
   })
+
+  for (const theme of ['light', 'dark'] as const) {
+    it(`out of GPU memory (${theme}): says so plainly, keeps the engine's words under 查看详情, and 改小一点再试 runs smaller`, async () => {
+      const page = await openBoard(app, { theme })
+      await page.locator('[data-studio-generate]').click()
+      await page.waitForFunction((channel) => window.__mock.callsTo(channel).length >= 1, ENGINE_JOBS)
+      const id = await page.evaluate(() => window.__mock.state.jobs[0]!.id)
+      const card = page.locator('article[data-canvas-card="canvas-1"]')
+      const raw = 'CUDA out of memory. Tried to allocate 2.00 GiB'
+      // Main keeps the engine's own words in the job log.
+      await page.evaluate(
+        ([jobId, text]) => {
+          window.__mock.state.jobLogs = { [jobId]: [{ jobId, seq: 1, at: new Date().toISOString(), stream: 'stderr', text }] }
+        },
+        [id, raw] as const,
+      )
+      await emitJob(page, id, { state: 'failed', preview: undefined, error: { code: 'E_OOM', message: raw } })
+      await expect.poll(() => card.getByRole('alert').textContent()).toBe('显存不够这个尺寸')
+      expect(await card.textContent()).not.toContain('CUDA')
+      // The same size would fail again: no 重试, a smaller picture instead.
+      expect(await card.getByRole('button', { name: '重试 画面 1' }).count()).toBe(0)
+      const smaller = card.getByRole('button', { name: '改小一点再试 画面 1' })
+      expect(await smaller.isVisible()).toBe(true)
+      await app.screenshot(`board-out-of-memory-${theme}`)
+
+      // 查看详情: 活动 says it plainly too, and the engine's own words are in the log.
+      await card.locator('[data-card-status="failed"]').getByRole('button', { name: '查看详情' }).click()
+      const row = page.locator(`[data-job-row="${id}"]`)
+      await expect.poll(() => row.innerText()).toContain('失败 · 显存不够这个尺寸')
+      await expect.poll(() => row.locator('[data-job-log]').textContent()).toContain(raw)
+      await app.screenshot(`activity-out-of-memory-${theme}`)
+      await page.getByRole('button', { name: '关闭活动' }).click()
+
+      await smaller.click()
+      await page.waitForFunction((channel) => window.__mock.callsTo(channel).length >= 2, ENGINE_JOBS)
+      const rerun = await page.evaluate((channel) => window.__mock.callsTo(channel)[1] as { width: number; height: number }, ENGINE_JOBS)
+      expect(rerun).toMatchObject({ width: 768, height: 768 })
+      // The 画面 itself is now that size, so the next run fits too.
+      await expect
+        .poll(() => page.evaluate(() => window.__mock.state.projects[0]!.canvases.find((item) => item.id === 'canvas-1')?.width))
+        .toBe(768)
+    })
+  }
 
   /** Bounding boxes of every wire chip on screen. */
   async function chipBoxes(page: Page): Promise<Array<{ x: number; y: number; width: number; height: number }>> {
@@ -926,7 +1029,7 @@ describe('readable nodes', () => {
 
   it('adds an input from the ＋: from a file or a picture on the board', async () => {
     const page = await openBoard(app)
-    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa.png']))
+    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa-1600x1200.png']))
     await addInput(page, 'canvas-1', '起始图', '从文件…')
     await expect.poll(async () => (await savedInputs(page))?.init?.link.canvasId ?? '', { timeout: 10_000 }).toMatch(/.+/)
     const picture = (await savedInputs(page))!.init!.link.canvasId
@@ -1148,14 +1251,13 @@ describe('filmstrip, 用作起始图 and recipes', () => {
 
   it('starts from a recipe: the picture comes from a file, and 局部重绘 opens the mask', async () => {
     const page = await openWithRuns()
-    // Right-click on empty board holds the ways to start. No control adapter yet: 按构图生成 is off and says why on hover.
+    // Right-click on empty board holds the ways to start. No control adapter yet: 按构图生成 is not among them.
     await openBlankMenu(page)
-    const compose = page.getByRole('menuitem', { name: /按构图生成/ })
-    expect(await compose.isDisabled()).toBe(true)
-    expect(await compose.getAttribute('title')).toBe('需要先在模型页添加控制适配器')
+    expect(await page.getByRole('menuitem', { name: '局部重绘' }).isEnabled()).toBe(true)
+    expect(await page.getByRole('menuitem', { name: /按构图生成/ }).count()).toBe(0)
     await app.screenshot('board-recipes-light')
 
-    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa.png']))
+    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa-1600x1200.png']))
     await page.getByRole('menuitem', { name: '局部重绘' }).click()
     await expect.poll(async () => (await cardIds(page)).length, { timeout: 10_000 }).toBe(5)
     // The new 画面 (selected) and the picture card that feeds it.
@@ -1163,6 +1265,23 @@ describe('filmstrip, 用作起始图 and recipes', () => {
     expect(created).not.toBe('canvas-1')
     await expect.poll(async () => (await saved(page, created!))?.inputs?.init?.link.canvasId ?? '', { timeout: 10_000 }).toMatch(/.+/)
     await expect.poll(() => page.getByRole('toolbar', { name: '遮罩工具' }).isVisible()).toBe(true)
+    // The new 画面 takes the photo's 4:3 shape and is brought into view whole, to paint on.
+    expect(await saved(page, created!)).toMatchObject({ width: 1152, height: 864 })
+    const board = (await page.locator('[data-board]').boundingBox())!
+    await expect
+      .poll(async () => {
+        const box = (await page.locator(`article[data-canvas-card="${created}"]`).boundingBox())!
+        return (
+          box.x >= board.x && box.y >= board.y && box.x + box.width <= board.x + board.width && box.y + box.height <= board.y + board.height
+        )
+      })
+      .toBe(true)
+  })
+
+  it('offers 按构图生成 once a 控制适配器 is installed', async () => {
+    const page = await openBoard(app, { adapters: true })
+    await openBlankMenu(page)
+    expect(await page.getByRole('menuitem', { name: '按构图生成' }).isEnabled()).toBe(true)
   })
 })
 

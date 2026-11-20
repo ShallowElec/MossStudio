@@ -227,7 +227,13 @@ describe('lib/format jobs', () => {
     expect(jobSummary(job({ state: 'queued', queuePosition: 2 }))).toBe('排队中 · 第 2 个')
     expect(jobSummary(job({ state: 'queued' }))).toBe('排队中')
     expect(jobSummary(job({ state: 'succeeded' }))).toBe('完成 · 1024 × 768')
-    expect(jobSummary(job({ state: 'failed', error: { code: 'E_OOM', message: '显存不够' } }))).toBe('失败 · 显存不够')
+    expect(jobSummary(job({ state: 'failed', error: { code: 'E_MODEL', message: '模型文件不完整' } }))).toBe('失败 · 模型文件不完整')
+    // The engine's own words stay in the log; the summary says what happened.
+    expect(jobSummary(job({ state: 'failed', error: { code: 'E_OOM', message: 'CUDA out of memory' } }))).toBe('失败 · 显存不够这个尺寸')
+    // A training words its own failures.
+    expect(jobSummary(job({ kind: 'training', state: 'failed', error: { code: 'E_OOM', message: '训练时显存不够' } }))).toBe(
+      '失败 · 训练时显存不够',
+    )
     expect(jobSummary(job({ state: 'canceled' }))).toBe('已取消')
     expect(jobSummary(job({ kind: 'training', state: 'running', progress: { stage: 'idle', current: 50, total: 200, percent: 25 } }))).toBe(
       '训练中 · 50 / 200',

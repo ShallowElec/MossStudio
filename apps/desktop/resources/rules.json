@@ -1,29 +1,25 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-19T02:00:00Z",
+  "updated_at": "2026-11-20T00:00:00Z",
   "rules": [
     {
       "id": "E_OOM",
-      "match": "(MPS backend out of memory|CUDA out of memory|OutOfMemoryError|DefaultCPUAllocator: can't allocate memory|RuntimeError:.*out of memory)",
+      "match": "(out of memory|OutOfMemoryError|DefaultCPUAllocator: can't allocate memory)",
       "severity": "error",
-      "title": "显存/内存不足",
-      "explain": "模型在 {stage} 阶段耗尽了设备内存。16 GB 机器跑 1024² + bf16 很容易触发。",
-      "solutions": [
-        { "label": "降到 768² 重试", "action": "retry", "params": { "width": 768, "height": 768 } },
-        { "label": "改用 8 步 DMD", "action": "set_option", "params": { "profile": "dmd8" } },
-        { "label": "开启分块解码", "action": "set_option", "params": { "vae_tiling": true } }
-      ],
+      "title": "显存不够",
+      "explain": "显卡的显存放不下这次要算的东西。生成时把尺寸改小一点；训练时把「显存」选小一档。",
+      "solutions": [{ "label": "查看日志", "action": "open_job_log" }],
       "dedupe": { "windowSec": 60, "maxPerWindow": 1 }
     },
     {
       "id": "E_MODULE",
       "match": "ModuleNotFoundError: No module named '([^']+)'",
       "severity": "error",
-      "title": "缺少 Python 包：{1}",
-      "explain": "当前实例的运行时里没有 {1}，通常是依赖安装不完整或实例代码更新后未重建环境。",
+      "title": "训练环境缺少组件：{1}",
+      "explain": "训练环境没有装完整，通常是安装中途断了。到「设置 › 训练」重新安装训练环境再试。",
       "solutions": [
-        { "label": "修复运行时", "action": "repair_runtime" },
-        { "label": "重建依赖", "action": "reinstall_deps" }
+        { "label": "重新安装训练环境", "action": "open_settings", "params": { "tab": "training" } },
+        { "label": "查看日志", "action": "open_job_log" }
       ],
       "dedupe": { "windowSec": 120, "maxPerWindow": 1 }
     },
@@ -31,11 +27,11 @@
       "id": "E_VERSION",
       "match": "(ImportError: cannot import name|version mismatch|requires .* but you have|Incompatible .* version)",
       "severity": "error",
-      "title": "依赖版本不兼容",
-      "explain": "实例代码与运行时里的包版本不匹配，常见于切换到旧 commit 或手动升级过包。",
+      "title": "训练环境的组件版本不对",
+      "explain": "训练环境里的组件和训练器不匹配，常见于更新训练器之后。到「设置 › 训练」重新安装训练环境再试。",
       "solutions": [
-        { "label": "按实例重建运行时", "action": "rebuild_runtime" },
-        { "label": "查看依赖详情", "action": "open_instance_tab", "params": { "tab": "deps" } }
+        { "label": "重新安装训练环境", "action": "open_settings", "params": { "tab": "training" } },
+        { "label": "查看日志", "action": "open_job_log" }
       ],
       "dedupe": { "windowSec": 120, "maxPerWindow": 1 }
     },
@@ -44,23 +40,17 @@
       "match": "(HTTPError|SSLError|ConnectionError|Max retries exceeded|Read timed out|Failed to establish a new connection|Could not resolve host)",
       "severity": "warning",
       "title": "网络请求失败",
-      "explain": "下载或鉴权请求没有完成。可能是网络不可达、镜像不可用或 HF 限流。",
-      "solutions": [
-        { "label": "切换镜像重试", "action": "switch_mirror" },
-        { "label": "检查网络设置", "action": "open_settings", "params": { "tab": "network" } }
-      ],
+      "explain": "下载没有完成：网络连不上，或者这条下载线路用不了。换一条下载线路再试。",
+      "solutions": [{ "label": "换下载线路", "action": "switch_mirror" }],
       "dedupe": { "windowSec": 60, "maxPerWindow": 1 }
     },
     {
       "id": "E_DISK",
       "match": "(No space left on device|ENOSPC|OSError: \\[Errno 28\\])",
       "severity": "error",
-      "title": "磁盘空间不足",
-      "explain": "写入模型或输出时磁盘已满。bf16 全量权重需要约 27 GB。",
-      "solutions": [
-        { "label": "清理未使用模型", "action": "open_settings", "params": { "tab": "storage" } },
-        { "label": "更换模型目录", "action": "open_settings", "params": { "tab": "storage" } }
-      ],
+      "title": "磁盘空间不够",
+      "explain": "保存模型或图片时磁盘满了。清理一些文件，或者换一个空间大的位置。",
+      "solutions": [{ "label": "更换保存位置", "action": "open_settings", "params": { "tab": "storage" } }],
       "dedupe": { "windowSec": 300, "maxPerWindow": 1 }
     },
     {
@@ -68,11 +58,8 @@
       "match": "(Address already in use|OSError: \\[Errno 48\\]|WinError 10048)",
       "severity": "warning",
       "title": "端口被占用",
-      "explain": "另一个进程（可能是上次未退出的实例）占用了端口。",
-      "solutions": [
-        { "label": "自动换端口重试", "action": "retry_pick_port" },
-        { "label": "结束占用进程", "action": "show_port_owner" }
-      ],
+      "explain": "另一个程序（可能是上次没有退出的引擎）占着端口。退出它，或者重启电脑后再试。",
+      "solutions": [{ "label": "查看日志", "action": "open_job_log" }],
       "dedupe": { "windowSec": 60, "maxPerWindow": 1 }
     },
     {
@@ -80,35 +67,17 @@
       "match": "(401 Client Error|403 Client Error|gated repo|Access to model .* is restricted|Invalid username or password)",
       "severity": "warning",
       "title": "需要 Hugging Face 授权",
-      "explain": "该模型需要登录或同意许可协议。",
-      "solutions": [
-        { "label": "配置 HF Token", "action": "open_settings", "params": { "tab": "network" } },
-        { "label": "打开模型页面", "action": "open_url" }
-      ],
+      "explain": "这个模型要先登录 Hugging Face 并同意许可。填好访问令牌后再下载。",
+      "solutions": [{ "label": "填写访问令牌", "action": "open_settings", "params": { "tab": "network" } }],
       "dedupe": { "windowSec": 300, "maxPerWindow": 1 }
     },
     {
       "id": "E_KILLED",
       "match": "(Killed|exit code 137|signal 9|SIGKILL)",
       "severity": "error",
-      "title": "进程被系统终止",
-      "explain": "通常是系统内存压力导致的 OOM killer，而不是代码错误。",
-      "solutions": [
-        { "label": "降低分辨率重试", "action": "retry", "params": { "width": 768, "height": 768 } },
-        { "label": "查看内存占用", "action": "open_diagnostics" }
-      ],
-      "dedupe": { "windowSec": 120, "maxPerWindow": 1 }
-    },
-    {
-      "id": "E_MPS_OP",
-      "match": "(not implemented for 'MPS'|MPS backend.*not support|Placeholder storage has not been allocated)",
-      "severity": "error",
-      "title": "MPS 不支持该算子",
-      "explain": "当前 macOS 的 PyTorch MPS 后端缺少这个算子，需要回退到 CPU 或降低精度。",
-      "solutions": [
-        { "label": "启用 MPS fallback 重试", "action": "set_option", "params": { "mps_fallback": true } },
-        { "label": "改用 CPU 运行", "action": "set_option", "params": { "device": "cpu" } }
-      ],
+      "title": "被系统结束了",
+      "explain": "通常是电脑内存不够，系统把它结束了。关掉其他占内存的程序再试；生成时也可以把尺寸改小一点。",
+      "solutions": [{ "label": "查看日志", "action": "open_job_log" }],
       "dedupe": { "windowSec": 120, "maxPerWindow": 1 }
     },
     {
@@ -116,10 +85,10 @@
       "match": null,
       "severity": "error",
       "title": "程序异常退出",
-      "explain": "进程以非零状态退出，但没有匹配到已知错误。请查看原始输出的最后 20 行。",
+      "explain": "运行到一半退出了，没有认出原因。日志的最后几行通常会说明。",
       "solutions": [
         { "label": "查看日志", "action": "open_job_log" },
-        { "label": "导出诊断包", "action": "export_bundle" }
+        { "label": "复制诊断信息", "action": "copy_diagnostics" }
       ],
       "dedupe": { "windowSec": 60, "maxPerWindow": 1 }
     }

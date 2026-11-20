@@ -35,6 +35,7 @@ import {
   promoteInstall,
   recoverEngineInstall,
   setEngineInstallProgress,
+  clearEngineLastAttempt,
   writeEngineLastAttempt,
 } from '../lib/engineStore'
 import { invalidateEngineReadiness } from './engineReadiness'
@@ -967,6 +968,11 @@ export async function downloadMossInfer(request: EngineDownloadRequest): Promise
     packages: packageIds,
     updatedAt: new Date().toISOString(),
   }
+  try {
+    clearEngineLastAttempt(paths.mossinfer())
+  } catch (error) {
+    console.warn('[engine] clear last attempt', error)
+  }
   publish({ phase: 'querying', ...(request.note ? { note: request.note } : {}) })
   let pendingStagingDir: string | undefined
   const installed: string[] = []
@@ -1060,9 +1066,11 @@ export async function downloadMossInfer(request: EngineDownloadRequest): Promise
       rmSync(pendingStagingDir, { recursive: true, force: true })
       pendingStagingDir = undefined
     }
+    const failedPhase = current?.phase
     publish({
       phase: operationController.signal.aborted ? 'canceled' : 'error',
       ...(installed.length ? { packages: installed } : {}),
+      ...(failedPhase && !operationController.signal.aborted ? { failedPhase } : {}),
       error: operationController.signal.aborted ? undefined : error instanceof Error ? error.message : String(error),
     })
   } finally {

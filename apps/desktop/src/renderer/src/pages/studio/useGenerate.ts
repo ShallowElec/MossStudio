@@ -7,7 +7,7 @@ import { adapterStatuses, normalizeCanvasAdapters } from '@shared/adapters'
 import { call } from '../../lib/api'
 import { electronStudioClient } from '../../lib/studioClient'
 import { useApp } from '../../store'
-import { taskCanvasFor } from './canvases'
+import { smallerCanvas, taskCanvasFor } from './canvases'
 import { profileFor, randomSeed, samplingForBundle, seedForRun } from './defaults'
 import { resolveJobInputs } from './jobInputs'
 import { compileCanvasPrompt } from './prompt'
@@ -53,7 +53,12 @@ export function useGenerate(options: {
   notify: (message: string, tone: 'info' | 'success' | 'error') => void
 }): {
   submitting: boolean
-  generate: (canvasId?: string, seed?: SeedMode) => Promise<{ queued: boolean; canvasId?: string; jobId?: string; error?: string }>
+  /** `smaller`: the 画面 goes one size step down first (it ran out of GPU memory). */
+  generate: (
+    canvasId?: string,
+    seed?: SeedMode,
+    runOptions?: { smaller?: boolean },
+  ) => Promise<{ queued: boolean; canvasId?: string; jobId?: string; error?: string }>
 } {
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
@@ -61,7 +66,7 @@ export function useGenerate(options: {
   const latest = useRef(options)
   latest.current = options
 
-  const generate = useCallback(async (canvasId?: string, seedMode: SeedMode = 'auto') => {
+  const generate = useCallback(async (canvasId?: string, seedMode: SeedMode = 'auto', runOptions: { smaller?: boolean } = {}) => {
     const { project, catalog, preferredBundleId, remoteHost, controlAdapters = [], controlAdaptersLoaded, notify } = latest.current
     const fail = (message: string): { queued: false; error: string } => {
       notify(message, 'error')
@@ -91,9 +96,16 @@ export function useGenerate(options: {
         }).catch(() => null)
       : null
     // Everything below reads the canvases as they are now: edits made while the engine answered are kept.
-    const canvases = project.canvasesRef.current
-    const found = canvases.find((canvas) => canvas.id === requested.id)
+    let canvases = project.canvasesRef.current
+    let found = canvases.find((canvas) => canvas.id === requested.id)
     if (!found) return stop('这个画面已经删除了')
+    if (runOptions.smaller) {
+      // The 画面 itself gets the smaller size, so the next run fits too and 尺寸 shows it.
+      const smaller = smallerCanvas(found)
+      if (!smaller) return stop('已经是最小的尺寸了')
+      canvases = canvases.map((canvas) => (canvas.id === smaller.id ? smaller : canvas))
+      found = smaller
+    }
     // A 放大 is sized from its 原图; the run uses that size.
     const source = withUpscaleSize(found, canvases)
     // What the engine gets: the description and LoRA with the 风格 nodes' added.

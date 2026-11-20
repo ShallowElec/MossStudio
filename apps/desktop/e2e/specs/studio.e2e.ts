@@ -252,6 +252,70 @@ describe('studio', () => {
     expect(await page.locator('[data-face-description]').textContent()).toBe('窗台上睡觉的橘猫，午后阳光')
   })
 
+  it('a new board offers only the picture recipes this computer can run, and no minimap for its one card', async () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const page = await app.open({ scenario: 'ready', route: '/studio', theme })
+      await openStudio(page)
+      const row = page.getByRole('group', { name: '从一张图开始' })
+      await row.waitFor()
+      // No 控制适配器 installed: 按构图生成 is not offered.
+      expect(await row.getByRole('button').allTextContents()).toEqual(['改一张图', '局部重绘', '放大一张图'])
+      expect(await row.getByRole('button', { disabled: true }).count()).toBe(0)
+      expect(await page.getByRole('group', { name: '小地图' }).count()).toBe(0)
+      await app.screenshot(`studio-start-row-${theme}`)
+    }
+  })
+
+  it('a recipe under the first 画面 fills it with the picture, in its shape; a cancelled pick changes nothing', async () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const page = await app.open({ scenario: 'ready', route: '/studio', theme })
+      await openStudio(page)
+      const cards = page.locator('article[data-canvas-card]')
+      const row = page.getByRole('group', { name: '从一张图开始' })
+      const ideas = page.locator('[data-face-ideas] button')
+      await row.waitFor()
+      const first = await cards.first().getAttribute('data-canvas-card')
+
+      // The file dialog is closed without a choice: the board is as it was.
+      await row.getByRole('button', { name: '改一张图' }).click()
+      await expect.poll(() => page.evaluate(() => window.__mock.callsTo(window.__mock.Ipc.pickImages).length)).toBe(1)
+      await settle(page, 300)
+      expect(await cards.count()).toBe(1)
+      expect(await row.isVisible()).toBe(true)
+      expect(await ideas.count()).toBe(3)
+
+      // A 1024 × 768 photo: the same 画面 takes it as 起始图 and becomes 4:3, so nothing is cropped.
+      await page.evaluate(() => (window.__mock.state.pickedImages = ['/home/me/photo-1024x768.png']))
+      await row.getByRole('button', { name: '改一张图' }).click()
+      await expect.poll(() => page.locator('article[data-canvas-kind="image"]').count(), { timeout: 10_000 }).toBe(1)
+      expect(await page.locator('article[data-canvas-kind="layout"]').count()).toBe(1)
+      expect(await page.locator('article[data-canvas-kind="layout"]').getAttribute('data-canvas-card')).toBe(first)
+      await expect.poll(() => page.locator('[data-settings-summary]').textContent()).toContain('4:3')
+      await expect
+        .poll(
+          () =>
+            page.evaluate((id) => {
+              const made = window.__mock.state.projects[0]?.canvases.find((canvas) => canvas.id === id)
+              return made ? { width: made.width, height: made.height, init: Boolean(made.inputs?.init) } : null
+            }, first),
+          { timeout: 10_000 },
+        )
+        .toEqual({ width: 1152, height: 864, init: true })
+      // Both the 画面 and the picture card beside it are in view.
+      const board = (await page.locator('[data-board]').boundingBox())!
+      const inView = async (selector: string): Promise<boolean> => {
+        const box = (await page.locator(selector).boundingBox())!
+        return (
+          box.x >= board.x && box.y >= board.y && box.x + box.width <= board.x + board.width && box.y + box.height <= board.y + board.height
+        )
+      }
+      await expect.poll(() => inView('article[data-canvas-kind="image"]')).toBe(true)
+      expect(await inView('article[data-canvas-kind="layout"]')).toBe(true)
+      await settle(page, 300)
+      await app.screenshot(`studio-recipe-start-${theme}`)
+    }
+  })
+
   it('draws a box by dragging on the selected 画面 and says what goes there on the box', async () => {
     const page = await app.open({ scenario: 'ready', route: '/studio', theme: 'light' })
     await openStudio(page)

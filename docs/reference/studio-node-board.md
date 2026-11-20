@@ -1,7 +1,7 @@
 ---
 status: current
 last-verified: 2026-11-08 (fec4fe3)
-code: apps/desktop/src/renderer/src/pages/studio/, apps/desktop/src/renderer/src/lib/preparation.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/canvasJobBranch.ts, apps/desktop/src/shared/cliEngine.ts
+code: apps/desktop/src/renderer/src/pages/studio/, apps/desktop/src/renderer/src/lib/preparation.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/canvasJobBranch.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/shared/generationError.ts
 ---
 
 # Studio node board
@@ -24,7 +24,7 @@ Paths are relative to `apps/desktop/src/`; `studio/` stands for `renderer/src/pa
 ## 2. Board and cards
 
 - A card is drawn from its `x`, `y`, `width` and `height` in board pixels (`studio/boardLayout.ts`): `BOARD_UNIT` 0.25, so a 1024 px picture is a 256 px card; `CARD_HEADER` 28 px holds the title. Cards move by their title row or their picture (`studio/useCardDrag.ts`). A left drag on empty board draws a box that picks every card it touches; the right or middle button, Space held, or the 平移 tool pans, and a right-click that does not move still opens the menu; the wheel zooms around the pointer.
-- Several cards can be picked at once (`studio/selection.ts`): a box, Shift, Ctrl or ⌘ clicks, or Ctrl+A. The picked cards are a `Board` state that counts only while it holds the selected card (`selectedCanvasId`, which the left panel shows), so selecting a card any other way picks it alone; nothing about picking is saved. Picked cards move together and get a bar with 已选 N 张, 排整齐 (`tidyPlaces`: rows of about √n from the group's corner) and 删除, which asks once; Delete does the same, Esc keeps only the selected card. The minimap (`studio/Minimap.tsx`) draws every card, the picked ones in the accent and running ones with a dot, and the part on screen as a tint; a press or drag on it centres the view there. It follows pans through `Board`'s view listeners rather than renders, and cards placed near the corner keep clear of it (`keepInView`).
+- Several cards can be picked at once (`studio/selection.ts`): a box, Shift, Ctrl or ⌘ clicks, or Ctrl+A. The picked cards are a `Board` state that counts only while it holds the selected card (`selectedCanvasId`, which the left panel shows), so selecting a card any other way picks it alone; nothing about picking is saved. Picked cards move together and get a bar with 已选 N 张, 排整齐 (`tidyPlaces`: rows of about √n from the group's corner) and 删除, which asks once; Delete does the same, Esc keeps only the selected card. The minimap (`studio/Minimap.tsx`) draws every card, the picked ones in the accent and running ones with a dot, and the part on screen as a tint; a press or drag on it centres the view there. It shows by itself only while some card reaches past the part of the board on screen and the board is at least `MINIMAP_MIN_BOARD` (640 px) wide (`studio/selection.ts` `minimapHelps`); once the 小地图 button is used, the person's choice holds. It follows pans through `Board`'s view listeners rather than renders, and cards placed near the corner keep clear of it (`keepInView`).
 - Gestures stay off React and off the project until they end: a pan sets the board's transform directly and commits the view on release, wheel ticks render at most once a frame, and a dragged card is drawn from `Board`'s own state and written to the project once, when it is let go. `CanvasCard` is memoized and compares its props by value (`sameCardProps`), so a new card prop must be plain data or a callback bound through `studio/useStableCallbacks.ts`; an inline closure would make every card re-render on every board render.
 - Picture files (PNG, JPEG, WebP, BMP; `studio/imageNodes.ts`) dropped or pasted on the board become picture cards. They are copied into the project's assets through `Ipc.studioImportImage` (`studio/useBoardAssets.ts`), so an unsaved project is saved first.
 - Deleting a card removes the wires that point at it and reports how many (`studio/links.ts` `dropLinksTo`); a 画面 takes its folded runs with it (`studio/canvases.ts` `removedWith`). The dialog 删除画面？ says that generated pictures stay in 作品 (`/library`).
@@ -34,7 +34,7 @@ Right-click menus (`studio/BoardMenu.tsx`, entries built in `studio/Board.tsx`):
 | On | Entries |
 | --- | --- |
 | Empty board 画板 | 新建画面, the picture recipes (section 7), 新建风格, 一组同风格的图, 导入图片…, 从作品选择…, 显示全部 |
-| A card (same as its ⋯ button) | The picture actions of section 6, 复制 or 复制为新画面, 查看详情 (opens the Activity panel on the job), then 删除 / 删除风格 / 删除画面 |
+| A card (same as its ⋯ button) | The picture actions of section 6; on a 画面 (not a 放大), 描图… and, while it has one, 不用描图; 复制 or 复制为新画面, 查看详情 (opens the Activity panel on the job), then 删除 / 删除风格 / 删除画面 |
 | A wire 连线 | 断开连线 |
 | A region 区域 | 改描述, 删除 |
 
@@ -80,11 +80,13 @@ Wires (`studio/wires.ts`, drawn by `studio/WireLayer.tsx`) are of two kinds: `in
 
 | Input | Stored in | Settings | Sent as |
 | --- | --- | --- | --- |
-| 起始图 | `inputs.init` | 重绘幅度 0 to 1 (default `DEFAULT_INIT_STRENGTH` 0.6); 起始图缩放方式 crop / fit / stretch under 高级 | `JobParams.initImage` |
+| 起始图 | `inputs.init` | 重绘幅度 0 to 1 (default `DEFAULT_INIT_STRENGTH` 0.6); 起始图缩放方式 crop / fit / stretch under 高级. A 画面 that has never run takes the shape of its first 起始图 at about the same pixel count, its regions scaled with it (`studio/nodes.ts` `withStartPictureShape`), so the picture is not cropped | `JobParams.initImage` |
 | 遮罩 | `inputs.mask.path` | Painted on the 画面 with the 遮罩 tool (M): 画笔, 橡皮, 大小, 反转, 清除, 完成. White means repaint. Saved as a PNG in the project's assets. | `JobParams.mask`; needs a 起始图 |
 | 控制图 | `inputs.control` | 控制适配器 (installed from 模型), its LoRA 强度, and per image 强度 0 to 10 (default 1) with 开始 and 结束 0 to 1 | `JobParams.control` |
 | 参考图 | `inputs.references` | 参考图最长边 16 to 2048 | `JobParams.references` |
 | 风格 | `inputs.styles` | None; merged at generation (section 10) | The prompt and `adapters` |
+
+描图 (`backgroundPath`) is a picture from 作品 shown under a 画面 to trace over, chosen from the card's menu or 作品's 用作描图. It is a guide only and is never sent to the engine.
 
 `studio/jobInputs.ts` (`resolveJobInputs`) turns each link into the source's file path and the adapter id into its file. Anything that cannot be resolved becomes a blocker; an input is never dropped quietly. `studio/mask.ts` maps the painted mask between canvas pixels and the start picture's pixels the way the engine's `resize_to` does, and `maskAvailability` hides the tool when the engine has no `imageInput` and disables it on a 放大 or a result.
 
@@ -92,6 +94,7 @@ Wires (`studio/wires.ts`, drawn by `studio/WireLayer.tsx`) are of two kinds: `in
 
 - A run (`studio/useGenerate.ts`) resolves the 画面 with its 风格 nodes (`generationCanvas`), resolves inputs, picks the seed (`studio/defaults.ts` `seedForRun`: a new random seed unless 种子 is locked), and writes into a new result canvas (`taskCanvasFor`). The 画面's face follows the newest run.
 - The filmstrip (`studio/runs.ts`, `studio/Filmstrip.tsx`) lists every run of a 画面, oldest left. A run stays folded in the strip unless it is pinned, feeds another canvas, or is itself the source of a result (`foldedRunIds`). Click a thumbnail to show it on the face (and on the wires), double-click to open the viewer (`studio/OutputViewer.tsx`), drag it onto the board to pin it where it lands (`studio/useRunDrag.ts`). Runs that do not fit sit behind +N. A run without a picture (running, 失败, 停止) shows only while it is the newest; the next run clears such leftovers (`staleRunIds`). A finished card reads N 张, then 排队 N 张 when jobs were ahead of it and 实跑 with the engine's own time (`studio/jobStatus.ts`, from `JobRecord.queuedBehind` and `runStartedAt`).
+- A failed run says what happened in plain words, from the code the engine returned (`shared/generationError.ts`); the engine's own text stays in the job log, behind 查看详情 (on the face of a 画面, in the footer of a result). Out of GPU memory (`E_OOM`) reads 显存不够这个尺寸, and 重试, which would fail the same way, becomes 改小一点再试: the 画面 goes one size step down (`smallerSize` in `studio/defaults.ts`, about half the pixels, regions scaled along by `smallerCanvas`) and runs again. A 放大, whose size comes from its start picture, and a 画面 already at the smallest size keep 重试. The same words show in 活动 and the failure notification, and in 漫画's retry line.
 - Busy branches (`shared/canvasJobBranch.ts`): while a job is active, its canvas and every canvas upstream in its `sourceCanvasId` chain count as busy, so 生成 and 重新生成 are disabled with 这个画面或它的结果正在生成. Main checks the same lineage before starting a job.
 
 Picture actions in a card's menu (`studio/Board.tsx` `cardActions`):
@@ -110,18 +113,18 @@ While 拆成区域 reads, the new 画面 shows the picture faintly with 正在�
 
 ## 7. Recipes
 
-A recipe lays out nodes already wired; nothing about them is special afterwards (`studio/recipes.ts`, started in `studio/StudioPage.tsx` `startRecipe`). They are offered in the empty board's menu and, while a new project has one blank 画面, in a row under it (`StartRow` in `studio/BoardControls.tsx`). That same blank 画面 shows three descriptions to try on its face (`FIRST_IDEAS` in `studio/Board.tsx`); a click writes one as its description.
+A recipe lays out nodes already wired; nothing about them is special afterwards (`studio/recipes.ts`, started in `studio/StudioPage.tsx` `startRecipe`). They are offered in the empty board's menu and, while the project's only card is a 画面 with no inputs, regions or runs (a description may be typed; `starterCanvas`), in a row under it (`StartRow` in `studio/BoardControls.tsx`). A picture recipe asks for the file first, so a cancelled pick, or one that comes back after another project was opened, leaves the board as it was; that blank 画面 takes the picture rather than a second 画面 beside it, and the board brings the 画面 and its picture card into view. That same blank 画面 shows three descriptions to try on its face (`FIRST_IDEAS` in `studio/Board.tsx`); a click writes one as its description.
 
-| `RecipeId` | Label | Lays out | Disabled when |
+| `RecipeId` | Label | Lays out | Not offered when |
 | --- | --- | --- | --- |
 | `edit` | 改一张图 | A 画面 with a picture chosen from a file as 起始图 | no `imageInput` |
 | `inpaint` | 局部重绘 | The same, then switches to the 遮罩 tool | no `imageInput` |
-| `compose` | 按构图生成 | A 画面 with the first installed 控制适配器 and the picture as its first control kind | no `control`, or 需要先在模型页添加控制适配器 |
+| `compose` | 按构图生成 | A 画面 with the first installed 控制适配器 and the picture as its first control kind | no `control`, or no 控制适配器 installed |
 | `style` | 参考风格 | A 画面 with the picture as 参考图 | no `references` |
 | `upscale` | 放大一张图 | A 放大 fed by the chosen picture | no `imageInput` |
 | `series` | 一组同风格的图 | A 风格 and three 画面 wired to it, side by side (`studio/nodes.ts` `seriesFromStyle`) | never; needs no engine |
 
-With no usable engine every picture recipe carries the engine's reason; with a usable one that lacks the feature it says 现在的引擎不支持这个做法.
+A recipe this computer cannot run is left out of the menu and the row, and the row is not shown when none is left (a text-only engine). While no engine is usable yet, the picture recipes are shown off with the engine's reason instead.
 
 ## 8. Readiness checks
 

@@ -1,13 +1,14 @@
 import { Check, ChevronRight, ExternalLink, Monitor, RefreshCw } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SlotKey } from '@shared/modelCombos'
 import { useNavigate } from 'react-router-dom'
 import { Ipc } from '@shared/channels'
 import type { ManagedHost, Settings } from '@shared/types'
 import { call } from '../../lib/api'
 import { bytes } from '../../lib/format'
-import { timeLeftLabel, type Preparation } from '../../lib/preparation'
+import { preparationAmount, timeLeftLabel, type Preparation } from '../../lib/preparation'
 import { useApp } from '../../store'
+import { Notice } from '../../components/common/Notice'
 import { Button, ProgressBar, Spinner, cn, useToast } from '../../components/ui'
 import { ModelDropOverlay, ModelImportSheet } from '../../components/ModelImport'
 import { useModelImport } from '../../lib/modelImport'
@@ -15,7 +16,7 @@ import { pickFolder } from '../settings/fields'
 import { HostDialog } from '../settings/HostDialog'
 import { emptyHostForm, hostPathsPatch, hostSavePayload, type HostForm } from '../settings/hostForm'
 import type { PlanLine } from '../../lib/engineInstall'
-import { setupNeedLine, setupSpaceLabel, stepsToStart, type SetupStep } from './setupState'
+import { setupNeedLine, setupSpaceLabel, type SetupStep } from './setupState'
 import { useSetup } from './useSetup'
 import { CombinationDialog } from '../models/CombinationDialog'
 import { ModelSources } from '../models/ModelSources'
@@ -105,7 +106,7 @@ function Progress({ progress, modelName }: { progress: Preparation; modelName: s
       <div className="flex flex-wrap items-baseline gap-x-3">
         <span className="tabular text-display font-semibold text-ink">{percent}%</span>
         <span className="tabular text-ui text-ink-2">
-          {bytes(progress.done)} / {bytes(progress.total)}
+          {preparationAmount(progress.done, progress.total)}
           {left ? ` · 还要${left}` : ''}
         </span>
       </div>
@@ -120,7 +121,9 @@ function Progress({ progress, modelName }: { progress: Preparation; modelName: s
             <span className="tabular">
               {part.finished
                 ? bytes(part.total)
-                : `${bytes(part.done)} / ${bytes(part.total)}${part.speedBps > 0 ? ` · ${bytes(part.speedBps)}/s` : ''}`}
+                : part.failed && !part.active
+                  ? '没下载完'
+                  : `${preparationAmount(part.done, part.total)}${part.speedBps > 0 ? ` · ${bytes(part.speedBps)}/s` : ''}`}
             </span>
           </li>
         ))}
@@ -206,7 +209,6 @@ export function SetupPage(): React.JSX.Element {
   }
 
   const running = view.phase === 'running'
-  const pending = stepsToStart(view)
   const mac = view.os === 'macos'
   const need = setupNeedLine(view)
   const gpuStep = view.steps.find((step) => step.id === 'gpu')
@@ -232,12 +234,17 @@ export function SetupPage(): React.JSX.Element {
   }, [view.phase, saveSettings, navigate, toast])
 
   // Picked up after a restart (the engine still installing, the model never started): carry on.
+  // A part that failed stays failed, with its reason and 重试, instead of being retried unseen.
+  const waiting = useMemo(
+    () => view.steps.filter((step) => step.id !== 'gpu' && step.state === 'waiting').map((step) => step.id),
+    [view.steps],
+  )
   const resumed = useRef(false)
   useEffect(() => {
-    if (!running || pending.length === 0 || starting || resumed.current || sharedOpen || combining || reusePending) return
+    if (!running || waiting.length === 0 || starting || resumed.current || sharedOpen || combining || reusePending) return
     resumed.current = true
-    void start()
-  }, [running, pending.length, starting, start, sharedOpen, combining, reusePending])
+    void start(waiting)
+  }, [running, waiting, starting, start, sharedOpen, combining, reusePending])
 
   async function selectSharedModel(id: string): Promise<void> {
     setSelecting(true)
@@ -347,6 +354,33 @@ export function SetupPage(): React.JSX.Element {
           <>
             <h1 className="text-display font-semibold text-ink">正在准备</h1>
             <Progress progress={progress} modelName={modelName} />
+            {/* One part stopped while the other keeps going: its reason and its own way out. */}
+            {view.steps
+              .filter((step) => step.state === 'error')
+              .map((step) => (
+                <Notice
+                  key={step.id}
+                  tone="danger"
+                  data-setup-failed={step.id}
+                  title={step.headline}
+                  action={
+                    <>
+                      {step.switchMirror ? (
+                        <Button tone="ghost" size="xs" disabled={leaving} onClick={() => void leave('active', '/settings/network')}>
+                          换下载线路
+                        </Button>
+                      ) : null}
+                      <Button size="xs" disabled={starting} onClick={() => void start([step.id])}>
+                        重试
+                      </Button>
+                    </>
+                  }
+                >
+                  <span className="line-clamp-2" title={step.detail}>
+                    {step.detail}
+                  </span>
+                </Notice>
+              ))}
             <div className="flex items-center gap-3">
               {modelsPath ? (
                 <span className="min-w-0 flex-1 truncate text-ui text-ink-2" title={modelsPath}>

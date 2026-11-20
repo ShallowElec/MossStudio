@@ -48,8 +48,8 @@ import { useBoardAssets } from './useBoardAssets'
 import { useEngineFeatures } from './useEngineFeatures'
 import { useControlAdapters } from '../../lib/useControlAdapters'
 import { GalleryPicker } from './GalleryPicker'
-import { removeLink, roleLabel, setControlAdapter, setLink, type CanvasLinkEntry, type LinkRole, type PickTarget } from './links'
-import type { Recipe } from './recipes'
+import { linksOf, removeLink, roleLabel, setControlAdapter, setLink, type CanvasLinkEntry, type LinkRole, type PickTarget } from './links'
+import { starterCanvas, type Recipe } from './recipes'
 import { BOARD_GAP, cardWidth } from './boardLayout'
 import {
   createStyleCanvas,
@@ -61,6 +61,7 @@ import {
   tryLoraOnBoard,
   upscaleFromPicture,
   upscaleProblem,
+  withStartPictureShape,
   withUpscaleSize,
 } from './nodes'
 import { dropRun, givesPicture, isActiveRun, keepCardsShown, pictureLink, pinRun, runsOf, unpinRun, withRunSettings } from './runs'
@@ -169,7 +170,7 @@ export function StudioPage(): React.JSX.Element {
   const [adapterPickerOpen, setAdapterPickerOpen] = useState(false)
   // 从作品选择: the input a picture from 作品 goes into.
   // 从作品选择: the input a picture from 作品 goes into, or (right-click on the board) where it goes on the board.
-  const [galleryTarget, setGalleryTarget] = useState<PickTarget | { at: { x: number; y: number } } | null>(null)
+  const [galleryTarget, setGalleryTarget] = useState<PickTarget | { at: { x: number; y: number } } | { underlayOf: string } | null>(null)
 
   const remoteEnabled = settings?.remoteHostsEnabled === true
   const remoteHost = remoteEnabled ? (hosts.find((host) => host.id === remoteHostId) ?? null) : null
@@ -342,7 +343,13 @@ export function StudioPage(): React.JSX.Element {
     // 用作起始图: the picture comes onto the board beside the new canvas and feeds it.
     if (request.useAs === 'start') {
       void inputImport.importPaths([request.sourcePath], canvas).then(([image]) => {
-        if (image) updateCanvas(canvas.id, (item) => setLink(item, 'init', { canvasId: image.id }))
+        if (!image) return
+        // Like any first 起始图: the 画面 takes the picture's shape when it differs from the size the request carried.
+        setCanvases((previous) =>
+          previous.map((item) =>
+            item.id === canvas.id ? withStartPictureShape(setLink(item, 'init', { canvasId: image.id }), previous, item) : item,
+          ),
+        )
       })
     }
     const choice = resolveBundle(catalog, canvas.modelBundleId, preferredBundleId)
@@ -350,7 +357,7 @@ export function StudioPage(): React.JSX.Element {
       toast.push(`这张图用的模型「${request.modelName ?? request.modelBundleId}」还没有下载，生成前请先下载或换一个模型`, 'info')
     }
     if (missingAdapters.length) toast.push(`模型库里没有这些 LoRA：${missingAdapters.join('、')}`, 'info')
-  }, [loaded, reuseRequest, canvasesRef, selectedRef, setCanvases, select, catalog, preferredBundleId, toast, inputImport, updateCanvas])
+  }, [loaded, reuseRequest, canvasesRef, selectedRef, setCanvases, select, catalog, preferredBundleId, toast, inputImport])
 
   // 训练 › 在创作中试用: a 风格 with the trained LoRA and a 画面 wired to it.
   useEffect(() => {
@@ -402,8 +409,8 @@ export function StudioPage(): React.JSX.Element {
       const linked = setLink(target, role, resolved, kind)
       if (linked === target) return previous
       const next = pinRun(previous, resolved.canvasId)
-      // A 放大 takes its size from its 原图.
-      return next.map((canvas) => (canvas.id === targetId ? withUpscaleSize(linked, next) : canvas))
+      // A 放大 takes its size from its 原图, a 画面 that never ran its shape from its first 起始图.
+      return next.map((canvas) => (canvas.id === targetId ? withStartPictureShape(withUpscaleSize(linked, next), next, target) : canvas))
     })
   }
 
@@ -413,7 +420,8 @@ export function StudioPage(): React.JSX.Element {
     // A picture card has no generation settings; the new 画面 takes the latest canvas's.
     const made = canvasFromPicture(list, sourceId, { role, at, fallback: latestSettings() })
     if (!made) return
-    project.setCanvases(made.canvases)
+    const shaped = withStartPictureShape(made.created, made.canvases)
+    project.setCanvases(made.canvases.map((canvas) => (canvas.id === shaped.id ? shaped : canvas)))
     project.select(made.created.id)
     requestAnimationFrame(() => board.current?.reveal(made.created.id))
   }
@@ -487,6 +495,7 @@ export function StudioPage(): React.JSX.Element {
 
   /** Pick one picture file and bring it onto the board as a picture card. */
   const pickPicture = async (): Promise<ProjectCanvas | null> => {
+    const session = project.sessionKey
     let paths: string[]
     try {
       paths = await call<string[]>(Ipc.pickImages, { title: '选择要放大的图' })
@@ -494,7 +503,8 @@ export function StudioPage(): React.JSX.Element {
       toast.push(error instanceof Error ? error.message : String(error), 'error')
       return null
     }
-    if (!paths?.length) return null
+    // A pick that comes back after another project was opened was not for that one.
+    if (!paths?.length || live.current.project.sessionKey !== session) return null
     const [image] = await inputImport.importPaths(paths.slice(0, 1))
     return image ?? null
   }
@@ -513,6 +523,7 @@ export function StudioPage(): React.JSX.Element {
   }
 
   const importPicturesAt = async (at: { x: number; y: number }): Promise<void> => {
+    const session = project.sessionKey
     let paths: string[]
     try {
       paths = await call<string[]>(Ipc.pickImages, { title: '选择图片' })
@@ -520,7 +531,8 @@ export function StudioPage(): React.JSX.Element {
       toast.push(error instanceof Error ? error.message : String(error), 'error')
       return
     }
-    if (paths?.length) await importAt(paths, at)
+    // `at` is a point on the board the menu was opened on, not on another project's.
+    if (paths?.length && live.current.project.sessionKey === session) await importAt(paths, at)
   }
 
   /** A new 画面, at a board point when given. */
@@ -549,18 +561,27 @@ export function StudioPage(): React.JSX.Element {
       return
     }
     if (!recipe.role) return
-    const created = addCanvasAt(at)
-    if (recipe.role === 'control') {
-      const adapter = controlAdapters.find((item) => item.controlKinds.length)
-      if (!adapter) return
-      project.updateCanvas(created.id, (canvas) => setControlAdapter(canvas, adapter.id))
-      await inputImport.addFromFile(created.id, 'control', adapter.controlKinds[0])
-    } else {
-      await inputImport.addFromFile(created.id, recipe.role)
-    }
+    const adapter = recipe.role === 'control' ? controlAdapters.find((item) => item.controlKinds.length) : undefined
+    if (recipe.role === 'control' && !adapter) return
+    // The picture is chosen first, so a cancelled pick leaves the board as it was; a new project's blank 画面 takes it.
+    const filled = await inputImport.addFromFile(
+      () => {
+        const starter = starterCanvas(project.canvasesRef.current)
+        const target = starter ?? addCanvasAt(at)
+        if (starter) project.select(starter.id)
+        if (adapter) project.updateCanvas(target.id, (canvas) => setControlAdapter(canvas, adapter.id))
+        return target.id
+      },
+      recipe.role,
+      adapter?.controlKinds[0],
+    )
+    if (!filled) return
+    // It may have grown to the picture's shape, and the picture card beside it should be seen too.
+    const made = project.canvasesRef.current.find((canvas) => canvas.id === filled)
+    const shown = [filled, ...(made ? linksOf(made).map((entry) => entry.link.canvasId) : [])]
+    requestAnimationFrame(() => board.current?.reveal(shown))
     // 局部重绘 goes straight to painting the part to redo.
-    const made = project.canvasesRef.current.find((canvas) => canvas.id === created.id)
-    if (recipe.id === 'inpaint' && made?.inputs?.init) setTool('mask')
+    if (recipe.id === 'inpaint') setTool('mask')
   }
 
   const inputsWiring: InputsWiring = {
@@ -583,8 +604,8 @@ export function StudioPage(): React.JSX.Element {
     },
   }
 
-  const run = async (canvasId: string, seed?: 'new' | 'same'): Promise<void> => {
-    const result = await generate(canvasId, seed)
+  const run = async (canvasId: string, seed?: 'new' | 'same', smaller?: boolean): Promise<void> => {
+    const result = await generate(canvasId, seed, { smaller })
     if (result.canvasId && result.canvasId !== canvasId) board.current?.reveal(result.canvasId)
   }
 
@@ -944,12 +965,14 @@ export function StudioPage(): React.JSX.Element {
           onSelectCanvas={(id) => project.select(id)}
           onMoveCanvas={(id, x, y) => project.updateCanvas(id, { x, y })}
           onChangeLayers={changeLayers}
-          onUnderlay={(item) => applyUnderlay(item?.path)}
+          onUnderlay={(canvasId, pick) =>
+            pick ? setGalleryTarget({ underlayOf: canvasId }) : updateCanvas(canvasId, { backgroundPath: undefined })
+          }
           onAddCanvas={(at) => void addCanvasAt(at)}
           onImportPictures={(at) => void importPicturesAt(at)}
           onPicturesFromGallery={(at) => setGalleryTarget({ at })}
           onOpenViewer={(canvasId, index) => setViewer({ canvasId, index })}
-          onRerun={(canvasId, seed) => void run(canvasId, seed)}
+          onRerun={(canvasId, seed, smaller) => void run(canvasId, seed, smaller)}
           onCancel={(jobId) => {
             void cancelJob(jobId).catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
           }}
@@ -1076,12 +1099,19 @@ export function StudioPage(): React.JSX.Element {
 
       <GalleryPicker
         open={galleryTarget !== null}
-        title={galleryTarget && 'role' in galleryTarget ? `选择${roleLabel(galleryTarget.role)}` : '选择图片'}
+        title={
+          galleryTarget && 'role' in galleryTarget
+            ? `选择${roleLabel(galleryTarget.role)}`
+            : galleryTarget && 'underlayOf' in galleryTarget
+              ? '选择描图'
+              : '选择图片'
+        }
         onClose={() => setGalleryTarget(null)}
         onPick={(path) => {
           const target = galleryTarget
           setGalleryTarget(null)
           if (target && 'role' in target) void inputImport.addPaths(target.canvasId, target.role, target.kind, [path])
+          else if (target && 'underlayOf' in target) updateCanvas(target.underlayOf, { backgroundPath: path })
           else if (target) void importAt([path], target.at)
         }}
       />

@@ -43,6 +43,16 @@ export function clampDimension(value: number, fallback: number = DEFAULT_SIZE.wi
   return Math.min(MAX_DIMENSION, Math.max(MIN_DIMENSION, snapped))
 }
 
+/**
+ * One size step down for a picture the GPU could not fit: three quarters of
+ * each side (about half the pixels), on the engine grid. Null when it is
+ * already as small as the engine goes.
+ */
+export function smallerSize(width: number, height: number): { width: number; height: number } | null {
+  const next = { width: clampDimension(width * 0.75, MIN_DIMENSION), height: clampDimension(height * 0.75, MIN_DIMENSION) }
+  return next.width < width || next.height < height ? next : null
+}
+
 export type QualityId = 'fast' | 'standard' | 'fine'
 export type SamplerProfile = 'dmd8' | 'base'
 

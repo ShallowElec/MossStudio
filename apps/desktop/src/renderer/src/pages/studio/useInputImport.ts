@@ -3,8 +3,8 @@ import { Ipc } from '@shared/channels'
 import type { ProjectCanvas } from '@shared/types'
 import { call } from '../../lib/api'
 import { createImageCanvas } from './canvases'
-import { MAX_REFERENCES, setLink, type LinkRole } from './links'
-import { withUpscaleSize } from './nodes'
+import { MAX_REFERENCES, roleLabel, setLink, type LinkRole } from './links'
+import { withStartPictureShape, withUpscaleSize } from './nodes'
 import type { StudioProject } from './useStudioProject'
 
 interface ImportedPicture {
@@ -24,15 +24,19 @@ function message(error: unknown): string {
  * its folder).
  */
 export function useInputImport(options: {
-  project: Pick<StudioProject, 'projectId' | 'saveNow' | 'canvasesRef' | 'setCanvases'>
+  project: Pick<StudioProject, 'projectId' | 'sessionKey' | 'saveNow' | 'canvasesRef' | 'setCanvases'>
   notify: (text: string, tone?: 'error' | 'info' | 'success') => void
 }): {
   /** Import files as picture cards placed beside `near`; returns the new cards. */
   importPaths: (paths: readonly string[], near?: ProjectCanvas) => Promise<ProjectCanvas[]>
-  /** Import pictures (a gallery item, say) and link them into `targetId`'s role. */
-  addPaths: (targetId: string, role: LinkRole, kind: string | undefined, paths: readonly string[]) => Promise<void>
-  /** Pick files, then link them into `targetId`'s role. */
-  addFromFile: (targetId: string, role: LinkRole, kind?: string) => Promise<void>
+  /** Import pictures (a gallery item, say) and link them into `targetId`'s role; false when none went in. */
+  addPaths: (targetId: string, role: LinkRole, kind: string | undefined, paths: readonly string[]) => Promise<boolean>
+  /**
+   * Pick files, then link them into the role of the canvas `target` names, or
+   * makes once a file is chosen; resolves to that canvas's id, or null when
+   * nothing was added (cancelled, or another project opened meanwhile).
+   */
+  addFromFile: (target: string | (() => string), role: LinkRole, kind?: string) => Promise<string | null>
 } {
   const live = useRef(options)
   live.current = options
@@ -61,34 +65,39 @@ export function useInputImport(options: {
 
   /** Copies pictures into the project and links them into a card's input. */
   const addPaths = useCallback(
-    async (targetId: string, role: LinkRole, kind: string | undefined, paths: readonly string[]): Promise<void> => {
+    async (targetId: string, role: LinkRole, kind: string | undefined, paths: readonly string[]): Promise<boolean> => {
       const { project, notify } = live.current
       const target = project.canvasesRef.current.find((canvas) => canvas.id === targetId)
-      if (!target) return
+      if (!target) return false
       const room = role === 'reference' ? Math.max(0, MAX_REFERENCES - (target.inputs?.references?.links.length ?? 0)) : 1
-      if (!paths.length || room === 0) return
-      if (paths.length > room) notify(`参考图最多 ${MAX_REFERENCES} 张，只放入了前 ${room} 张`, 'info')
+      if (!paths.length || room === 0) return false
+      if (paths.length > room) {
+        notify(
+          role === 'reference' ? `参考图最多 ${MAX_REFERENCES} 张，只放入了前 ${room} 张` : `${roleLabel(role)}只能放一张，放入了第一张`,
+          'info',
+        )
+      }
       const created = await importPaths(paths.slice(0, room), target)
-      if (!created.length) return
-      project.setCanvases((previous) =>
-        previous.map((canvas) =>
-          canvas.id === targetId
-            ? // A 放大 takes its size from its 原图.
-              withUpscaleSize(
-                created.reduce((next, image) => setLink(next, role, { canvasId: image.id }, kind), canvas),
-                [...previous, ...created],
-              )
-            : canvas,
-        ),
-      )
+      if (!created.length) return false
+      project.setCanvases((previous) => {
+        const all = [...previous, ...created]
+        return previous.map((canvas) => {
+          if (canvas.id !== targetId) return canvas
+          const linked = created.reduce((next, image) => setLink(next, role, { canvasId: image.id }, kind), canvas)
+          // A 放大 takes its size from its 原图, a 画面 that never ran its shape from its first 起始图.
+          return withStartPictureShape(withUpscaleSize(linked, all), all, canvas)
+        })
+      })
+      return true
     },
     [importPaths],
   )
 
   const addFromFile = useCallback(
-    async (targetId: string, role: LinkRole, kind?: string): Promise<void> => {
+    async (target: string | (() => string), role: LinkRole, kind?: string): Promise<string | null> => {
       const { project, notify } = live.current
-      if (!project.canvasesRef.current.some((canvas) => canvas.id === targetId)) return
+      if (typeof target === 'string' && !project.canvasesRef.current.some((canvas) => canvas.id === target)) return null
+      const session = project.sessionKey
       let paths: string[]
       try {
         paths = await call<string[]>(Ipc.pickImages, {
@@ -96,9 +105,13 @@ export function useInputImport(options: {
         })
       } catch (error) {
         notify(message(error), 'error')
-        return
+        return null
       }
-      await addPaths(targetId, role, kind, paths ?? [])
+      // A cancelled pick changes nothing: the canvas is made only now. Nor does a pick that comes back
+      // after another project was opened: the canvas and the place it was for belong to the old one.
+      if (!paths?.length || live.current.project.sessionKey !== session) return null
+      const targetId = typeof target === 'string' ? target : target()
+      return (await addPaths(targetId, role, kind, paths)) ? targetId : null
     },
     [addPaths],
   )
