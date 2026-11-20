@@ -61,7 +61,11 @@ function mount(start: ProjectCanvas[], options: { held?: boolean } = {}) {
   const project = {
     canvasesRef: board,
     selectedRef: { current: 'scene' },
-    setCanvases: (next: ProjectCanvas[] | ((previous: ProjectCanvas[]) => ProjectCanvas[])) => {
+    // A run's writes are saved but never an undo step: they must not use the recording setter.
+    setCanvases: () => {
+      throw new Error('a run wrote through setCanvases, which records an undo step')
+    },
+    setRunCanvases: (next: ProjectCanvas[] | ((previous: ProjectCanvas[]) => ProjectCanvas[])) => {
       board.current = typeof next === 'function' ? next(board.current) : next
     },
     saveNow: async () => ({ id: 'project-1' }),

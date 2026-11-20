@@ -13,6 +13,7 @@ import {
   Undo2,
 } from 'lucide-react'
 import { IconButton, cn } from '../../components/ui'
+import { platform } from '../../lib/api'
 import { BRUSH_MAX, BRUSH_MIN } from './mask'
 import type { MaskBrush } from './MaskLayer'
 import type { BoardTool } from './RegionLayer'
@@ -32,10 +33,10 @@ export interface BoardHistoryControls {
   onRedo: () => void
 }
 
-/** Shortcut names as this computer writes them. */
-const MAC = typeof window !== 'undefined' && window.clover?.platform === 'darwin'
-const UNDO_KEY = MAC ? '⌘Z' : 'Ctrl+Z'
-const REDO_KEY = MAC ? '⇧⌘Z' : 'Ctrl+Shift+Z'
+/** The undo and redo shortcuts as this computer writes them. */
+function historyKeys(): { undo: string; redo: string } {
+  return platform() === 'darwin' ? { undo: '⌘Z', redo: '⇧⌘Z' } : { undo: 'Ctrl+Z', redo: 'Ctrl+Shift+Z' }
+}
 
 const TOOLS: Array<{ id: BoardTool; label: string; key: string; icon: React.ReactNode }> = [
   { id: 'select', label: '选择', key: 'V', icon: <MousePointer2 className="size-4" strokeWidth={1.6} /> },
@@ -77,6 +78,7 @@ export function Toolbar({
   onMinimap: (on: boolean) => void
   history: BoardHistoryControls
 }): React.JSX.Element {
+  const keys = historyKeys()
   return (
     <div
       role="toolbar"
@@ -95,10 +97,10 @@ export function Toolbar({
           {item.icon}
         </ToolButton>
       ))}
-      <ToolButton aria-label="撤销" title={`撤销 ${UNDO_KEY}`} disabled={!history.canUndo} onClick={history.onUndo}>
+      <ToolButton aria-label="撤销" title={`撤销 ${keys.undo}`} disabled={!history.canUndo} onClick={history.onUndo}>
         <Undo2 className="size-4" strokeWidth={1.6} />
       </ToolButton>
-      <ToolButton aria-label="重做" title={`重做 ${REDO_KEY}`} disabled={!history.canRedo} onClick={history.onRedo}>
+      <ToolButton aria-label="重做" title={`重做 ${keys.redo}`} disabled={!history.canRedo} onClick={history.onRedo}>
         <Redo2 className="size-4" strokeWidth={1.6} />
       </ToolButton>
       <span aria-hidden="true" className="w-2" />

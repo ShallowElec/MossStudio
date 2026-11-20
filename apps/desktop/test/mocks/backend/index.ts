@@ -815,9 +815,13 @@ function defaultHandlers(): Map<string, Handler> {
       height: size ? Number(size[2]) : 1024,
     }
   })
+  // Main names a mask by its content, so every new stroke is a new file: the first, then -2, -3…
+  const maskSaves = new Map<string, number>()
   h.set(Ipc.studioSaveMask, (payload) => {
     const { projectId, canvasId } = p<{ projectId: string; canvasId: string }>(payload)
-    return { path: `/fixture/projects/${projectId}/assets/mask-${canvasId}.png` }
+    const count = (maskSaves.get(`${projectId}/${canvasId}`) ?? 0) + 1
+    maskSaves.set(`${projectId}/${canvasId}`, count)
+    return { path: `/fixture/projects/${projectId}/assets/mask-${canvasId}${count > 1 ? `-${count}` : ''}.png` }
   })
   h.set(Ipc.controlAdaptersList, (_, { state }) => state.controlAdapters)
   h.set(Ipc.controlAdaptersRemove, (payload, { state, emit }) => {

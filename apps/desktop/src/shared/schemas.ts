@@ -801,6 +801,8 @@ export const schemas = {
     selectedCanvasId: z.string().max(120).optional(),
     seriesId: z.string().max(120).optional(),
     page: z.number().int().min(1).max(9999).optional(),
+    /** Mask files the window's undo history still holds: a save must not prune them. */
+    keepMasks: z.array(z.string().min(1).max(4096)).max(2000).optional(),
   }),
 
   caseSave: z.object({

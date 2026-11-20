@@ -795,17 +795,28 @@ describe('studio board', () => {
     await expect.poll(() => savedInputs(page).then((inputs) => inputs?.mask ?? null), { timeout: 10_000 }).toBeNull()
   })
 
-  it('a new stroke replaces the mask file it painted over (so old masks do not pile up)', async () => {
+  it('a new stroke keeps the mask it painted over on disk while undo can bring it back', async () => {
     const page = await openBoard(app, { inputs: { init: { link: { canvasId: 'img-1' }, strength: 0.6 } } })
+    const masks = '/fixture/projects/project-1/assets'
     await page.getByRole('button', { name: '遮罩', exact: true }).click()
     await paintStroke(page)
-    await expect.poll(() => savedInputs(page).then((inputs) => inputs?.mask?.path ?? null), { timeout: 10_000 }).not.toBeNull()
-    const first = await page.evaluate(() => window.__mock.callsTo('studio:save-mask')[0] as { replaces?: string })
-    expect(first.replaces).toBeUndefined()
+    await expect
+      .poll(() => savedInputs(page).then((inputs) => inputs?.mask?.path ?? null), { timeout: 10_000 })
+      .toBe(`${masks}/mask-canvas-1.png`)
     await paintStroke(page)
-    await expect.poll(() => app.calls('studio:save-mask').then((calls) => calls.length), { timeout: 5_000 }).toBe(2)
-    const second = await page.evaluate(() => window.__mock.callsTo('studio:save-mask')[1] as { replaces?: string })
-    expect(second.replaces).toBe('/fixture/projects/project-1/assets/mask-canvas-1.png')
+    await expect
+      .poll(() => savedInputs(page).then((inputs) => inputs?.mask?.path ?? null), { timeout: 10_000 })
+      .toBe(`${masks}/mask-canvas-1-2.png`)
+    // Nothing is deleted at once: the save tells main the painted-over mask is still held by undo.
+    const saves = await page.evaluate(() => window.__mock.callsTo('studio:save-mask') as Array<{ replaces?: string }>)
+    expect(saves.map((call) => call.replaces)).toEqual([undefined, undefined])
+    await expect
+      .poll(() => app.calls<{ keepMasks?: string[] }>('projects:save').then((calls) => calls.at(-1)?.keepMasks ?? []))
+      .toContain(`${masks}/mask-canvas-1.png`)
+    await page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: '撤销' }).click()
+    await expect
+      .poll(() => savedInputs(page).then((inputs) => inputs?.mask?.path ?? null), { timeout: 10_000 })
+      .toBe(`${masks}/mask-canvas-1.png`)
   })
 
   it('turns the mask tool off with a reason until a start picture is linked', async () => {

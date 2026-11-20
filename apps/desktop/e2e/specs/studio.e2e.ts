@@ -340,6 +340,12 @@ describe('studio', () => {
     // Only the run already on its way went out; the three called off never did.
     expect(await page.evaluate((channel) => window.__mock.callsTo(channel).length, ENGINE_JOBS)).toBe(2)
     expect(await app.calls('jobs:cancel')).toEqual([])
+    // Calling runs off is no undo step: 撤销 takes back the description, and the queue stays empty.
+    const undo = page.getByRole('toolbar', { name: '画布工具' }).getByRole('button', { name: '撤销' })
+    await undo.click()
+    await expect.poll(() => page.getByRole('textbox', { name: '描述', exact: true }).inputValue()).toBe('')
+    expect(await card.locator('[data-strip-queued]').count()).toBe(0)
+    expect(await undo.isDisabled()).toBe(true)
   })
 
   it('sends a queued run with the settings of its click; a change goes to the runs asked for after it', async () => {

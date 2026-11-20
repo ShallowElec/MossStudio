@@ -10,6 +10,8 @@ export interface StudioProjectInput {
   selectedCanvasId?: string
   seriesId?: string
   page?: number
+  /** Mask files the undo history can still bring back; the save keeps them on disk. */
+  keepMasks?: string[]
 }
 
 /**

@@ -703,10 +703,11 @@ export function registerIpc(): void {
 
   handle(Ipc.projectGet, schemas.projectId, ({ id }) => getProject(id))
 
-  handle(Ipc.projectSave, schemas.projectSave, (input) => {
+  handle(Ipc.projectSave, schemas.projectSave, ({ keepMasks, ...input }) => {
     const saved = saveProject(input)
-    // Masks painted over or cleared are no longer referenced: drop them (never one a job still reads).
-    void pruneProjectMasks(saved, activeJobInputPaths()).catch(() => undefined)
+    // Masks painted over or cleared are no longer referenced: drop them (never one a job still reads,
+    // nor one the Studio's undo can still bring back).
+    void pruneProjectMasks(saved, activeJobInputPaths(), keepMasks).catch(() => undefined)
     return saved
   })
 

@@ -70,13 +70,13 @@ A read returns its data. An ask returns `{ shown, card, summary }`. A write or r
 
 ## 7. Undoing a turn
 
-Main names each tool call's turn (`turnId`, the reply's message id from the `start` event) and the executor runs a 自主 turn's tools inside `StudioToolApi.oneStep` with the key `turn:<turnId>` and the call's id. The board's history ([studio-node-board.md](/docs/reference/studio-node-board.md#13-undo-and-redo)) then joins everything the turn changes into one step, 助手的修改, however many tools and rounds it took, and remembers the calls. A turn that only read or asked makes no step.
+Main names each tool call's turn (`turnId`, the reply's message id from the `start` event) and the executor runs a 自主 turn's tools inside `StudioToolApi.oneStep` with the key `turn:<turnId>` and the call's id. The board's history ([studio-node-board.md](/docs/reference/studio-node-board.md#13-undo-and-redo)) then joins everything the turn changes into one step, 助手的修改, however many tools and rounds it took, and remembers the calls. A turn that only read or asked, or whose changes cancel out, makes no step.
 
 Under the turn's last reply (`assistant/format.ts` `turnCalls` finds it), `TurnUndo` in `assistant/Assistant.tsx` asks the history where that step stands (`history.ts` `turnState`):
 
 | State | Shows |
 | --- | --- |
-| `latest`: the turn's step is the newest | 撤销这一步; undoes exactly that step, with the same toast as Ctrl+Z |
+| `latest`: the turn's step is the newest | 撤销这一步; undoes the turn's own steps and never one under them, with the same toast as Ctrl+Z. A 画面 the turn made that is generating now is not taken away: 先取消正在生成的画面再撤销 |
 | `buried`: something was changed after it | 撤销这一步, disabled, with the reason in its tooltip |
 | `redo`: undone, and the next redo brings it back | 重做 |
 | `undone`: undone, and other steps were undone after it | 已撤销, disabled |

@@ -301,4 +301,18 @@ describe('mask cleanup', () => {
     for (const kept of [used, byResult, byJob, picture.path]) expect(existsSync(kept)).toBe(true)
     expect(existsSync(orphan)).toBe(false)
   })
+
+  it("keeps the masks undo can still bring back, and only this project's own", async () => {
+    const painted = (await assets.saveMask('project-1', 'canvas-1', strokes[0]!)).path
+    const over = (await assets.saveMask('project-1', 'canvas-1', strokes[1]!)).path
+    const gone = (await assets.saveMask('project-1', 'canvas-2', strokes[2]!)).path
+    mkdirSync(join(dataRoot(), 'projects', 'project-2', 'assets'), { recursive: true })
+    const foreign = (await assets.saveMask('project-2', 'canvas-1', strokes[3]!)).path
+    const canvases = [canvas({ id: 'canvas-1', inputs: { init: { link: { canvasId: 'img' }, strength: 0.5 }, mask: { path: over } } })]
+    // The mask painted over is held by undo; a path of another project in the list changes nothing there.
+    expect(await assets.pruneProjectMasks({ id: 'project-1', canvases }, [], [painted, foreign, '/etc/passwd'])).toEqual([resolve(gone)])
+    expect([existsSync(painted), existsSync(over), existsSync(foreign)]).toEqual([true, true, true])
+    // Once the history lets it go, the next save prunes it.
+    expect(await assets.pruneProjectMasks({ id: 'project-1', canvases })).toEqual([resolve(painted)])
+  })
 })

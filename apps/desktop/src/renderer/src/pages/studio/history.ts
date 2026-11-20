@@ -1,5 +1,7 @@
-import type { ProjectCanvas } from '@shared/types'
+import type { JobRecord, ProjectCanvas, ProjectLayer } from '@shared/types'
+import { removedWith } from './canvases'
 import { linksOf } from './links'
+import { isActiveRun, runsOf } from './runs'
 import { sameData } from './sameData'
 
 /**
@@ -104,25 +106,18 @@ export interface RecordOptions {
 export function record(history: BoardHistory, changes: readonly CanvasChange[], options: RecordOptions): boolean {
   if (!changes.length) return false
   const top = history.undo.at(-1)
-  let step = top && !history.sealed && top.token === options.token ? top : null
-  const shaped = !step
-  if (!step) {
-    step = {
-      id: history.nextId++,
-      token: options.token,
-      before: new Map(),
-      after: new Map(),
-      beforeAt: new Map(),
-      afterAt: new Map(),
-      selectedBefore: options.selected,
-      selectedAfter: null,
-      calls: [],
-    }
-    history.undo.push(step)
-    if (history.undo.length > HISTORY_LIMIT) history.undo.splice(0, history.undo.length - HISTORY_LIMIT)
-    history.redo = []
+  const joined = top && !history.sealed && top.token === options.token ? top : null
+  const step: HistoryStep = joined ?? {
+    id: history.nextId++,
+    token: options.token,
+    before: new Map(),
+    after: new Map(),
+    beforeAt: new Map(),
+    afterAt: new Map(),
+    selectedBefore: options.selected,
+    selectedAfter: null,
+    calls: [],
   }
-  history.sealed = false
   for (const change of changes) {
     if (!step.before.has(change.id)) {
       step.before.set(change.id, change.before)
@@ -133,7 +128,45 @@ export function record(history: BoardHistory, changes: readonly CanvasChange[], 
   }
   if (options.label && !step.label) step.label = options.label
   if (options.call && !step.calls.includes(options.call)) step.calls.push(options.call)
-  return shaped
+  // Edits that cancel out (a box dragged back where it was) leave nothing to undo.
+  if (isEmptyStep(step)) {
+    if (joined) history.undo.pop()
+    return Boolean(joined)
+  }
+  if (joined) return false
+  history.undo.push(step)
+  if (history.undo.length > HISTORY_LIMIT) history.undo.splice(0, history.undo.length - HISTORY_LIMIT)
+  history.redo = []
+  history.sealed = false
+  return true
+}
+
+/**
+ * Join one more change into a list of changes of the same moment: the first
+ * `before` of each canvas and its latest `after` (a gesture held back until it ends).
+ */
+export function mergeChanges(into: Map<string, CanvasChange>, changes: readonly CanvasChange[]): void {
+  for (const change of changes) {
+    const earlier = into.get(change.id)
+    into.set(change.id, earlier ? { ...change, before: earlier.before, beforeAt: earlier.beforeAt } : change)
+  }
+}
+
+/** The mask files the steps can still bring back, so a save does not prune them. */
+export function heldMasks(history: BoardHistory): string[] {
+  const paths = new Set<string>()
+  for (const step of [...history.undo, ...history.redo]) {
+    for (const canvas of [...step.before.values(), ...step.after.values()]) {
+      const path = canvas?.inputs?.mask?.path
+      if (path) paths.add(path)
+    }
+  }
+  return [...paths]
+}
+
+/** The steps of a stack that change something, the newest last. */
+export function liveSteps(stack: readonly HistoryStep[]): HistoryStep[] {
+  return stack.filter((step) => !isEmptyStep(step))
 }
 
 /** A step whose edits cancel out (a box dragged back to where it was). */
@@ -146,16 +179,66 @@ export function isEmptyStep(step: HistoryStep): boolean {
   return true
 }
 
-/** A result with pictures: undo never takes one off the board. */
+/** A result with pictures: undo never takes one off the board on its own. */
 function keepsPictures(canvas: ProjectCanvas): boolean {
   return canvas.kind === 'result' && Boolean(canvas.outputs?.length)
+}
+
+/**
+ * What applying a step would take off the board: the canvases it removes
+ * (`own`), and the runs folded into a 画面 among them (`along`), which go with
+ * it as they do when the 画面 is deleted.
+ */
+export function removals(
+  canvases: readonly ProjectCanvas[],
+  step: HistoryStep,
+  direction: 'undo' | 'redo',
+): { own: string[]; along: string[] } {
+  const to = direction === 'undo' ? step.before : step.after
+  const byId = new Map(canvases.map((canvas) => [canvas.id, canvas]))
+  const own = [...to].flatMap(([id, target]) => {
+    const current = byId.get(id)
+    return !target && current && !(direction === 'undo' && keepsPictures(current)) ? [id] : []
+  })
+  const taken = new Set(own)
+  const along = new Set<string>()
+  for (const id of own) for (const run of removedWith(canvases, id).slice(1)) if (!taken.has(run)) along.add(run)
+  return { own, along: [...along] }
+}
+
+/** Whether applying a step would take off a canvas whose run (or one of its 画面's runs) is waiting or running. */
+export function removesRunning(
+  canvases: readonly ProjectCanvas[],
+  step: HistoryStep,
+  direction: 'undo' | 'redo',
+  jobs: readonly Pick<JobRecord, 'id' | 'state'>[],
+): boolean {
+  const { own, along } = removals(canvases, step, direction)
+  const byId = new Map(canvases.map((canvas) => [canvas.id, canvas]))
+  return [...own, ...along].some((id) => {
+    const canvas = byId.get(id)
+    if (!canvas) return false
+    return isActiveRun(canvas, jobs) || runsOf(canvas, canvases).some((run) => isActiveRun(run, jobs))
+  })
+}
+
+/** Region boxes drawn on a canvas of `from` size, moved onto one of `to` size. */
+function scaledLayers(layers: readonly ProjectLayer[], from: { width: number; height: number }, to: { width: number; height: number }) {
+  const x = to.width / from.width
+  const y = to.height / from.height
+  return layers.map((layer) => {
+    const [x1, y1, x2, y2] = layer.bbox
+    return { ...layer, bbox: [x1 * x, y1 * y, x2 * x, y2 * y] as ProjectLayer['bbox'] }
+  })
 }
 
 /**
  * Apply a step to the canvases as they are now, backwards (undo) or forwards
  * (redo). Only the fields the step changed are written, onto the current
  * canvas, so run state and later edits to other fields stay. A canvas the step
- * removed comes back at its old place; one it added goes again.
+ * removed comes back at its old place; one it added goes again, with the runs
+ * folded into it, which the step then keeps so the other direction brings them
+ * back. Check `removesRunning` first: this does not.
  */
 export function applyStep(
   canvases: readonly ProjectCanvas[],
@@ -163,20 +246,25 @@ export function applyStep(
   direction: 'undo' | 'redo',
 ): { canvases: ProjectCanvas[]; restored: string[] } {
   const from = direction === 'undo' ? step.after : step.before
+  const fromAt = direction === 'undo' ? step.afterAt : step.beforeAt
   const to = direction === 'undo' ? step.before : step.after
   const places = direction === 'undo' ? step.beforeAt : step.afterAt
   const list = [...canvases]
   const index = new Map(list.map((canvas, at) => [canvas.id, at]))
-  const removed = new Set<string>()
+  const { own, along } = removals(list, step, direction)
+  for (const id of along) {
+    const at = index.get(id)!
+    from.set(id, list[at]!)
+    fromAt.set(id, at)
+    to.set(id, null)
+  }
+  const removed = new Set([...own, ...along])
   const inserts: Array<{ at: number; canvas: ProjectCanvas }> = []
   for (const [id, target] of to) {
     const at = index.get(id)
     const current = at === undefined ? undefined : list[at]
     const source = from.get(id) ?? null
-    if (!target) {
-      if (current && !(direction === 'undo' && keepsPictures(current))) removed.add(id)
-      continue
-    }
+    if (!target) continue
     if (!current) {
       // Only a canvas this step removed comes back; one removed since by something else stays gone.
       if (!source) inserts.push({ at: places.get(id) ?? list.length, canvas: target })
@@ -189,6 +277,11 @@ export function applyStep(
     for (const key of fields) {
       if (values[key] === undefined) delete next[key]
       else next[key] = values[key]
+    }
+    // The canvas changed size since (改小一点再试 is a run's change, not a step): its boxes follow the size it has now.
+    const resized = current.width !== target.width || current.height !== target.height
+    if (fields.includes('layers') && !fields.includes('width') && !fields.includes('height') && resized) {
+      next['layers'] = scaledLayers(target.layers, target, current)
     }
     list[at!] = next as unknown as ProjectCanvas
   }
@@ -284,13 +377,28 @@ function topRun(stack: readonly HistoryStep[], calls: ReadonlySet<string>): numb
 export function turnState(history: BoardHistory, calls: readonly string[]): TurnState | null {
   if (!calls.length) return null
   const set = new Set(calls)
-  if (history.undo.some((step) => ofTurn(step, set))) return topRun(history.undo, set) > 0 ? 'latest' : 'buried'
-  if (history.redo.some((step) => ofTurn(step, set))) return topRun(history.redo, set) > 0 ? 'redo' : 'undone'
+  const undo = liveSteps(history.undo)
+  const redo = liveSteps(history.redo)
+  if (undo.some((step) => ofTurn(step, set))) return topRun(undo, set) > 0 ? 'latest' : 'buried'
+  if (redo.some((step) => ofTurn(step, set))) return topRun(redo, set) > 0 ? 'redo' : 'undone'
   return null
 }
 
-/** How many undo (or redo) steps take back (or bring back) exactly that turn; 0 when they would take more. */
-export function turnSteps(history: BoardHistory, calls: readonly string[], direction: 'undo' | 'redo'): number {
-  const count = topRun(direction === 'undo' ? history.undo : history.redo, new Set(calls))
-  return Math.max(0, count)
+/** Whether a step holds changes of the turn known by these tool calls. */
+export function isTurnStep(step: HistoryStep, calls: readonly string[]): boolean {
+  return ofTurn(step, new Set(calls))
+}
+
+/** Inputs that take typed text, and so have their own undo (not sliders, menus, boxes or buttons). */
+const TEXT_INPUT = /^(text|search|url|tel|email|password|number)$/
+
+/**
+ * Whether Ctrl+Z belongs to the focused control rather than the board: a text
+ * area, a text input or editable text. A slider or a menu with focus leaves it to the board.
+ */
+export function ownsUndoKey(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  if (!element?.closest) return false
+  if (element.closest('textarea, [contenteditable="true"]')) return true
+  return element instanceof HTMLInputElement && TEXT_INPUT.test(element.type || 'text')
 }

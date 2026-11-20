@@ -79,7 +79,8 @@ import { resolveJobInputs } from './jobInputs'
 import { useGenerate } from './useGenerate'
 import { useInputImport } from './useInputImport'
 import { droppedPaths, useModelImport } from '../../lib/modelImport'
-import { useStudioProject } from './useStudioProject'
+import { useStudioProject, type StepOutcome } from './useStudioProject'
+import { ownsUndoKey } from './history'
 import { usePictureRegions } from './usePictureRegions'
 
 const BUNDLE_KEY = 'mossstudio.modelBundleId'
@@ -531,8 +532,11 @@ export function StudioPage(): React.JSX.Element {
     if (!created.length) return
     const first = created[0]!
     const ids = new Set(created.map((card) => card.id))
-    project.setCanvases((previous) =>
-      previous.map((canvas) => (ids.has(canvas.id) ? { ...canvas, x: canvas.x - first.x + at.x, y: canvas.y - first.y + at.y } : canvas)),
+    // Placing them is part of bringing them in: one step with the import.
+    project.history.join(project.history.top('undo'), () =>
+      project.setCanvases((previous) =>
+        previous.map((canvas) => (ids.has(canvas.id) ? { ...canvas, x: canvas.x - first.x + at.x, y: canvas.y - first.y + at.y } : canvas)),
+      ),
     )
     project.select(first.id)
     requestAnimationFrame(() => board.current?.keepInView(first.id))
@@ -573,7 +577,8 @@ export function StudioPage(): React.JSX.Element {
     }
     if (recipe.id === 'upscale') {
       const image = await pickPicture()
-      if (image) upscaleFrom(image.id)
+      // The picture and the 放大 fed by it are one step.
+      if (image) project.history.join(project.history.top('undo'), () => upscaleFrom(image.id))
       return
     }
     if (!recipe.role) return
@@ -837,26 +842,33 @@ export function StudioPage(): React.JSX.Element {
     return () => registerStudioTools(null)
   }, [])
 
-  /** Undo or redo one step and say what it was, with the way back. */
-  const undoStep = (): void => {
-    const label = live.current.project.history.undo()
-    if (label) toast.push(`已撤销 ${label}`, 'info', { label: '重做', onClick: redoStep }, HISTORY_TOAST)
+  /**
+   * Say what an undo or redo did, with the way back tied to that very step: the
+   * toast's button does nothing once another step has taken its place.
+   */
+  const announce = (direction: 'undo' | 'redo', outcome: StepOutcome, offerBack = true): void => {
+    if (outcome === 'running') {
+      toast.push(direction === 'undo' ? '先取消正在生成的画面再撤销' : '先取消正在生成的画面再重做', 'info', undefined, HISTORY_TOAST)
+      return
+    }
+    if (!outcome) return
+    const back =
+      direction === 'undo' ? { label: '重做', onClick: () => redoStep(outcome.id) } : { label: '撤销', onClick: () => undoStep(outcome.id) }
+    toast.push(`${direction === 'undo' ? '已撤销' : '已重做'} ${outcome.label}`, 'info', offerBack ? back : undefined, HISTORY_TOAST)
   }
-  const redoStep = (): void => {
-    const label = live.current.project.history.redo()
-    if (label) toast.push(`已重做 ${label}`, 'info', { label: '撤销', onClick: undoStep }, HISTORY_TOAST)
+  /** Undo (or redo) the latest step; with `only`, just while that step is still the one on top. */
+  const undoStep = (only?: number): void => announce('undo', live.current.project.history.undo(only))
+  const redoStep = (only?: number): void => announce('redo', live.current.project.history.redo(only))
+  /** The toast after an action on the board: its 撤销 takes back that action and nothing else. */
+  const undoable = (message: string): void => {
+    const id = live.current.project.history.top('undo')
+    toast.push(message, 'info', id === null ? undefined : { label: '撤销', onClick: () => undoStep(id) }, HISTORY_TOAST)
   }
   /** The assistant's 撤销这一步: exactly that turn's changes, and only while nothing came after them. */
   const assistantUndo = {
     turn: project.history.turn,
-    undo: (calls: readonly string[]): void => {
-      const label = live.current.project.history.undoTurn(calls)
-      if (label) toast.push(`已撤销 ${label}`, 'info', undefined, HISTORY_TOAST)
-    },
-    redo: (calls: readonly string[]): void => {
-      const label = live.current.project.history.redoTurn(calls)
-      if (label) toast.push(`已重做 ${label}`, 'info', undefined, HISTORY_TOAST)
-    },
+    undo: (calls: readonly string[]): void => announce('undo', live.current.project.history.undoTurn(calls), false),
+    redo: (calls: readonly string[]): void => announce('redo', live.current.project.history.redoTurn(calls), false),
   }
 
   // Keyboard: Ctrl+Enter generates; Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo and redo; V / H / M pick tools; Delete removes a region.
@@ -874,7 +886,7 @@ export function StudioPage(): React.JSX.Element {
         // A text field keeps its own undo; a panel outside the Studio (活动) is not the board's.
         const target = event.target as Node | null
         const outside = target !== document.body && !root.current?.contains(target)
-        if (isTyping(event.target) || outside || document.querySelector('dialog[open]')) return
+        if (ownsUndoKey(event.target) || outside || document.querySelector('dialog[open]')) return
         event.preventDefault()
         if (letter === 'y' || event.shiftKey) redoStep()
         else undoStep()
@@ -913,13 +925,15 @@ export function StudioPage(): React.JSX.Element {
       toast.push(list.length > 1 ? '有画面还在生成，先取消再删除' : '这个画面还在生成，先取消再删除', 'info')
       return
     }
+    // Generated pictures are files in 作品; a card going does not touch them.
+    const ran = list.some((canvas) => canvas.kind === 'result' || runsOf(canvas, project.canvasesRef.current).length > 0)
     let removedLinks = 0
     for (const canvas of list) {
       if (project.canvasesRef.current.some((item) => item.id === canvas.id)) removedLinks += project.removeCanvas(canvas.id)
     }
     const what = list.length === 1 ? `「${list[0]!.title}」` : ` ${list.length} 张卡片`
     const links = removedLinks ? `，并移除了 ${removedLinks} 条连线` : ''
-    toast.push(`已删除${what}${links}`, 'info', { label: '撤销', onClick: undoStep }, HISTORY_TOAST)
+    undoable(`已删除${what}${links}${ran ? '，图片还在作品里' : ''}`)
   }
   const viewerCanvas = viewer ? (project.canvases.find((canvas) => canvas.id === viewer.canvasId) ?? null) : null
   const viewerJob = viewerCanvas?.jobId ? jobs.find((job) => job.id === viewerCanvas.jobId) : undefined
@@ -1027,7 +1041,12 @@ export function StudioPage(): React.JSX.Element {
           blockers={readiness.blockers}
           tool={tool}
           onTool={setTool}
-          history={{ canUndo: project.history.canUndo, canRedo: project.history.canRedo, onUndo: undoStep, onRedo: redoStep }}
+          history={{
+            canUndo: project.history.canUndo,
+            canRedo: project.history.canRedo,
+            onUndo: () => undoStep(),
+            onRedo: () => redoStep(),
+          }}
           selectedRegionId={selectedRegionId}
           onSelectRegion={setSelectedRegionId}
           onSelectCanvas={(id) => project.select(id)}
@@ -1047,7 +1066,7 @@ export function StudioPage(): React.JSX.Element {
           onCancel={(jobId) => {
             void cancelJob(jobId).catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
           }}
-          onCallOff={(runId) => project.setCanvases((previous) => dropRun(previous, runId))}
+          onCallOff={(runId) => project.setRunCanvases((previous) => dropRun(previous, runId))}
           onShowActivity={(jobId) => openActivity('jobs', jobId ?? null)}
           onCopy={(canvas) => {
             const created = project.addCanvas(canvas)
@@ -1110,11 +1129,11 @@ export function StudioPage(): React.JSX.Element {
             const run = project.canvasesRef.current.find((canvas) => canvas.id === runId)
             if (!run) return
             project.updateCanvas(layoutId, (canvas) => withRunSettings(canvas, run), '用这次的设置')
-            toast.push('已换成这次生成用的设置', 'info', { label: '撤销', onClick: undoStep }, HISTORY_TOAST)
+            undoable('已换成这次生成用的设置')
           }}
           onDropRun={(runId) => {
             project.setCanvases((previous) => dropRun(previous, runId))
-            toast.push('已删除这次生成，图片仍保留在作品里', 'info', { label: '撤销', onClick: undoStep }, HISTORY_TOAST)
+            undoable('已删除这次生成，图片仍保留在作品里')
           }}
           onRecipe={(recipe, at) => void startRecipe(recipe, at)}
           onUpscale={upscaleFrom}

@@ -169,11 +169,13 @@ export async function releaseMask(projectId: string, canvasId: string, path: str
 /**
  * After a save: deletes the project's mask files no canvas references any more
  * (masks painted over, cleared, or of deleted canvases), keeping those a job
- * still reads. Returns the files deleted.
+ * still reads and those the window's undo history can still bring back
+ * (`held`; only this project's own mask files count). Returns the files deleted.
  */
 export async function pruneProjectMasks(
   project: Pick<ProjectDocument, 'id' | 'canvases'>,
   inUse: Iterable<string> = [],
+  held: Iterable<string> = [],
 ): Promise<string[]> {
   const dir = assetsDirFor(project.id)
   let names: string[]
@@ -184,6 +186,7 @@ export async function pruneProjectMasks(
   }
   const keep = referencedPaths(project.canvases)
   for (const item of inUse) keep.add(resolve(item))
+  for (const item of held) if (isOwnMask(project.id, item)) keep.add(resolve(item))
   const removed: string[] = []
   for (const name of names) {
     if (!MASK_FILE.test(name)) continue

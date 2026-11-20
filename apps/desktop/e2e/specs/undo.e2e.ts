@@ -158,7 +158,7 @@ describe('board undo', () => {
     await expect.poll(() => card.count()).toBe(0)
     expect(await page.getByRole('dialog').count()).toBe(0)
     await expect.poll(async () => (await saved(page, 'run-1')) ?? null, { timeout: 10_000 }).toBeNull()
-    await expect.poll(() => page.getByRole('status').filter({ hasText: '已删除「画面 1」' }).isVisible()).toBe(true)
+    await expect.poll(() => page.getByRole('status').filter({ hasText: '已删除「画面 1」，图片还在作品里' }).isVisible()).toBe(true)
 
     await page.keyboard.press('Control+z')
     await expect.poll(() => card.count()).toBe(1)
@@ -256,14 +256,23 @@ describe('board undo', () => {
     })
   }
 
-  it('on a board of 60 cards a drag does no history work until it is let go, and is one step', async () => {
+  it('on a board of 60 cards a card or region drag does no history work until it is let go, and is one step', async () => {
     const extra = Array.from({ length: 59 }, (_, index) => ({
       id: `card-${index + 2}`,
       title: `画面 ${index + 2}`,
       x: ((index + 1) % 10) * 300,
       y: Math.floor((index + 1) / 10) * 340,
     }))
-    const page = await openBoard(app, { extra })
+    const region = {
+      id: 'r1',
+      kind: 'object' as const,
+      caption: '窗台',
+      bbox: [100, 100, 700, 700] as [number, number, number, number],
+      visible: true,
+      locked: false,
+      opacity: 1,
+    }
+    const page = await openBoard(app, { extra, layout: { layers: [region] } })
     expect(await page.locator('article[data-canvas-card]').count()).toBe(60)
     const { undo } = toolbar(page)
     const start = (await place(page, 'canvas-1'))!
@@ -280,6 +289,20 @@ describe('board undo', () => {
     await undo.click()
     await expect.poll(() => place(page, 'canvas-1'), { timeout: 10_000 }).toEqual(start)
     // The whole drag was one step.
+    expect(await undo.isDisabled()).toBe(true)
+
+    // A region dragged across its 画面: the history waits for the pointer to be let go too.
+    const box = (await page.locator('article[data-canvas-card="canvas-1"] [data-region-id="r1"]').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 20, { steps: 20 })
+    await settle(page)
+    expect(await undo.isDisabled()).toBe(true)
+    await page.mouse.up()
+    await expect.poll(() => undo.isDisabled()).toBe(false)
+    await expect.poll(async () => (await saved(page, 'canvas-1'))?.layers[0]?.bbox, { timeout: 10_000 }).not.toEqual(region.bbox)
+    await undo.click()
+    await expect.poll(async () => (await saved(page, 'canvas-1'))?.layers[0]?.bbox, { timeout: 10_000 }).toEqual(region.bbox)
     expect(await undo.isDisabled()).toBe(true)
   })
 })

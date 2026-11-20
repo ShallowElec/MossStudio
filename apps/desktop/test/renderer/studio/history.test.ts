@@ -5,11 +5,17 @@ import {
   createHistory,
   diffCanvases,
   HISTORY_LIMIT,
+  heldMasks,
   isEmptyStep,
+  isTurnStep,
+  liveSteps,
+  mergeChanges,
+  ownsUndoKey,
   record,
+  removesRunning,
   stepLabel,
   turnState,
-  turnSteps,
+  type CanvasChange,
   type BoardHistory,
 } from '@renderer/pages/studio/history'
 import { removeCanvasFrom } from '@renderer/pages/studio/canvases'
@@ -98,13 +104,45 @@ describe('studio/history record', () => {
     expect(history.undo[0]!.before.get('a')!.x).toBe(20)
   })
 
-  it('a step whose edits cancel out is empty', () => {
+  it('drops a step whose edits cancel out, and keeps the steps under it and what could be redone', () => {
     const history = createHistory()
-    let list = [canvas({ id: 'a', layers: [layer()] })]
-    const original = list
-    list = edit(history, list, [{ ...list[0]!, layers: [layer({ bbox: [10, 10, 500, 500] })] }], 'pointer:1')
-    edit(history, list, [{ ...original[0]!, layers: [layer()] }], 'pointer:1')
-    expect(isEmptyStep(history.undo[0]!)).toBe(true)
+    let list = edit(history, [canvas({ id: 'a', layers: [layer()] })], [canvas({ id: 'a', layers: [layer()], prompt: '猫' })], 'tick:1')
+    const before = list
+    list = edit(history, list, [{ ...list[0]!, layers: [layer({ bbox: [10, 10, 500, 500] })] }], 'tick:2')
+    expect(history.undo).toHaveLength(2)
+    edit(history, list, before, 'tick:2')
+    expect(history.undo).toHaveLength(1)
+    expect(history.undo[0]!.after.get('a')!.prompt).toBe('猫')
+    // A gesture held back and recorded at once, that ends where it started, is no step and clears no redo.
+    history.redo.push(history.undo.pop()!)
+    const moved = new Map<string, CanvasChange>()
+    mergeChanges(moved, diffCanvases(before, [{ ...before[0]!, x: 40 }]))
+    mergeChanges(moved, diffCanvases([{ ...before[0]!, x: 40 }], before))
+    expect(record(history, [...moved.values()], { token: 'pointer:3', selected: null })).toBe(false)
+    expect([history.undo.length, history.redo.length]).toEqual([0, 1])
+  })
+
+  it('a step whose edits cancel out is empty, and does not count', () => {
+    const history = createHistory()
+    const a = canvas({ id: 'a' })
+    edit(history, [a], [{ ...a, x: 9 }], 'tick:1')
+    const step = history.undo[0]!
+    step.after.set('a', a)
+    expect(isEmptyStep(step)).toBe(true)
+    expect(liveSteps(history.undo)).toEqual([])
+    // A turn whose changes came to nothing has nothing to take back.
+    step.calls.push('c1')
+    expect(turnState(history, ['c1'])).toBeNull()
+  })
+
+  it('holds the masks its steps can bring back', () => {
+    const history = createHistory()
+    const masked = (path: string): ProjectCanvas =>
+      canvas({ id: 'a', inputs: { init: { link: { canvasId: 'p' }, strength: 0.6 }, mask: { path } } })
+    edit(history, [masked('/m/1.png')], [masked('/m/2.png')])
+    edit(history, [masked('/m/2.png')], [], 'tick:2')
+    history.redo.push(history.undo.pop()!)
+    expect(heldMasks(history).sort()).toEqual(['/m/1.png', '/m/2.png'])
   })
 })
 
@@ -152,6 +190,47 @@ describe('studio/history applyStep', () => {
     const pinned = run('r', 'gone')
     edit(other, start, [...start, pinned])
     expect(applyStep([...start, pinned], other.undo[0]!, 'undo').canvases.map((item) => item.id)).toEqual(['a', 'r'])
+  })
+
+  it('takes a 画面 away with the runs folded into it, and redo brings them back', () => {
+    const history = createHistory()
+    const a = canvas({ id: 'a' })
+    edit(history, [a], [a, canvas({ id: 'b', title: '画面 2' })])
+    // It ran since: two runs in its filmstrip, one pinned as a card.
+    const now = [a, canvas({ id: 'b', title: '画面 2' }), run('r1', 'b'), run('r2', 'b', { pinned: true })]
+    const undone = applyStep(now, history.undo[0]!, 'undo').canvases
+    expect(undone.map((item) => item.id)).toEqual(['a', 'r2'])
+    const redone = applyStep(undone, history.undo[0]!, 'redo').canvases
+    expect(redone.map((item) => item.id)).toEqual(['a', 'b', 'r1', 'r2'])
+    expect(redone[2]!.outputs?.[0]?.path).toBe('/out/r1.png')
+  })
+
+  it('will not take off a 画面 whose run is waiting or going', () => {
+    const history = createHistory()
+    const a = canvas({ id: 'a' })
+    edit(history, [a], [a, canvas({ id: 'b' })])
+    const now = [a, canvas({ id: 'b' }), run('r1', 'b', { jobState: 'queued', outputs: [] })]
+    const step = history.undo[0]!
+    expect(removesRunning(now, step, 'undo', [{ id: 'job-r1', state: 'queued' }])).toBe(true)
+    expect(removesRunning(now, step, 'undo', [{ id: 'job-r1', state: 'running' }])).toBe(true)
+    expect(removesRunning(now, step, 'undo', [{ id: 'job-r1', state: 'succeeded' }])).toBe(false)
+    // A run made at the click, not sent to the engine yet (no job), counts as going.
+    const unsent = [a, canvas({ id: 'b' }), run('r1', 'b', { jobId: undefined, jobState: 'starting', outputs: [] })]
+    expect(removesRunning(unsent, step, 'undo', [])).toBe(true)
+    // Its own run as well (older projects ran on the 画面 itself).
+    const own = [a, canvas({ id: 'b', jobId: 'job-b', jobState: 'running' })]
+    expect(removesRunning(own, step, 'undo', [{ id: 'job-b', state: 'running' }])).toBe(true)
+  })
+
+  it("redraws an earlier step's boxes at the size the 画面 has now", () => {
+    const history = createHistory()
+    const a = canvas({ id: 'a', layers: [layer({ bbox: [100, 100, 1000, 1000] })] })
+    edit(history, [a], [{ ...a, layers: [layer({ bbox: [0, 0, 512, 512] })] }])
+    // 改小一点再试 halved it since, as part of a run (not a step).
+    const smaller = { ...a, width: 512, height: 512, layers: [layer({ bbox: [0, 0, 256, 256] })] }
+    const undone = applyStep([smaller], history.undo[0]!, 'undo').canvases
+    expect(undone[0]!.layers[0]!.bbox).toEqual([50, 50, 500, 500])
+    expect([undone[0]!.width, undone[0]!.height]).toEqual([512, 512])
   })
 
   it('does not bring back a card that something else removed since', () => {
@@ -229,23 +308,44 @@ describe('studio/history turns', () => {
     expect(history.undo).toHaveLength(1)
     expect(stepLabel(history.undo[0]!)).toBe('助手的修改')
     expect(turnState(history, ['c1', 'c2'])).toBe('latest')
-    expect(turnSteps(history, ['c1', 'c2'], 'undo')).toBe(1)
+    expect(isTurnStep(history.undo[0]!, ['c2'])).toBe(true)
     expect(turnState(history, ['other'])).toBeNull()
     edit(history, list, [{ ...list[0]!, x: 9 }], 'tick:5')
     expect(turnState(history, ['c1', 'c2'])).toBe('buried')
-    expect(turnSteps(history, ['c1', 'c2'], 'undo')).toBe(0)
+    expect(isTurnStep(history.undo.at(-1)!, ['c1', 'c2'])).toBe(false)
   })
 
   it('offers redo right after its undo, and only then', () => {
     const { history } = steps()
     history.redo.push(history.undo.pop()!)
     expect(turnState(history, ['c2'])).toBe('redo')
-    expect(turnSteps(history, ['c2'], 'redo')).toBe(1)
     // Something older undone after it: redoing the turn alone is not possible any more.
     const older = createHistory()
     edit(older, [canvas({ id: 'z' })], [canvas({ id: 'z', x: 1 })], 'tick:1')
     history.redo.push(older.undo[0]!)
     expect(turnState(history, ['c2'])).toBe('undone')
-    expect(turnSteps(history, ['c2'], 'redo')).toBe(0)
+  })
+})
+
+describe('studio/history ownsUndoKey', () => {
+  it('leaves Ctrl+Z to text entry only; a slider, a menu or a button hands it to the board', () => {
+    const make = (html: string): Element => {
+      const host = document.createElement('div')
+      host.innerHTML = html
+      return host.firstElementChild!
+    }
+    for (const html of [
+      '<textarea></textarea>',
+      '<input>',
+      '<input type="text">',
+      '<input type="number">',
+      '<div contenteditable="true"></div>',
+    ]) {
+      expect(ownsUndoKey(make(html)), html).toBe(true)
+    }
+    for (const html of ['<input type="range">', '<select></select>', '<input type="checkbox">', '<button></button>', '<div></div>']) {
+      expect(ownsUndoKey(make(html)), html).toBe(false)
+    }
+    expect(ownsUndoKey(null)).toBe(false)
   })
 })
