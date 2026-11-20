@@ -99,7 +99,11 @@ export function stopEngineRequests(): void {
   requestSidecars.clear()
 }
 
-/** Checks many weight files through one sidecar instead of starting the engine once per file. */
+/**
+ * Checks many weight files through one sidecar instead of starting the engine once per file.
+ * Requests may overlap: the engine runs two `inspect`s at a time and answers `busy` to a third,
+ * so a caller sends at most two at once.
+ */
 export async function withEngineRequests<T>(
   serverPath: string,
   task: (request: EngineRequest) => Promise<T>,
@@ -110,10 +114,10 @@ export async function withEngineRequests<T>(
   const lines = createInterface({ input: proc.stdout })
   let sequence = 0
   let failed: Error | null = null
-  let pending: { id: number; resolve: (value: Record<string, unknown>) => void; reject: (cause: Error) => void } | null = null
+  const pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (cause: Error) => void }>()
   function fail(error: Error): void {
     failed ??= error
-    pending?.reject(error)
+    for (const request of pending.values()) request.reject(error)
   }
 
   lines.on('line', (line) => {
@@ -123,10 +127,11 @@ export async function withEngineRequests<T>(
     } catch {
       return
     }
-    if (!pending || message?.id !== pending.id) return
+    const request = typeof message?.id === 'number' ? pending.get(message.id) : undefined
+    if (!request) return
     const error = message.error as { code?: string; message?: string } | undefined
-    if (error) pending.reject(new Error([error.code, error.message].filter(Boolean).join(': ')))
-    else pending.resolve((message.result ?? {}) as Record<string, unknown>)
+    if (error) request.reject(new Error([error.code, error.message].filter(Boolean).join(': ')))
+    else request.resolve((message.result ?? {}) as Record<string, unknown>)
   })
   proc.on('error', fail)
   proc.stdin.on('error', fail)
@@ -139,13 +144,13 @@ export async function withEngineRequests<T>(
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       return await new Promise<Record<string, unknown>>((resolve, reject) => {
-        pending = { id, resolve, reject }
+        pending.set(id, { resolve, reject })
         timer = setTimeout(() => fail(new Error('moss-server 请求超时：' + method)), timeoutMs)
         proc.stdin.write(JSON.stringify({ id, method, params }) + '\n')
       })
     } finally {
       clearTimeout(timer)
-      pending = null
+      pending.delete(id)
     }
   }
 

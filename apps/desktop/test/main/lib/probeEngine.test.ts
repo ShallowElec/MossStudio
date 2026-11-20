@@ -38,6 +38,17 @@ describe('withEngineRequests', () => {
     ])
   })
 
+  it('matches overlapping requests to their answers, which may come out of order', async () => {
+    // The engine answers an inspect when it is done: here the first one asked finishes last.
+    const path = await server(
+      `if (method === 'hello') reply(id, hello); else setTimeout(() => reply(id, { path: params.path }), params.path === 'slow' ? 80 : 5)`,
+    )
+    const results = await withEngineRequests(path, (request) =>
+      Promise.all([request('inspect', { path: 'slow' }), request('inspect', { path: 'fast' })]),
+    )
+    expect(results).toEqual([{ path: 'slow' }, { path: 'fast' }])
+  })
+
   it('fails when the engine exits before answering', async () => {
     const path = await server(`process.exit(3)`)
     await expect(withEngineRequests(path, async () => 'never')).rejects.toThrow('moss-server 已退出：3')
