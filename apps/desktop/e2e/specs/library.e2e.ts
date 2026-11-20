@@ -104,6 +104,21 @@ describe('library', () => {
     await expect.poll(() => page.getByRole('textbox', { name: '种子' }).inputValue()).toBe('1001')
   })
 
+  it('用作描图 puts the picture under the selected 画面 in 创作, to trace over', async () => {
+    const page = await openLibrary()
+    await page.getByRole('button', { name: '创作' }).click()
+    await page.locator('[data-project-switcher]').waitFor()
+    await page.getByRole('button', { name: '作品' }).click()
+    await tiles(page).nth(1).click()
+    await page.getByRole('complementary', { name: '作品详情' }).getByRole('button', { name: '用作描图' }).click()
+    await expect.poll(() => hash(page)).toBe('#/studio')
+    await expect
+      .poll(() => page.evaluate(() => window.__mock.state.projects[0]?.canvases.map((canvas) => canvas.backgroundPath ?? null)), {
+        timeout: 10_000,
+      })
+      .toEqual(['/fixture/outputs/moss_0001.png'])
+  })
+
   it('deletes after confirmation, moving the file to the trash', async () => {
     const page = await openLibrary()
     await tiles(page).nth(2).click()

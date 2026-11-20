@@ -252,6 +252,20 @@ describe('studio', () => {
     expect(await page.locator('[data-face-description]').textContent()).toBe('窗台上睡觉的橘猫，午后阳光')
   })
 
+  it('a new board offers only the picture recipes this computer can run, and no minimap for its one card', async () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const page = await app.open({ scenario: 'ready', route: '/studio', theme })
+      await openStudio(page)
+      const row = page.getByRole('group', { name: '从一张图开始' })
+      await row.waitFor()
+      // No 控制适配器 installed: 按构图生成 is not offered.
+      expect(await row.getByRole('button').allTextContents()).toEqual(['改一张图', '局部重绘', '放大一张图'])
+      expect(await row.getByRole('button', { disabled: true }).count()).toBe(0)
+      expect(await page.getByRole('group', { name: '小地图' }).count()).toBe(0)
+      await app.screenshot(`studio-start-row-${theme}`)
+    }
+  })
+
   it('draws a box by dragging on the selected 画面 and says what goes there on the box', async () => {
     const page = await app.open({ scenario: 'ready', route: '/studio', theme: 'light' })
     await openStudio(page)

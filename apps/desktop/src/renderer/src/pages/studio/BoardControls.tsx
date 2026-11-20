@@ -156,7 +156,7 @@ export function InputThumbs({
   )
 }
 
-/** An empty project: the ways to start from a picture, under the first 画面. */
+/** An empty project: the ways to start from a picture this computer can run, under the first 画面. */
 export function StartRow({
   point,
   zoom,
@@ -167,10 +167,12 @@ export function StartRow({
   zoom: number
   recipes: readonly Recipe[]
   onRecipe: (recipe: Recipe) => void
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const starts = recipes.filter(
     (recipe) => recipe.id === 'edit' || recipe.id === 'inpaint' || recipe.id === 'compose' || recipe.id === 'upscale',
   )
+  // Nothing here can start from a picture on this computer (a text-only engine, say).
+  if (!starts.length) return null
   return (
     <div
       data-board-ui

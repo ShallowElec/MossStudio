@@ -24,7 +24,7 @@ Paths are relative to `apps/desktop/src/`; `studio/` stands for `renderer/src/pa
 ## 2. Board and cards
 
 - A card is drawn from its `x`, `y`, `width` and `height` in board pixels (`studio/boardLayout.ts`): `BOARD_UNIT` 0.25, so a 1024 px picture is a 256 px card; `CARD_HEADER` 28 px holds the title. Cards move by their title row or their picture (`studio/useCardDrag.ts`). A left drag on empty board draws a box that picks every card it touches; the right or middle button, Space held, or the 平移 tool pans, and a right-click that does not move still opens the menu; the wheel zooms around the pointer.
-- Several cards can be picked at once (`studio/selection.ts`): a box, Shift, Ctrl or ⌘ clicks, or Ctrl+A. The picked cards are a `Board` state that counts only while it holds the selected card (`selectedCanvasId`, which the left panel shows), so selecting a card any other way picks it alone; nothing about picking is saved. Picked cards move together and get a bar with 已选 N 张, 排整齐 (`tidyPlaces`: rows of about √n from the group's corner) and 删除, which asks once; Delete does the same, Esc keeps only the selected card. The minimap (`studio/Minimap.tsx`) draws every card, the picked ones in the accent and running ones with a dot, and the part on screen as a tint; a press or drag on it centres the view there. It follows pans through `Board`'s view listeners rather than renders, and cards placed near the corner keep clear of it (`keepInView`).
+- Several cards can be picked at once (`studio/selection.ts`): a box, Shift, Ctrl or ⌘ clicks, or Ctrl+A. The picked cards are a `Board` state that counts only while it holds the selected card (`selectedCanvasId`, which the left panel shows), so selecting a card any other way picks it alone; nothing about picking is saved. Picked cards move together and get a bar with 已选 N 张, 排整齐 (`tidyPlaces`: rows of about √n from the group's corner) and 删除, which asks once; Delete does the same, Esc keeps only the selected card. The minimap (`studio/Minimap.tsx`) draws every card, the picked ones in the accent and running ones with a dot, and the part on screen as a tint; a press or drag on it centres the view there. It shows by itself only while some card reaches past the part of the board on screen and the board is at least `MINIMAP_MIN_BOARD` (640 px) wide (`studio/selection.ts` `minimapHelps`); once the 小地图 button is used, the person's choice holds. It follows pans through `Board`'s view listeners rather than renders, and cards placed near the corner keep clear of it (`keepInView`).
 - Gestures stay off React and off the project until they end: a pan sets the board's transform directly and commits the view on release, wheel ticks render at most once a frame, and a dragged card is drawn from `Board`'s own state and written to the project once, when it is let go. `CanvasCard` is memoized and compares its props by value (`sameCardProps`), so a new card prop must be plain data or a callback bound through `studio/useStableCallbacks.ts`; an inline closure would make every card re-render on every board render.
 - Picture files (PNG, JPEG, WebP, BMP; `studio/imageNodes.ts`) dropped or pasted on the board become picture cards. They are copied into the project's assets through `Ipc.studioImportImage` (`studio/useBoardAssets.ts`), so an unsaved project is saved first.
 - Deleting a card removes the wires that point at it and reports how many (`studio/links.ts` `dropLinksTo`); a 画面 takes its folded runs with it (`studio/canvases.ts` `removedWith`). The dialog 删除画面？ says that generated pictures stay in 作品 (`/library`).
@@ -34,7 +34,7 @@ Right-click menus (`studio/BoardMenu.tsx`, entries built in `studio/Board.tsx`):
 | On | Entries |
 | --- | --- |
 | Empty board 画板 | 新建画面, the picture recipes (section 7), 新建风格, 一组同风格的图, 导入图片…, 从作品选择…, 显示全部 |
-| A card (same as its ⋯ button) | The picture actions of section 6, 复制 or 复制为新画面, 查看详情 (opens the Activity panel on the job), then 删除 / 删除风格 / 删除画面 |
+| A card (same as its ⋯ button) | The picture actions of section 6; on a 画面 (not a 放大), 描图… and, while it has one, 不用描图; 复制 or 复制为新画面, 查看详情 (opens the Activity panel on the job), then 删除 / 删除风格 / 删除画面 |
 | A wire 连线 | 断开连线 |
 | A region 区域 | 改描述, 删除 |
 
@@ -86,6 +86,8 @@ Wires (`studio/wires.ts`, drawn by `studio/WireLayer.tsx`) are of two kinds: `in
 | 参考图 | `inputs.references` | 参考图最长边 16 to 2048 | `JobParams.references` |
 | 风格 | `inputs.styles` | None; merged at generation (section 10) | The prompt and `adapters` |
 
+描图 (`backgroundPath`) is a picture from 作品 shown under a 画面 to trace over, chosen from the card's menu or 作品's 用作描图. It is a guide only and is never sent to the engine.
+
 `studio/jobInputs.ts` (`resolveJobInputs`) turns each link into the source's file path and the adapter id into its file. Anything that cannot be resolved becomes a blocker; an input is never dropped quietly. `studio/mask.ts` maps the painted mask between canvas pixels and the start picture's pixels the way the engine's `resize_to` does, and `maskAvailability` hides the tool when the engine has no `imageInput` and disables it on a 放大 or a result.
 
 ## 6. Runs and the filmstrip
@@ -112,16 +114,16 @@ While 拆成区域 reads, the new 画面 shows the picture faintly with 正在�
 
 A recipe lays out nodes already wired; nothing about them is special afterwards (`studio/recipes.ts`, started in `studio/StudioPage.tsx` `startRecipe`). They are offered in the empty board's menu and, while a new project has one blank 画面, in a row under it (`StartRow` in `studio/BoardControls.tsx`). That same blank 画面 shows three descriptions to try on its face (`FIRST_IDEAS` in `studio/Board.tsx`); a click writes one as its description.
 
-| `RecipeId` | Label | Lays out | Disabled when |
+| `RecipeId` | Label | Lays out | Not offered when |
 | --- | --- | --- | --- |
 | `edit` | 改一张图 | A 画面 with a picture chosen from a file as 起始图 | no `imageInput` |
 | `inpaint` | 局部重绘 | The same, then switches to the 遮罩 tool | no `imageInput` |
-| `compose` | 按构图生成 | A 画面 with the first installed 控制适配器 and the picture as its first control kind | no `control`, or 需要先在模型页添加控制适配器 |
+| `compose` | 按构图生成 | A 画面 with the first installed 控制适配器 and the picture as its first control kind | no `control`, or no 控制适配器 installed |
 | `style` | 参考风格 | A 画面 with the picture as 参考图 | no `references` |
 | `upscale` | 放大一张图 | A 放大 fed by the chosen picture | no `imageInput` |
 | `series` | 一组同风格的图 | A 风格 and three 画面 wired to it, side by side (`studio/nodes.ts` `seriesFromStyle`) | never; needs no engine |
 
-With no usable engine every picture recipe carries the engine's reason; with a usable one that lacks the feature it says 现在的引擎不支持这个做法.
+A recipe this computer cannot run is left out of the menu and the row, and the row is not shown when none is left (a text-only engine). While no engine is usable yet, the picture recipes are shown off with the engine's reason instead.
 
 ## 8. Readiness checks
 

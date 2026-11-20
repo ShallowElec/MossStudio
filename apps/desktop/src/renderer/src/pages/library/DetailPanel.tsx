@@ -204,7 +204,7 @@ export function DetailPanel({
             <Wand2 className="size-4" strokeWidth={1.6} /> 用作起始图
           </Button>
           <Button tone="secondary" onClick={useAsBackground}>
-            <ImageIcon className="size-4" strokeWidth={1.6} /> 用作底图
+            <ImageIcon className="size-4" strokeWidth={1.6} /> 用作描图
           </Button>
         </div>
       </div>

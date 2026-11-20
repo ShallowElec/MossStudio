@@ -1,4 +1,4 @@
-import { BOARD_GAP, cardRect, overlaps, type Rect } from './boardLayout'
+import { BOARD_GAP, cardRect, overlaps, type Rect, type View } from './boardLayout'
 import type { ProjectCanvas } from '@shared/types'
 
 /**
@@ -83,4 +83,22 @@ export function minimapFit(bounds: Rect, size: { width: number; height: number }
       y: (size.height - bounds.h * scale) / 2 - bounds.y * scale,
     },
   }
+}
+
+/** Narrower than this (screen pixels), the board has no corner to spare for the minimap. */
+export const MINIMAP_MIN_BOARD = 640
+
+/**
+ * Whether the minimap earns its corner by itself: some card reaches past the
+ * part of the board on screen, and the board is wide enough. The person's own
+ * choice from the toolbar overrides this.
+ */
+export function minimapHelps(cards: readonly Placed[], view: View, board: { width: number; height: number }): boolean {
+  const bounds = boundsOf(cards)
+  if (!bounds || board.width < MINIMAP_MIN_BOARD) return false
+  const left = -view.pan.x / view.zoom
+  const top = -view.pan.y / view.zoom
+  const right = (board.width - view.pan.x) / view.zoom
+  const bottom = (board.height - view.pan.y) / view.zoom
+  return bounds.x < left || bounds.y < top || bounds.x + bounds.w > right || bounds.y + bounds.h > bottom
 }

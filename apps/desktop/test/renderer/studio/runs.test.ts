@@ -276,7 +276,8 @@ describe('studio/recipes', () => {
   }
   const brief = (list: ReturnType<typeof recipes>) => list.map((recipe) => [recipe.id, recipe.role ?? null, recipe.disabled ?? null])
 
-  it('offers every recipe the engine can do, and says why the others are off', () => {
+  it('offers only the recipes this computer can run, and says why while no engine is ready', () => {
+    const ids = (list: ReturnType<typeof recipes>) => list.map((recipe) => recipe.id)
     expect(brief(recipes(features(), [adapter]))).toEqual([
       ['edit', 'init', null],
       ['inpaint', 'init', null],
@@ -285,8 +286,12 @@ describe('studio/recipes', () => {
       ['upscale', 'init', null],
       ['series', null, null],
     ])
-    expect(recipes(features(), [])[2]!.disabled).toBe('需要先在模型页添加控制适配器')
-    expect(recipes(features({ references: false }), [adapter])[3]!.disabled).toBe('现在的引擎不支持这个做法')
+    // No 控制适配器 installed: 按构图生成 is left out, not shown off.
+    expect(ids(recipes(features(), []))).toEqual(['edit', 'inpaint', 'style', 'upscale', 'series'])
+    expect(ids(recipes(features({ references: false }), [adapter]))).toEqual(['edit', 'inpaint', 'compose', 'upscale', 'series'])
+    // A text-only engine (兼容模式, AMD 原生) reports every flag off: only the series is left.
+    const textOnly = features({ imageInput: false, control: false, references: false })
+    expect(brief(recipes(textOnly, [adapter]))).toEqual([['series', null, null]])
     const noEngine = recipes(null, [], [{ id: 'engine', message: '引擎还没装好' }])
     expect(noEngine[0]!.disabled).toBe('引擎还没装好，就绪后才能使用')
     // A 风格 and three 画面 are only laid out: no engine needed.

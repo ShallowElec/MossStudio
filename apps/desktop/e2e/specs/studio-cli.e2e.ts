@@ -73,6 +73,26 @@ describe('studio on a 兼容模式 (Vulkan) engine', () => {
     expect(await page.getByRole('textbox', { name: 'Shift' }).count()).toBe(1)
   })
 
+  it('a new board offers no picture recipes: none can run on this engine', async () => {
+    const page = await app.open({ scenario: 'vulkanOnly', route: '/studio' })
+    await page.locator('article[data-canvas-card]').first().waitFor()
+    await settle(page, 150)
+    expect(await page.getByRole('group', { name: '从一张图开始' }).count()).toBe(0)
+    // Nor the empty board's menu; what needs no picture stays.
+    const board = (await page.locator('[data-board]').boundingBox())!
+    await page.mouse.click(board.x + board.width - 260, board.y + 160, { button: 'right' })
+    const menu = page.getByRole('menu', { name: '画板' })
+    await menu.waitFor()
+    expect(await menu.getByRole('menuitem').allTextContents()).toEqual([
+      '新建画面',
+      '新建风格',
+      '一组同风格的图',
+      '导入图片…',
+      '从作品选择…',
+      '显示全部',
+    ])
+  })
+
   it('a plain run goes through with no inputs and no LoRA', async () => {
     const page = await openStudio(app)
     await expect.poll(() => generate(page).isEnabled()).toBe(true)

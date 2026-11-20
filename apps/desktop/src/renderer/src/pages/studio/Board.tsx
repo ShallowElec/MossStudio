@@ -3,7 +3,6 @@ import type {
   CanvasImageLink,
   ControlAdapterEntry,
   EngineFeatures,
-  GalleryItem,
   JobRecord,
   ProjectCanvas,
   ProjectLayer,
@@ -43,7 +42,7 @@ import { useWireConnect } from './useWireConnect'
 import { useWireSelection } from './useWireSelection'
 import { InputAdder, InputThumbs, SelectionBar, StartRow } from './BoardControls'
 import { MINIMAP_BOX, Minimap } from './Minimap'
-import { boundsOf, boxBetween, cardsInBox, readingOrder, tidyPlaces, toggled } from './selection'
+import { boundsOf, boxBetween, cardsInBox, minimapHelps, readingOrder, tidyPlaces, toggled } from './selection'
 import { BoardMenu, type BoardMenuEntry } from './BoardMenu'
 import type { PortActions } from './SlotMenu'
 import { inputSlots, socketY } from './ports'
@@ -95,7 +94,8 @@ export interface BoardProps {
   onSelectCanvas: (id: string) => void
   onMoveCanvas: (id: string, x: number, y: number) => void
   onChangeLayers: (canvasId: string, update: (layers: ProjectLayer[]) => ProjectLayer[]) => void
-  onUnderlay: (item: GalleryItem | null) => void
+  /** 描图: choose a picture to trace over on a 画面 (never sent to the engine), or take it away. */
+  onUnderlay: (canvasId: string, pick: boolean) => void
   /** A new 画面; at a board point when given (the right-click menu). */
   onAddCanvas: (at?: Point) => void
   onOpenViewer: (canvasId: string, index: number) => void
@@ -214,9 +214,10 @@ export function Board(props: BoardProps): React.JSX.Element {
   const overBoard = useRef(false)
   /** After a right-button pan, the menu the button's release would open is not wanted. */
   const menuQuiet = useRef(0)
-  const [minimapOn, setMinimapOn] = useState(true)
-  const minimapOnRef = useRef(minimapOn)
-  minimapOnRef.current = minimapOn
+  /** The minimap as the person set it from the toolbar; until then it shows only where it helps (`minimapHelps`). */
+  const [minimapChoice, setMinimapChoice] = useState<boolean | null>(null)
+  /** The board's size on screen, kept by a ResizeObserver so the minimap can follow side panels opening. */
+  const [boardSize, setBoardSize] = useState({ width: 0, height: 0 })
   const [brush, setBrush] = useState<MaskBrush>({ mode: 'paint', size: BRUSH_DEFAULT })
   const [maskCommand, setMaskCommand] = useState<MaskCommand | undefined>(undefined)
   /** Last pointer position over the board, where a pasted picture lands. */
@@ -246,6 +247,9 @@ export function Board(props: BoardProps): React.JSX.Element {
         : onBoard,
     [onBoard, dragAt],
   )
+  const minimapOn = minimapChoice ?? minimapHelps(cards, view, boardSize)
+  const minimapOnRef = useRef(minimapOn)
+  minimapOnRef.current = minimapOn
 
   /**
    * Cards picked together with the selected one (Shift or Ctrl clicks, a box,
@@ -546,6 +550,8 @@ export function Board(props: BoardProps): React.JSX.Element {
     const element = viewport.current
     if (!element) return
     const observer = new ResizeObserver(() => {
+      const { width, height } = element.getBoundingClientRect()
+      setBoardSize((current) => (current.width === width && current.height === height ? current : { width, height }))
       for (const listener of viewListeners.current) listener()
     })
     observer.observe(element)
@@ -782,8 +788,12 @@ export function Board(props: BoardProps): React.JSX.Element {
     const danger = (entry: BoardMenuEntry): boolean => !('gap' in entry) && entry.tone === 'danger'
     const jobId = run.jobId ?? canvas.jobId
     const plain = canvas.kind === 'image' || canvas.kind === 'style'
+    // 描图: a picture under a 画面 to trace over; a 放大 redraws its 原图 and has none.
+    const traceable = canvas.kind === 'layout' && !canvas.upscale
     return [
       ...actions.filter((entry) => !danger(entry)),
+      ...(traceable ? [{ label: '描图…', onSelect: () => props.onUnderlay(canvas.id, true) }] : []),
+      ...(traceable && canvas.backgroundPath ? [{ label: '不用描图', onSelect: () => props.onUnderlay(canvas.id, false) }] : []),
       { label: plain ? '复制' : '复制为新画面', onSelect: () => props.onCopy(canvas) },
       ...(jobId && canvas.kind !== 'image' ? [{ label: '查看详情', onSelect: () => props.onShowActivity(jobId) }] : []),
       { gap: true },
@@ -1016,7 +1026,7 @@ export function Board(props: BoardProps): React.JSX.Element {
         onZoom={zoomBy}
         onFit={fit}
         minimap={minimapOn}
-        onMinimap={setMinimapOn}
+        onMinimap={setMinimapChoice}
       />
       {props.tool === 'mask' && mask.enabled ? (
         <MaskBar
@@ -1216,7 +1226,7 @@ export function Board(props: BoardProps): React.JSX.Element {
           )
         })}
         <InputThumbs wires={labelled} canvases={props.canvases} zoom={view.zoom} />
-        {selected && selected.kind === 'layout' && !selected.upscale && !connect.draft && !multi ? (
+        {selected && selected.kind === 'layout' && !selected.upscale && !mask.hidden && !connect.draft && !multi ? (
           // A 画面's tools sit on the selected card, above its title.
           <div
             className="absolute left-0 top-0 z-[7] origin-top-left"
@@ -1225,13 +1235,7 @@ export function Board(props: BoardProps): React.JSX.Element {
               transform: `translate(${selectedDrawn!.x}px, ${selectedDrawn!.y}px) scale(${1 / Math.max(0.01, view.zoom)}) translate(0, calc(-100% - 6px))`,
             }}
           >
-            <CardToolbar
-              tool={props.tool}
-              onTool={props.onTool}
-              underlay={selected.backgroundPath}
-              onUnderlay={props.onUnderlay}
-              mask={mask}
-            />
+            <CardToolbar tool={props.tool} onTool={props.onTool} mask={mask} />
           </div>
         ) : null}
         <WireChips

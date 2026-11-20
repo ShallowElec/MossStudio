@@ -1,11 +1,5 @@
 import { Brush, Eraser, FlipHorizontal2, Hand, Map as MapIcon, Maximize2, Minus, MousePointer2, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import type { GalleryItem } from '@shared/types'
-import { Ipc } from '@shared/channels'
-import { FieldLabel, IconButton, LoadingRow, cn } from '../../components/ui'
-import { MenuGap, MenuItem, Popover } from '../../components/common/Popover'
-import { call } from '../../lib/api'
-import { cloverUrl } from '../../lib/clover'
+import { IconButton, cn } from '../../components/ui'
 import { BRUSH_MAX, BRUSH_MIN } from './mask'
 import type { MaskBrush } from './MaskLayer'
 import type { BoardTool } from './RegionLayer'
@@ -34,80 +28,6 @@ function ToolButton({ on, className, ...props }: React.ComponentProps<'button'> 
       )}
       {...props}
     />
-  )
-}
-
-/** Recent pictures from 作品, to place under the selected canvas as a guide. */
-function UnderlayMenu({
-  current,
-  onPick,
-  close,
-}: {
-  current?: string
-  onPick: (item: GalleryItem | null) => void
-  close: () => void
-}): React.JSX.Element {
-  const [items, setItems] = useState<GalleryItem[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    call<{ items: GalleryItem[] }>(Ipc.galleryList, { limit: 12 })
-      .then((page) => {
-        if (alive) setItems(page.items ?? [])
-      })
-      .catch((reason: unknown) => {
-        if (alive) setError(reason instanceof Error ? reason.message : String(reason))
-      })
-    return () => {
-      alive = false
-    }
-  }, [])
-  return (
-    <div className="flex w-[280px] flex-col gap-2 p-1">
-      <FieldLabel className="px-1">底图</FieldLabel>
-      {items === null && !error ? (
-        <LoadingRow className="justify-center py-6" />
-      ) : error ? (
-        <p className="px-1 py-3 text-caption text-ink-2">读不到作品：{error}</p>
-      ) : items && items.length === 0 ? (
-        <p className="px-1 py-3 text-caption text-ink-2">作品里还没有图片。</p>
-      ) : (
-        <div className="grid grid-cols-4 gap-1.5">
-          {items!.map((item) => (
-            <button
-              key={item.path}
-              type="button"
-              title={item.name}
-              aria-label={`用 ${item.name} 作底图`}
-              aria-pressed={current === item.path}
-              onClick={() => {
-                onPick(item)
-                close()
-              }}
-              className={cn(
-                'aspect-square overflow-hidden rounded-md bg-well-strong',
-                current === item.path && 'ring-2 ring-accent ring-offset-2 ring-offset-raised',
-              )}
-            >
-              <img src={cloverUrl(item.path)} alt="" loading="lazy" className="size-full object-cover" />
-            </button>
-          ))}
-        </div>
-      )}
-      {current ? (
-        <>
-          <MenuGap />
-          <MenuItem
-            onSelect={() => {
-              onPick(null)
-              close()
-            }}
-          >
-            不用底图
-          </MenuItem>
-        </>
-      ) : null}
-    </div>
   )
 }
 
@@ -172,18 +92,14 @@ export function Toolbar({
   )
 }
 
-/** A selected 画面's tools, on the card: 底图 and 遮罩. Boxes are drawn straight on its face. */
+/** A selected 画面's tool on the card: 遮罩. Boxes are drawn straight on its face; 描图 is in the card's menu. */
 export function CardToolbar({
   tool,
   onTool,
-  underlay,
-  onUnderlay,
   mask,
 }: {
   tool: BoardTool
   onTool: (tool: BoardTool) => void
-  underlay?: string
-  onUnderlay: (item: GalleryItem | null) => void
   mask: MaskToolState
 }): React.JSX.Element {
   return (
@@ -194,35 +110,16 @@ export function CardToolbar({
       data-card-tools
       className="flex w-max items-center gap-0.5 whitespace-nowrap rounded-[10px] bg-raised p-1 shadow-float"
     >
-      <Popover
-        align="start"
-        label="底图"
-        trigger={(menu) => (
-          <ToolButton
-            on={Boolean(underlay)}
-            title="底图"
-            onClick={menu.toggle}
-            aria-expanded={menu['aria-expanded']}
-            aria-haspopup="dialog"
-          >
-            底图
-          </ToolButton>
-        )}
+      <ToolButton
+        on={tool === 'mask'}
+        disabled={!mask.enabled}
+        aria-label="遮罩"
+        title={mask.enabled ? '遮罩（M）' : mask.reason}
+        onClick={() => onTool(tool === 'mask' ? 'select' : 'mask')}
       >
-        {(close) => <UnderlayMenu current={underlay} onPick={onUnderlay} close={close} />}
-      </Popover>
-      {mask.hidden ? null : (
-        <ToolButton
-          on={tool === 'mask'}
-          disabled={!mask.enabled}
-          aria-label="遮罩"
-          title={mask.enabled ? '遮罩（M）' : mask.reason}
-          onClick={() => onTool(tool === 'mask' ? 'select' : 'mask')}
-        >
-          <Brush className="size-4" strokeWidth={1.6} />
-          遮罩
-        </ToolButton>
-      )}
+        <Brush className="size-4" strokeWidth={1.6} />
+        遮罩
+      </ToolButton>
     </div>
   )
 }

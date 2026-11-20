@@ -38,8 +38,10 @@ const FLAG: Record<Exclude<LinkRole, 'style'>, 'imageInput' | 'control' | 'refer
 }
 
 /**
- * The recipes, each with why it is off when it is. `features` undefined
- * means still reading (offered); null means no engine is usable.
+ * The recipes this computer can run. One the engine cannot do, or 按构图生成
+ * without a 控制适配器, is left out. `features` undefined means still
+ * reading (offered); null means no engine is usable yet, and every picture
+ * recipe says why it is off.
  */
 export function recipes(
   features: EngineFeatures | null | undefined,
@@ -47,14 +49,12 @@ export function recipes(
   blockers: readonly Blocker[] = [],
 ): Recipe[] {
   const engine = features === null ? engineUnavailableReason(features, blockers, '使用') : null
-  return RECIPES.map((recipe) => {
+  return RECIPES.flatMap((recipe) => {
     // A 风格 and three 画面 need nothing from the engine to be laid out.
-    if (!recipe.role) return { ...recipe }
-    if (engine) return { ...recipe, disabled: engine }
-    if (features && !features[FLAG[recipe.role]]) return { ...recipe, disabled: '现在的引擎不支持这个做法' }
-    if (recipe.role === 'control' && !adapters.some((adapter) => adapter.controlKinds.length)) {
-      return { ...recipe, disabled: '需要先在模型页添加控制适配器' }
-    }
-    return { ...recipe }
+    if (!recipe.role) return [{ ...recipe }]
+    if (engine) return [{ ...recipe, disabled: engine }]
+    if (features && !features[FLAG[recipe.role]]) return []
+    if (recipe.role === 'control' && !adapters.some((adapter) => adapter.controlKinds.length)) return []
+    return [{ ...recipe }]
   })
 }

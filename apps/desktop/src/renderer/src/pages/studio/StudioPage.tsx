@@ -166,7 +166,7 @@ export function StudioPage(): React.JSX.Element {
   const [adapterPickerOpen, setAdapterPickerOpen] = useState(false)
   // 从作品选择: the input a picture from 作品 goes into.
   // 从作品选择: the input a picture from 作品 goes into, or (right-click on the board) where it goes on the board.
-  const [galleryTarget, setGalleryTarget] = useState<PickTarget | { at: { x: number; y: number } } | null>(null)
+  const [galleryTarget, setGalleryTarget] = useState<PickTarget | { at: { x: number; y: number } } | { underlayOf: string } | null>(null)
 
   const remoteEnabled = settings?.remoteHostsEnabled === true
   const remoteHost = remoteEnabled ? (hosts.find((host) => host.id === remoteHostId) ?? null) : null
@@ -926,7 +926,9 @@ export function StudioPage(): React.JSX.Element {
           onSelectCanvas={(id) => project.select(id)}
           onMoveCanvas={(id, x, y) => project.updateCanvas(id, { x, y })}
           onChangeLayers={changeLayers}
-          onUnderlay={(item) => applyUnderlay(item?.path)}
+          onUnderlay={(canvasId, pick) =>
+            pick ? setGalleryTarget({ underlayOf: canvasId }) : updateCanvas(canvasId, { backgroundPath: undefined })
+          }
           onAddCanvas={(at) => void addCanvasAt(at)}
           onImportPictures={(at) => void importPicturesAt(at)}
           onPicturesFromGallery={(at) => setGalleryTarget({ at })}
@@ -1050,12 +1052,19 @@ export function StudioPage(): React.JSX.Element {
 
       <GalleryPicker
         open={galleryTarget !== null}
-        title={galleryTarget && 'role' in galleryTarget ? `选择${roleLabel(galleryTarget.role)}` : '选择图片'}
+        title={
+          galleryTarget && 'role' in galleryTarget
+            ? `选择${roleLabel(galleryTarget.role)}`
+            : galleryTarget && 'underlayOf' in galleryTarget
+              ? '选择描图'
+              : '选择图片'
+        }
         onClose={() => setGalleryTarget(null)}
         onPick={(path) => {
           const target = galleryTarget
           setGalleryTarget(null)
           if (target && 'role' in target) void inputImport.addPaths(target.canvasId, target.role, target.kind, [path])
+          else if (target && 'underlayOf' in target) updateCanvas(target.underlayOf, { backgroundPath: path })
           else if (target) void importAt([path], target.at)
         }}
       />
