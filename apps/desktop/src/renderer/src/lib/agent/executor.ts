@@ -172,6 +172,11 @@ async function runHandler(name: ToolName, args: unknown, api: StudioToolApi): Pr
   return handler(args, api)
 }
 
+/** The board changes of one turn (or one applied plan) are one undo step, 「助手的修改」. */
+function asOneStep<T>(api: StudioToolApi, key: string | undefined, call: string | undefined, run: () => T): T {
+  return key && api.oneStep ? api.oneStep(key, call, run) : run()
+}
+
 /**
  * Run the steps of a plan card. Nothing here goes back to the model: the user
  * confirmed a concrete change, so it is applied by the same handlers a direct
@@ -181,6 +186,7 @@ export async function applyPlan(card: AgentCard): Promise<{ applied: number; pro
   const api = live
   if (!api) throw new Error('Studio 尚未就绪，请先在创作页打开一个项目')
   const steps = card.steps ?? []
+  const key = `plan:${card.id}`
   for (const step of steps) {
     if (!isToolName(step.tool)) throw new Error(`方案里有未知工具 ${step.tool}`)
     const tool = toolByName(step.tool)
@@ -189,7 +195,8 @@ export async function applyPlan(card: AgentCard): Promise<{ applied: number; pro
     if (blocked) throw new Error(errorOf(blocked))
     const parsed = TOOL_SCHEMAS[step.tool].safeParse(step.args)
     if (!parsed.success) throw new Error(explainIssues(parsed.error))
-    await runHandler(step.tool, parsed.data, api)
+    const name = step.tool
+    await asOneStep(api, key, undefined, () => runHandler(name, parsed.data, api))
   }
   return { applied: steps.length, problems: problemsOf(api) }
 }
@@ -198,8 +205,9 @@ async function dispatch<N extends ToolName>(
   name: N,
   raw: Record<string, unknown>,
   api: StudioToolApi,
-  mode: AgentMode | undefined,
+  options: ExecuteOptions & { call: string },
 ): Promise<AiToolResult> {
+  const { mode } = options
   const parsed = TOOL_SCHEMAS[name].safeParse(raw)
   if (!parsed.success) return fail(explainIssues(parsed.error))
   const tool = toolByName(name)
@@ -210,7 +218,7 @@ async function dispatch<N extends ToolName>(
     // Hold the write: it becomes one step of the plan card this turn shows.
     return ok({ proposed: { tool: name, args, label: tool.summarize(args) } satisfies PlanStep })
   }
-  const data = await HANDLERS[name](args, api)
+  const data = await asOneStep(api, options.turnId && `turn:${options.turnId}`, options.call, () => HANDLERS[name](args, api))
   if (!tool || tool.risk === 'read') return ok(data)
   if (tool.risk === 'ask') return ok(data, { summary: tool.summarize(args) })
   // Writes and runs report what the canvas still lacks, so the model does not
@@ -220,6 +228,8 @@ async function dispatch<N extends ToolName>(
 
 export interface ExecuteOptions {
   mode?: AgentMode
+  /** The assistant turn that asked; its board changes become one undo step. */
+  turnId?: string
 }
 
 export async function executeStudioTool(call: AiToolCall, options: ExecuteOptions = {}): Promise<AiToolResult> {
@@ -233,7 +243,7 @@ export async function executeStudioTool(call: AiToolCall, options: ExecuteOption
   try {
     const blocked = precheck(tool, api)
     if (blocked) return blocked
-    return await dispatch(tool.name, raw, api, options.mode)
+    return await dispatch(tool.name, raw, api, { ...options, call: call.id })
   } catch (error) {
     if (error instanceof ToolFailure) return fail(error.message, error.fix)
     return fail(error instanceof Error ? error.message : String(error))

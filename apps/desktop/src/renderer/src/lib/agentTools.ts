@@ -1,5 +1,5 @@
 import { Events, Ipc } from '@shared/channels'
-import type { AgentMode } from '@shared/ai'
+import type { AiToolCallRequest } from '@shared/ai'
 import { call, onEvent } from './api'
 import { applyPlan, executeStudioTool, getStudioApi, setStudioApi } from './agent/executor'
 import type { StudioSnapshot, StudioToolApi } from './agent/types'
@@ -61,11 +61,11 @@ export function formatStudioContext(snapshot: StudioSnapshot | null): string | u
 
 /** Subscribe once; resolves every tool call the main process asks for. */
 export function installStudioToolBridge(): () => void {
-  return onEvent<{ callId: string; name: string; arguments: string; mode?: AgentMode }>(Events.aiToolCall, (request) => {
+  return onEvent<AiToolCallRequest>(Events.aiToolCall, (request) => {
     void (async () => {
       const result = await executeStudioTool(
         { id: request.callId, name: request.name, arguments: request.arguments },
-        { mode: request.mode },
+        { mode: request.mode, turnId: request.turnId },
       )
       await call(Ipc.aiToolResult, { callId: request.callId, result }).catch(() => undefined)
     })()

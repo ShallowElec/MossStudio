@@ -165,7 +165,7 @@ export function useGenerate(options: {
       const going = runs.some((run) => ACTIVE_JOB_STATES.has(run.jobState ?? ''))
       const task = taskCanvasFor(runSource, withSeed, crypto.randomUUID(), going)
       // The selection stays where the user is working; a 画面's run joins its filmstrip.
-      project.setCanvases(task.canvases)
+      project.setRunCanvases(task.canvases)
       return {
         taskId: task.taskId,
         source: runSource,
@@ -191,7 +191,7 @@ export function useGenerate(options: {
       const present = (): boolean => project.canvasesRef.current.some((canvas) => canvas.id === taskId)
       // Called off while it waited its turn: it never goes out.
       if (!present()) return { queued: false, error: '已取消' }
-      const drop = (): void => project.setCanvases((previous) => previous.filter((canvas) => canvas.id !== taskId))
+      const drop = (): void => project.setRunCanvases((previous) => previous.filter((canvas) => canvas.id !== taskId))
       try {
         // Pictures and sampling choices are checked against the engine this run goes to.
         const features =
@@ -271,7 +271,7 @@ export function useGenerate(options: {
         }
         const observed = useApp.getState().jobs.find((job) => job.id === jobId)
         const state = body.state
-        project.setCanvases((previous) =>
+        project.setRunCanvases((previous) =>
           previous.map((canvas) =>
             canvas.id === taskId
               ? {
@@ -289,7 +289,7 @@ export function useGenerate(options: {
         return { queued: true, canvasId: taskId, jobId }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        project.setCanvases((previous) =>
+        project.setRunCanvases((previous) =>
           previous.map((canvas) =>
             canvas.id === taskId ? { ...canvas, jobState: 'failed', error: { code: 'E_SUBMIT', message } } : canvas,
           ),

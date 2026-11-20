@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JobRecord, ProjectCanvas, ProjectDocument, ProjectSummary } from '@shared/types'
 import { electronStudioClient, type StudioClient } from '../../lib/studioClient'
 import { applyJobs, copyAsLayout, createLayoutCanvas, migrateCanvases, removeCanvasFrom, settingsFrom } from './canvases'
+import { applyStep, createHistory, diffCanvases, isEmptyStep, record, stepLabel, turnState, turnSteps, type TurnState } from './history'
 import { foldedRunIds, withoutUnstartedRuns } from './runs'
 import { UNTITLED_PROJECT, nextProjectName } from './defaults'
 import { useLiveState } from './useLiveState'
@@ -14,6 +15,38 @@ function snapshotOf(name: string, canvases: readonly ProjectCanvas[], selectedCa
 }
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+
+type CanvasesUpdate = ProjectCanvas[] | ((previous: ProjectCanvas[]) => ProjectCanvas[])
+
+/** A change the history should treat as one step, whenever it lands: an assistant turn. */
+export interface StepGroup {
+  key: string
+  label: string
+  /** The assistant tool call that makes this change. */
+  call?: string
+}
+
+/** Undo and redo of the board's canvases (see history.ts). */
+export interface StudioHistory {
+  canUndo: boolean
+  canRedo: boolean
+  /** Bumped whenever the steps change shape, so views that read `turn` render again. */
+  version: number
+  /** Takes back the latest step; returns its name, or null when there was nothing. */
+  undo: () => string | null
+  redo: () => string | null
+  /** Edits made while `run` runs (its synchronous part) join one step with the other edits of `group.key`. */
+  within: <T>(group: StepGroup, run: () => T) => T
+  /** Where the changes of an assistant turn, known by its tool calls, stand. */
+  turn: (calls: readonly string[]) => TurnState | null
+  /** Undo (or redo) exactly that turn's steps; null when other steps are in the way. */
+  undoTurn: (calls: readonly string[]) => string | null
+  redoTurn: (calls: readonly string[]) => string | null
+}
+
+function isFormField(element: Element | null): boolean {
+  return Boolean(element?.closest('input, textarea, select, [contenteditable="true"]'))
+}
 
 export interface StudioProject {
   loaded: boolean
@@ -29,8 +62,11 @@ export interface StudioProject {
   selectedCanvas: ProjectCanvas | null
   saveStatus: SaveStatus
   saveError: string | null
-  setCanvases: (next: ProjectCanvas[] | ((previous: ProjectCanvas[]) => ProjectCanvas[])) => void
-  updateCanvas: (id: string, patch: Partial<ProjectCanvas> | ((canvas: ProjectCanvas) => ProjectCanvas)) => void
+  /** A user edit: saved, and one step of undo. `label` names the step when the change alone would not say it. */
+  setCanvases: (next: CanvasesUpdate, label?: string) => void
+  /** What a run writes (its result card, job id, seed): saved, but never a step of undo. */
+  setRunCanvases: (next: CanvasesUpdate) => void
+  updateCanvas: (id: string, patch: Partial<ProjectCanvas> | ((canvas: ProjectCanvas) => ProjectCanvas), label?: string) => void
   select: (id: string | null) => void
   addCanvas: (source?: ProjectCanvas) => ProjectCanvas
   /** Removes the canvas and every link that pointed at it; returns how many links went. */
@@ -40,6 +76,7 @@ export interface StudioProject {
   newProject: () => Promise<void>
   rename: (name: string) => void
   deleteProject: (id: string) => Promise<void>
+  history: StudioHistory
 }
 
 /**
@@ -89,6 +126,72 @@ export function useStudioProject(options: {
   const knownUpdatedAt = useRef<string | null>(null)
   const loadedRef = useRef(false)
   loadedRef.current = loaded
+  const jobsRef = useRef(options.jobs)
+  jobsRef.current = options.jobs
+
+  const history = useRef(createHistory())
+  const [historyShape, setHistoryShape] = useState({ canUndo: false, canRedo: false, version: 0 })
+  const reshape = useCallback(() => {
+    const { undo, redo } = history.current
+    setHistoryShape((shape) => ({ canUndo: undo.length > 0, canRedo: redo.length > 0, version: shape.version + 1 }))
+  }, [])
+  /** The assistant turn whose edits are being made right now. */
+  const group = useRef<StepGroup | null>(null)
+  /**
+   * What makes edits one step when no turn groups them: one pointer gesture
+   * (a box dragged or resized, a slider pulled), one visit to a form field
+   * (typing a description is one step per focus, not per key), else one task
+   * (a group of cards moved or deleted together).
+   */
+  const moment = useRef({ tick: 0, tickPending: false, gesture: 0, pressed: false, focus: 0 })
+  useEffect(() => {
+    const now = moment.current
+    const down = (): void => {
+      now.gesture += 1
+      now.pressed = true
+    }
+    const up = (): void => {
+      now.pressed = false
+    }
+    const focus = (): void => {
+      now.focus += 1
+    }
+    window.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointerup', up, true)
+    window.addEventListener('pointercancel', up, true)
+    window.addEventListener('blur', up)
+    window.addEventListener('focusin', focus, true)
+    return () => {
+      window.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointerup', up, true)
+      window.removeEventListener('pointercancel', up, true)
+      window.removeEventListener('blur', up)
+      window.removeEventListener('focusin', focus, true)
+    }
+  }, [])
+  const tokenNow = (): string => {
+    const now = moment.current
+    if (group.current) return `group:${group.current.key}`
+    if (now.pressed) return `pointer:${now.gesture}`
+    if (isFormField(document.activeElement)) return `field:${now.focus}`
+    if (!now.tickPending) {
+      now.tickPending = true
+      queueMicrotask(() => {
+        now.tick += 1
+        now.tickPending = false
+      })
+    }
+    return `tick:${now.tick}`
+  }
+  const note = (previous: ProjectCanvas[], next: ProjectCanvas[], label?: string): void => {
+    const changes = diffCanvases(previous, next)
+    if (!changes.length) return
+    const turn = group.current
+    const options = { token: tokenNow(), label: turn?.label ?? label, call: turn?.call, selected: selectedRef.current }
+    if (record(history.current, changes, options)) reshape()
+  }
+  const noteRef = useRef(note)
+  noteRef.current = note
 
   const snapshot = useMemo(() => snapshotOf(projectName, canvases, selectedCanvasId), [projectName, canvases, selectedCanvasId])
   const liveSnapshot = (): string => snapshotOf(projectNameRef.current, canvasesRef.current, selectedRef.current)
@@ -192,6 +295,9 @@ export function useStudioProject(options: {
       // Loading is not an edit; a document that still needs writing (an empty
       // project given its first canvas) counts as one.
       savedEdits.current = savedState || !doc.id ? edits.current : edits.current - 1
+      // Another project's steps would write into this one.
+      history.current = createHistory()
+      reshape()
       setProjectId(doc.id)
       setProjectName(doc.name)
       setCanvases(list)
@@ -200,7 +306,7 @@ export function useStudioProject(options: {
       // A fresh project counts as saved until the user changes something.
       lastSaved.current = savedState || !doc.id ? snapshotOf(doc.name, list, selected?.id ?? null) : ''
     },
-    [setCanvases, setProjectId, setProjectName, setSelected],
+    [setCanvases, setProjectId, setProjectName, setSelected, reshape],
   )
 
   const blankProject = useCallback(
@@ -310,7 +416,16 @@ export function useStudioProject(options: {
 
   /** setCanvases / select for callers: these are local edits. */
   const editCanvases = useCallback(
-    (next: ProjectCanvas[] | ((previous: ProjectCanvas[]) => ProjectCanvas[])) => {
+    (next: CanvasesUpdate, label?: string) => {
+      edits.current += 1
+      const previous = canvasesRef.current
+      setCanvases(next)
+      noteRef.current(previous, canvasesRef.current, label)
+    },
+    [setCanvases, canvasesRef],
+  )
+  const setRunCanvases = useCallback(
+    (next: CanvasesUpdate) => {
       edits.current += 1
       setCanvases(next)
     },
@@ -325,12 +440,14 @@ export function useStudioProject(options: {
   )
 
   const updateCanvas = useCallback(
-    (id: string, patch: Partial<ProjectCanvas> | ((canvas: ProjectCanvas) => ProjectCanvas)) => {
-      editCanvases((previous) =>
-        previous.map((canvas) => {
-          if (canvas.id !== id) return canvas
-          return typeof patch === 'function' ? patch(canvas) : { ...canvas, ...patch }
-        }),
+    (id: string, patch: Partial<ProjectCanvas> | ((canvas: ProjectCanvas) => ProjectCanvas), label?: string) => {
+      editCanvases(
+        (previous) =>
+          previous.map((canvas) => {
+            if (canvas.id !== id) return canvas
+            return typeof patch === 'function' ? patch(canvas) : { ...canvas, ...patch }
+          }),
+        label,
       )
     },
     [editCanvases],
@@ -362,6 +479,75 @@ export function useStudioProject(options: {
     },
     [canvasesRef, selectedRef, editCanvases, select],
   )
+
+  /**
+   * After an undo or redo, the card the step was made on is selected (one it
+   * brought back first), so the panel shows what changed.
+   */
+  const selectAfter = useCallback(
+    (preferred: string | null, restored: readonly string[]) => {
+      const list = canvasesRef.current
+      const has = (id: string | null): id is string => id !== null && list.some((canvas) => canvas.id === id)
+      const back =
+        preferred && restored.includes(preferred)
+          ? preferred
+          : restored.find((id) => list.find((canvas) => canvas.id === id)?.kind !== 'result')
+      const target = back ?? (has(preferred) ? preferred : null)
+      if (target) {
+        if (target !== selectedRef.current) select(target)
+      } else if (!has(selectedRef.current)) {
+        select((list.find((canvas) => canvas.kind === 'layout') ?? list[0])?.id ?? null)
+      }
+    },
+    [canvasesRef, selectedRef, select],
+  )
+
+  const step = useCallback(
+    (direction: 'undo' | 'redo'): string | null => {
+      const steps = history.current
+      const from = direction === 'undo' ? steps.undo : steps.redo
+      const to = direction === 'undo' ? steps.redo : steps.undo
+      let label: string | null = null
+      while (from.length && label === null) {
+        const taken = from.pop()!
+        if (isEmptyStep(taken)) continue
+        if (direction === 'undo') taken.selectedAfter = selectedRef.current
+        const { canvases: next, restored } = applyStep(canvasesRef.current, taken, direction)
+        edits.current += 1
+        // A card brought back may have a job that moved on while it was gone.
+        setCanvases(applyJobs(next, jobsRef.current))
+        to.push(taken)
+        steps.sealed = true
+        selectAfter(direction === 'undo' ? taken.selectedBefore : taken.selectedAfter, restored)
+        label = stepLabel(taken)
+      }
+      reshape()
+      return label
+    },
+    [canvasesRef, selectedRef, setCanvases, selectAfter, reshape],
+  )
+  const undo = useCallback(() => step('undo'), [step])
+  const redo = useCallback(() => step('redo'), [step])
+  const within = useCallback(<T>(next: StepGroup, run: () => T): T => {
+    const outer = group.current
+    group.current = next
+    try {
+      return run()
+    } finally {
+      group.current = outer
+    }
+  }, [])
+  const turn = useCallback((calls: readonly string[]) => turnState(history.current, calls), [])
+  const turnStep = useCallback(
+    (calls: readonly string[], direction: 'undo' | 'redo'): string | null => {
+      let label: string | null = null
+      for (let count = turnSteps(history.current, calls, direction); count > 0; count -= 1) label = step(direction) ?? label
+      return label
+    },
+    [step],
+  )
+  const undoTurn = useCallback((calls: readonly string[]) => turnStep(calls, 'undo'), [turnStep])
+  const redoTurn = useCallback((calls: readonly string[]) => turnStep(calls, 'redo'), [turnStep])
 
   /**
    * Before leaving the open project, write its pending edits. False when that
@@ -454,6 +640,7 @@ export function useStudioProject(options: {
     saveStatus,
     saveError,
     setCanvases: editCanvases,
+    setRunCanvases,
     updateCanvas,
     select,
     addCanvas,
@@ -463,5 +650,6 @@ export function useStudioProject(options: {
     newProject,
     rename,
     deleteProject,
+    history: { ...historyShape, undo, redo, within, turn, undoTurn, redoTurn },
   }
 }

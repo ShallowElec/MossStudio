@@ -5,7 +5,7 @@
  * a test changes what the "main process" knows by editing `backend.state`.
  */
 import type { MangaSeries } from '@shared/manga/model'
-import type { AiConversationInfo, AiProviderInfo } from '@shared/ai'
+import type { AiConversationInfo, AiProviderInfo, AiToolCall } from '@shared/ai'
 import type { GbcJobSnapshot, GbcParseResult, GbcStatus } from '@shared/gbc'
 import type { UpdaterState } from '@shared/update'
 import { cliEngineFeatures } from '@shared/cliEngine'
@@ -109,6 +109,12 @@ export interface MockBackendState {
   pickedImages: string[]
   aiProviders: AiProviderInfo[]
   conversations: AiConversationInfo[]
+  /**
+   * The tool calls the next ai:chat makes before it replies, run in the window
+   * like main runs them (Events.aiToolCall, answered through ai:tool-result).
+   * Empty = a plain text reply.
+   */
+  aiTurn: Array<Pick<AiToolCall, 'name' | 'arguments'>>
   /** 导入模型: what the engine says each path is (./modelImport.ts); a path not listed is not a model file. */
   importFiles: Record<string, MockImportFile>
   /** What 选择文件… / 选择文件夹… (and 重新找到…) pick; null = the dialog is canceled. */
@@ -215,6 +221,7 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     pickedImages: [],
     aiProviders: [],
     conversations: [],
+    aiTurn: [],
     gbc: { status: gbcStatusFixture(false), versions: [], parse: gbcParseFixture(), job: null },
     engineFeatures: engineFeaturesFixture(),
     controlAdapters: [],

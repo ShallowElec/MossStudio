@@ -6,7 +6,7 @@ code: apps/desktop/src/renderer/src/pages/studio/assistant/, apps/desktop/src/re
 
 # Studio assistant
 
-The 助手 is a chat beside the board that changes the selected card through tools instead of giving advice. One registry defines every tool once (its zod schema, name, risk and one-line summary); the renderer runs them against live Studio state; the main process talks to the language model. Two modes decide whether a write happens at once (自主) or waits in a plan card for approval (审批).
+The 助手 is a chat beside the board that changes the selected card through tools instead of giving advice. One registry defines every tool once (its zod schema, name, risk and one-line summary); the renderer runs them against live Studio state; the main process talks to the language model. Two modes decide whether a write happens at once (自主) or waits in a plan card for approval (审批); a 自主 turn's changes are one undo step that its reply can take back.
 
 Paths are relative to `apps/desktop/src/`; `assistant/` stands for `renderer/src/pages/studio/assistant/`. The board it acts on is described in [studio-node-board.md](/docs/reference/studio-node-board.md); the reasons for this design are in [studio-design.md](/docs/explanation/studio-design.md).
 
@@ -30,10 +30,10 @@ Every message carries the project as it is at send time: `lib/agentTools.ts` `fo
 | Registry | `shared/agent/registry.ts` (`AGENT_TOOLS`) | Per tool: `title` (Chinese, for the chat line), `pack`, `risk` (`read`, `write`, `run`, `ask`), `requires` (`editable`), `description` for the model, `summarize(args)` |
 | Provider list | `toolDefinitions(resolveToolset({ page: 'studio' }))` in `main/ipc.ts` | JSON Schema from `z.toJSONSchema`, without `$schema` |
 | Handlers | `renderer/src/lib/agent/executor.ts` (`HANDLERS`) | One per `ToolName`; the table is exhaustive, so a tool without a handler fails to compile |
-| Studio API | `renderer/src/lib/agent/types.ts` (`StudioToolApi`), implemented in `StudioPage.tsx` | `state`, `readContext`, `readCanvas`, `setPrompt`, `setSampler`, `addLayer`, `addTextLayer`, `updateLayer`, `removeLayer`, `createScenes`, `selectCanvas`, `generate`, `problems` |
-| Bridge | `lib/agentTools.ts` (`installStudioToolBridge`) | `Events.aiToolCall` from main runs `executeStudioTool`; the result goes back through `Ipc.aiToolResult` |
+| Studio API | `renderer/src/lib/agent/types.ts` (`StudioToolApi`), implemented in `StudioPage.tsx` | `state`, `readContext`, `readCanvas`, `setPrompt`, `setSampler`, `addLayer`, `addTextLayer`, `updateLayer`, `removeLayer`, `createScenes`, `selectCanvas`, `generate`, `problems`, and `oneStep`, which makes a turn's board changes one undo step (section 7) |
+| Bridge | `lib/agentTools.ts` (`installStudioToolBridge`) | `Events.aiToolCall` from main (`AiToolCallRequest`, which names the turn in `turnId`) runs `executeStudioTool`; the result goes back through `Ipc.aiToolResult` |
 
-`resolveToolset` mounts `canvas.read` and `ask` everywhere, `canvas.write` and `storyboard` on the Studio only, and nothing when the provider cannot call tools. The `library` pack exists as a name only (section 9).
+`resolveToolset` mounts `canvas.read` and `ask` everywhere, `canvas.write` and `storyboard` on the Studio only, and nothing when the provider cannot call tools. The `library` pack exists as a name only (section 10).
 
 | Tool | 标题 | Pack, risk | Does | Refused when |
 | --- | --- | --- | --- | --- |
@@ -63,12 +63,27 @@ A read returns its data. An ask returns `{ shown, card, summary }`. A write or r
 
 | | 自主 (`auto`) | 审批 (`advanced`) |
 | --- | --- | --- |
-| A `write` or `run` tool | Runs at once; the trace line reports it | Is held: the executor returns `{ proposed: { tool, args, label } }` and nothing changes |
+| A `write` or `run` tool | Runs at once; the trace line reports it. Everything the turn changes on the board is one undo step (section 7) | Is held: the executor returns `{ proposed: { tool, args, label } }` and nothing changes |
 | End of the turn | The reply | Main collects every held step of the turn into one plan card (`planCardFor`: title 将改动 N 处, or the step's label when there is one; `why` is the model's text) |
 | On the board | Nothing | The regions the plan would add are previewed on the selected 画面 as dashed boxes tagged 方案 (`canvases.ts` `plannedRegions`, `lib/shell.ts` `planPreview`, `RegionLayer.tsx`) |
-| 应用 | | `lib/agent/executor.ts` `applyPlan` runs the steps in order through the same handlers, without the model; it stops at the first step that fails and does not undo the earlier ones |
+| 应用 | | `lib/agent/executor.ts` `applyPlan` runs the steps in order through the same handlers, without the model, as one undo step 助手的修改; it stops at the first step that fails and does not undo the earlier ones |
 
-## 7. Cards
+## 7. Undoing a turn
+
+Main names each tool call's turn (`turnId`, the reply's message id from the `start` event) and the executor runs a 自主 turn's tools inside `StudioToolApi.oneStep` with the key `turn:<turnId>` and the call's id. The board's history ([studio-node-board.md](/docs/reference/studio-node-board.md#13-undo-and-redo)) then joins everything the turn changes into one step, 助手的修改, however many tools and rounds it took, and remembers the calls. A turn that only read or asked makes no step.
+
+Under the turn's last reply (`assistant/format.ts` `turnCalls` finds it), `TurnUndo` in `assistant/Assistant.tsx` asks the history where that step stands (`history.ts` `turnState`):
+
+| State | Shows |
+| --- | --- |
+| `latest`: the turn's step is the newest | 撤销这一步; undoes exactly that step, with the same toast as Ctrl+Z |
+| `buried`: something was changed after it | 撤销这一步, disabled, with the reason in its tooltip |
+| `redo`: undone, and the next redo brings it back | 重做 |
+| `undone`: undone, and other steps were undone after it | 已撤销, disabled |
+
+With later steps on top, the button does not undo back through them: that would take back the person's own changes from a button that says it undoes the assistant's. Ctrl+Z on the board walks back step by step instead, and once the turn is on top again the button works. The history is not saved, so a reopened conversation, or one from before the project was opened, shows no button.
+
+## 8. Cards
 
 A card (`shared/agent/cards.ts` `AgentCard`) is attached to the assistant message that asked and saved with the conversation, so a reopened chat shows it. Nothing waits inside a tool call: the tool returns, the turn ends, and the answer becomes the next user message (`assistant/Assistant.tsx` `followUpFor`), which starts the next turn by itself.
 
@@ -80,14 +95,14 @@ A card (`shared/agent/cards.ts` `AgentCard`) is attached to the assistant messag
 
 Only one card waits at a time: the newest unanswered one sits above the composer and does not scroll with the chat. While it waits, text typed in the composer answers it (the placeholder changes: 或者直接写你的答案…, 想改哪里？写给助手…, 想先改什么？写给助手…); 调整… and 改一句… only move focus there. The answer is stored through `Ipc.aiCardAnswer` (`main/services/ai.ts` `answerAgentCard`) before the follow-up is sent. An answered card folds to one line in its message (the question; a plan reads 标题 · 已应用 N 处改动, 已放弃 or 提了调整).
 
-## 8. Writing a description by hand
+## 9. Writing a description by hand
 
 Text replies are never written automatically. 用作描述 under a reply opens 替换描述？ with 现在 and 替换为, and `applyStudioDescription` writes it on confirm.
 
-## 9. Not built
+## 10. Not built
 
 From `docs/design/agent-tool-rack.md`, still open at fec4fe3: thumbnails for composition choices (options are text only); the `library` pack (`pick_reference` from 作品); a `MAX_TOOL_ROUNDS` that grows for a storyboard; a check of all plan steps before 应用 runs the first; a way to answer a card without sending at once.
 
-## 10. Tests
+## 11. Tests
 
-`apps/desktop/test/shared/agentRegistry.test.ts` (registry names equal `TOOL_SCHEMAS` keys, schema shape, mounting), `test/renderer/lib/agentTools.test.ts` (executor: prechecks, held writes, `applyPlan`, cards, and that a text region made through the tools passes `compileCanvasPrompt`), `test/renderer/studio/canvases.test.ts` (`addRegion`, `editLayer`, `sceneCanvas`), `test/renderer/studio/assistantFormat.test.ts`; end to end `apps/desktop/e2e/specs/agent.e2e.ts` against the mock backend.
+`apps/desktop/test/shared/agentRegistry.test.ts` (registry names equal `TOOL_SCHEMAS` keys, schema shape, mounting), `test/renderer/lib/agentTools.test.ts` (executor: prechecks, held writes, `applyPlan`, cards, a turn's tools inside one undo step, and that a text region made through the tools passes `compileCanvasPrompt`), `test/renderer/studio/canvases.test.ts` (`addRegion`, `editLayer`, `sceneCanvas`), `test/renderer/studio/assistantFormat.test.ts` (`turnCalls`), `test/renderer/studio/history.test.ts` (`turnState`); end to end `apps/desktop/e2e/specs/agent.e2e.ts` and the 撤销这一步 test in `undo.e2e.ts`, whose mock turn (`MockBackendState.aiTurn`) runs its tools in the window as main does.

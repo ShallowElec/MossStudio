@@ -80,4 +80,9 @@ export interface StudioToolApi {
   generate(prompt?: string): Promise<unknown> | unknown
   /** What still blocks generation on the selected canvas; empty when it can run. */
   problems(): string[]
+  /**
+   * Run `run` so that the board changes it makes join every other change of
+   * `key` as one undo step, tagged with the tool call. Absent where nothing keeps an undo history.
+   */
+  oneStep?<T>(key: string, call: string | undefined, run: () => T): T
 }

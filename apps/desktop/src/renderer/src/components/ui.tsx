@@ -755,10 +755,12 @@ export interface ToastAction {
   onClick: () => void
 }
 
-type ToastPush = (message: string, tone?: ToastTone, action?: ToastAction) => void
+/** `key`: a toast with the same key that is still showing makes way for this one (undo pressed again and again). */
+type ToastPush = (message: string, tone?: ToastTone, action?: ToastAction, options?: { key?: string }) => void
 
 interface ToastItem {
   id: string
+  key?: string
   message: string
   tone: ToastTone
   action?: ToastAction
@@ -813,9 +815,13 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
       }
     }
   }, [items])
-  const push = useCallback<ToastPush>((message, tone = 'info', action) => {
+  const push = useCallback<ToastPush>((message, tone = 'info', action, options) => {
     const id = crypto.randomUUID()
-    setItems((previous) => [...previous.slice(-2), { id, message, tone, action, open: true }])
+    const key = options?.key
+    setItems((previous) => [
+      ...previous.filter((item) => !key || item.key !== key).slice(-2),
+      { id, key, message, tone, action, open: true },
+    ])
     const timer = window.setTimeout(() => {
       timers.current.delete(id)
       setItems((previous) => previous.map((item) => (item.id === id ? { ...item, open: false } : item)))

@@ -38,7 +38,7 @@ import { BRUSH_DEFAULT, maskAvailability, startPictureSize } from './mask'
 import type { MaskBrush, MaskCommand } from './MaskLayer'
 import { rerunEligibility, type Blocker, type ReadinessInput, type RerunCheck } from './readiness'
 import { KIND_LABEL, withKind, type BoardTool } from './RegionLayer'
-import { CardToolbar, MaskBar, Toolbar } from './Toolbar'
+import { CardToolbar, MaskBar, Toolbar, type BoardHistoryControls } from './Toolbar'
 import { useCardDrag } from './useCardDrag'
 import { useWireConnect } from './useWireConnect'
 import { useWireSelection } from './useWireSelection'
@@ -96,6 +96,8 @@ export interface BoardProps {
   update?: ReadinessInput['update']
   tool: BoardTool
   onTool: (tool: BoardTool) => void
+  /** Undo and redo in the toolbar. */
+  history: BoardHistoryControls
   selectedRegionId: string | null
   onSelectRegion: (id: string | null) => void
   onSelectCanvas: (id: string) => void
@@ -116,7 +118,7 @@ export interface BoardProps {
   onShowActivity: (jobId?: string) => void
   onCopy: (canvas: ProjectCanvas) => void
   onDelete: (canvas: ProjectCanvas) => void
-  /** Delete several picked cards at once (after asking). */
+  /** Delete several picked cards at once (undo brings them back). */
   onDeleteMany: (ids: string[]) => void
   /** What the engine can do (undefined while loading, null when none is usable). */
   engineFeatures: EngineFeatures | null | undefined
@@ -1123,6 +1125,7 @@ export function Board(props: BoardProps): React.JSX.Element {
         onFit={fit}
         minimap={minimapOn}
         onMinimap={setMinimapChoice}
+        history={props.history}
       />
       {props.tool === 'mask' && mask.enabled ? (
         <MaskBar

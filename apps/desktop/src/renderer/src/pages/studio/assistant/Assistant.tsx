@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronDown, Copy, History, PenLine, Plus, RotateCw, Trash2 } from 'lucide-react'
+import { ArrowUp, ChevronDown, Copy, History, PenLine, Plus, Redo2, RotateCw, Trash2, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Events, Ipc } from '@shared/channels'
 import {
@@ -39,7 +39,8 @@ import { ChoiceCard } from './ChoiceCard'
 import { ConfirmCard } from './ConfirmCard'
 import { PlanCard } from './PlanCard'
 import { ToolTrace, type TraceEntry } from './ToolTrace'
-import { toolDetail } from './format'
+import { toolDetail, turnCalls } from './format'
+import type { TurnState } from '../history'
 
 /** Survives unmounts so the chat never loses its place. */
 const CONVERSATION_KEY = 'mossstudio.agentConversationId'
@@ -113,12 +114,59 @@ function followUpFor(card: AgentCard, answer: AgentCardAnswer, problems: string[
   return lines.join('\n')
 }
 
+/** What the board's undo history says about a turn's changes, and the way to take them back. */
+export interface AssistantBoardUndo {
+  turn: (calls: readonly string[]) => TurnState | null
+  undo: (calls: readonly string[]) => void
+  redo: (calls: readonly string[]) => void
+}
+
+/**
+ * Under a 自主 turn that changed the board: 撤销这一步 while its changes are
+ * the latest, 重做 right after. With later changes on top it stays off: taking
+ * those back too would be a surprise.
+ */
+function TurnUndo({ calls, board }: { calls: readonly string[]; board: AssistantBoardUndo }): React.JSX.Element | null {
+  const state = board.turn(calls)
+  if (!state) return null
+  if (state === 'redo') {
+    return (
+      <Button data-turn-undo={state} size="xs" tone="ghost" className="-ml-2 self-start" onClick={() => board.redo(calls)}>
+        <Redo2 className="size-3.5" strokeWidth={1.6} />
+        重做
+      </Button>
+    )
+  }
+  if (state === 'undone') {
+    return (
+      <Button data-turn-undo={state} size="xs" tone="ghost" className="-ml-2 self-start" disabled>
+        已撤销
+      </Button>
+    )
+  }
+  return (
+    <Button
+      data-turn-undo={state}
+      size="xs"
+      tone="ghost"
+      className="-ml-2 self-start"
+      disabled={state === 'buried'}
+      title={state === 'buried' ? '之后画布上又有了改动，要先在画布上撤销它们' : undefined}
+      onClick={() => board.undo(calls)}
+    >
+      <Undo2 className="size-3.5" strokeWidth={1.6} />
+      撤销这一步
+    </Button>
+  )
+}
+
 /**
  * The Studio assistant. Every message carries the selected canvas as it is at
  * the moment of sending (description and regions), and the assistant changes
- * the canvas through the studio_* tools.
+ * the canvas through the studio_* tools. On the Studio page `board` gives each
+ * turn that changed the board a way to take it back.
  */
-export function Assistant(): React.JSX.Element {
+export function Assistant({ board }: { board?: AssistantBoardUndo } = {}): React.JSX.Element {
   const toast = useToast()
   const copyText = useCopyText()
   const animate = useUiAnimationEnabled()
@@ -368,6 +416,7 @@ export function Assistant(): React.JSX.Element {
   }
 
   const lastAssistantId = [...messages].reverse().find((message) => message.role === 'assistant')?.id
+  const callsOfTurn = useMemo(() => turnCalls(messages), [messages])
   const toolResults = useMemo(() => {
     const map = new Map<string, AiMessage>()
     for (const message of messages) if (message.role === 'tool' && message.toolCallId) map.set(message.toolCallId, message)
@@ -576,6 +625,7 @@ export function Assistant(): React.JSX.Element {
                             {answeredLine(message.card)}
                           </p>
                         ) : null}
+                        {board && callsOfTurn.has(message.id) ? <TurnUndo calls={callsOfTurn.get(message.id)!} board={board} /> : null}
                         {message.content ? (
                           // A reply's actions float over its corner on hover; they take no room in the conversation.
                           <div

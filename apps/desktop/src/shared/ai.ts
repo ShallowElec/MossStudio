@@ -111,6 +111,8 @@ export interface AiToolCallRequest {
   arguments: string
   /** Advanced mode turns a write into a plan step instead of changing anything. */
   mode?: AgentMode
+  /** The turn that asked (its reply's message id): the Studio makes one undo step of a turn's changes. */
+  turnId?: string
 }
 
 export interface AiProviderPreset {

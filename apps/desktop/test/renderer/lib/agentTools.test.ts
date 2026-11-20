@@ -386,6 +386,77 @@ describe('advanced mode', () => {
   it('refuses to apply a plan before the Studio is ready', async () => {
     await expect(applyPlan(planCard)).rejects.toThrow('Studio 尚未就绪')
   })
+
+  it('applies a plan as one undo step', async () => {
+    const groups: Array<{ key: string; call?: string }> = []
+    const tools = api({
+      oneStep: (key, call, run) => {
+        groups.push({ key, call })
+        return run()
+      },
+    })
+    registerStudioTools(tools)
+    await applyPlan(planCard)
+    expect(groups).toEqual([{ key: 'plan:card-1' }, { key: 'plan:card-1' }])
+  })
+})
+
+describe('undo steps of a turn', () => {
+  it('runs every tool of a 自主 turn inside one step of that turn, tagged with its call', async () => {
+    const groups: Array<{ key: string; call?: string }> = []
+    let inside = false
+    const tools = api({
+      oneStep: (key, call, run) => {
+        groups.push({ key, call })
+        inside = true
+        try {
+          return run()
+        } finally {
+          inside = false
+        }
+      },
+      // The write happens inside the step, not before or after it.
+      setPrompt: vi.fn((prompt: string) => {
+        expect(inside).toBe(true)
+        return { written: prompt.length }
+      }),
+    })
+    registerStudioTools(tools)
+    await executeStudioTool({ id: 'call-1', name: 'studio_set_prompt', arguments: '{"prompt":"猫"}' }, { mode: 'auto', turnId: 'msg-1' })
+    await executeStudioTool({ id: 'call-2', name: 'studio_add_layer', arguments: '{"label":"object","caption":"猫"}' }, { turnId: 'msg-1' })
+    expect(tools.setPrompt).toHaveBeenCalledTimes(1)
+    expect(groups).toEqual([
+      { key: 'turn:msg-1', call: 'call-1' },
+      { key: 'turn:msg-1', call: 'call-2' },
+    ])
+  })
+
+  it('does not group a held 审批 write, or a call that names no turn', async () => {
+    const oneStep = vi.fn((_key: string, _call: string | undefined, run: () => unknown) => run())
+    registerStudioTools(api({ oneStep: oneStep as StudioToolApi['oneStep'] }))
+    await executeStudioTool({ id: 'c', name: 'studio_set_prompt', arguments: '{"prompt":"x"}' }, { mode: 'advanced', turnId: 'msg-1' })
+    await executeStudioTool({ id: 'c', name: 'studio_set_prompt', arguments: '{"prompt":"x"}' }, { mode: 'auto' })
+    expect(oneStep).not.toHaveBeenCalled()
+  })
+
+  it('the bridge passes the turn main names along', async () => {
+    const backend = createMockBackend('ready')
+    const uninstall = backend.install()
+    const oneStep = vi.fn((_key: string, _call: string | undefined, run: () => unknown) => run())
+    registerStudioTools(api({ oneStep: oneStep as StudioToolApi['oneStep'] }))
+    const off = installStudioToolBridge()
+    backend.emit(Events.aiToolCall, {
+      callId: 'call-3',
+      name: 'studio_set_prompt',
+      arguments: '{"prompt":"猫"}',
+      mode: 'auto',
+      turnId: 'msg-7',
+    })
+    await flush()
+    expect(oneStep.mock.calls.map(([key, call]) => [key, call])).toEqual([['turn:msg-7', 'call-3']])
+    off()
+    uninstall()
+  })
 })
 
 describe('lib/agentTools installStudioToolBridge', () => {

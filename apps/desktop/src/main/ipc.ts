@@ -6,7 +6,7 @@ import { Events, Ipc } from '@shared/channels'
 import { schemas } from '@shared/schemas'
 import { trainingSchemas } from '@shared/training'
 import { resolveToolset, toolDefinitions } from '@shared/agent/registry'
-import type { AgentMode, AiToolCall, AiToolResult } from '@shared/ai'
+import type { AgentMode, AiToolCall, AiToolCallRequest, AiToolResult } from '@shared/ai'
 import type { IpcResult, Settings } from '@shared/types'
 import { emit } from './lib/events'
 import { ensureDirs, paths } from './lib/paths'
@@ -172,7 +172,7 @@ function handle<T>(channel: string, schema: ZodType | null, fn: (input: any, eve
 /** Tool calls are executed by the renderer (it owns the Studio state); main only relays. */
 const pendingToolCalls = new Map<string, (result: AiToolResult) => void>()
 
-function runToolInRenderer(event: Electron.IpcMainInvokeEvent, call: AiToolCall, mode: AgentMode): Promise<AiToolResult> {
+function runToolInRenderer(event: Electron.IpcMainInvokeEvent, call: AiToolCall, mode: AgentMode, turnId: string): Promise<AiToolResult> {
   const sender = event.sender
   return new Promise<AiToolResult>((resolve) => {
     const callId = call.id
@@ -189,7 +189,7 @@ function runToolInRenderer(event: Electron.IpcMainInvokeEvent, call: AiToolCall,
       settle({ ok: false, content: JSON.stringify({ error: 'window closed' }) })
       return
     }
-    sender.send(Events.aiToolCall, { callId, name: call.name, arguments: call.arguments, mode })
+    sender.send(Events.aiToolCall, { callId, name: call.name, arguments: call.arguments, mode, turnId } satisfies AiToolCallRequest)
   })
 }
 
@@ -284,7 +284,7 @@ export function registerIpc(): void {
       emit: (payload) => {
         if (!event.sender.isDestroyed()) event.sender.send(Events.aiStream, payload)
       },
-      runTool: (call, mode) => runToolInRenderer(event, call, mode),
+      runTool: (call, mode, turnId) => runToolInRenderer(event, call, mode, turnId),
       tools: toolDefinitions(resolveToolset({ page: 'studio' })),
     }),
   )

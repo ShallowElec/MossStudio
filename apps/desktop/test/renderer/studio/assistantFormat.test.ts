@@ -1,5 +1,40 @@
 import { describe, expect, it } from 'vitest'
-import { toolDetail, toolLabel, traceHeadline } from '@renderer/pages/studio/assistant/format'
+import type { AiMessage } from '@shared/ai'
+import { toolDetail, toolLabel, traceHeadline, turnCalls } from '@renderer/pages/studio/assistant/format'
+
+describe('studio/assistant turnCalls', () => {
+  const at = '2026-11-08T10:00:00.000Z'
+  const user = (id: string): AiMessage => ({ id, role: 'user', content: 'hi', createdAt: at })
+  const asked = (id: string, ...calls: string[]): AiMessage => ({
+    id,
+    role: 'assistant',
+    content: '',
+    createdAt: at,
+    toolCalls: calls.map((call) => ({ id: call, name: 'studio_set_prompt', arguments: '{}' })),
+  })
+  const reply = (id: string): AiMessage => ({ id, role: 'assistant', content: '好了', createdAt: at })
+  const tool = (id: string, call: string): AiMessage => ({ id, role: 'tool', content: '{}', createdAt: at, toolCallId: call })
+
+  it("gathers a turn's tool calls under its last reply, and skips turns without any", () => {
+    const messages = [
+      user('u1'),
+      asked('a1', 'c1', 'c2'),
+      tool('t1', 'c1'),
+      tool('t2', 'c2'),
+      asked('a2', 'c3'),
+      tool('t3', 'c3'),
+      reply('a3'),
+      user('u2'),
+      reply('a4'),
+      user('u3'),
+      asked('a5', 'c4'),
+    ]
+    expect([...turnCalls(messages)]).toEqual([
+      ['a3', ['c1', 'c2', 'c3']],
+      ['a5', ['c4']],
+    ])
+  })
+})
 
 describe('studio/assistant format', () => {
   it('names tools in plain words', () => {

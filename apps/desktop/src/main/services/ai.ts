@@ -566,7 +566,7 @@ export async function chat(
   input: AiChatInput,
   options: {
     emit: (event: AiStreamEvent) => void
-    runTool: (call: AiToolCall, mode: AgentMode) => Promise<AiToolResult>
+    runTool: (call: AiToolCall, mode: AgentMode, turnId: string) => Promise<AiToolResult>
     tools: AiToolDefinition[]
   },
 ): Promise<AiChatResult> {
@@ -630,7 +630,7 @@ export async function chat(
       const steps: PlanStep[] = []
       for (const call of toolCalls) {
         options.emit({ type: 'tool', conversationId: conversation.id, call })
-        const result = await options.runTool(call, mode)
+        const result = await options.runTool(call, mode, assistantId)
         options.emit({ type: 'tool-result', conversationId: conversation.id, callId: call.id, result })
         // A tool may hand back a card to show in the chat; it belongs to the
         // assistant turn that asked, and survives a restart with it. Writes the

@@ -31,6 +31,9 @@ import {
   type AiMessage,
   type AiProviderInfo,
   type AiProviderInput,
+  type AiStreamEvent,
+  type AiToolCallRequest,
+  type AiToolResult,
 } from '@shared/ai'
 import type { WebAccessInfo } from '@shared/backend'
 import type { EngineHello } from '@shared/engineProtocol'
@@ -992,26 +995,67 @@ function defaultHandlers(): Map<string, Handler> {
     return true
   })
   h.set(Ipc.aiConversations, (_, { state }) => state.conversations)
-  h.set(Ipc.aiChat, (payload, { state }) => {
+  // A turn runs its tools in the window, one round, the way main does: start, tool, the call, its result, done.
+  const toolResults = new Map<string, (result: AiToolResult) => void>()
+  h.set(Ipc.aiChat, async (payload, { state, emit }) => {
     const input = p<AiChatInput>(payload)
     const previous = state.conversations.find((item) => item.id === input.conversationId)
+    const id = previous?.id ?? 'fixture-chat'
+    const stamp = Date.now()
+    const turnId = `reply-${stamp}`
+    const stream = (event: AiStreamEvent): void => emit(Events.aiStream, event)
     const messages: AiMessage[] = [
       ...(previous?.messages ?? []),
-      { id: `user-${Date.now()}`, role: 'user', content: input.message ?? '', createdAt: FIXTURE_NOW },
-      { id: `reply-${Date.now()}`, role: 'assistant', content: 'Fixture reply', createdAt: FIXTURE_NOW },
+      { id: `user-${stamp}`, role: 'user', content: input.message ?? '', createdAt: FIXTURE_NOW },
     ]
+    stream({ type: 'start', conversationId: id, messageId: turnId })
+    const calls = state.aiTurn.map((call, index) => ({ ...call, id: `call-${stamp}-${index}` }))
+    state.aiTurn = []
+    if (calls.length) {
+      messages.push({ id: `asked-${stamp}`, role: 'assistant', content: '', createdAt: FIXTURE_NOW, toolCalls: calls })
+      for (const call of calls) {
+        stream({ type: 'tool', conversationId: id, call })
+        const result = await new Promise<AiToolResult>((resolve) => {
+          toolResults.set(call.id, resolve)
+          emit(Events.aiToolCall, {
+            callId: call.id,
+            name: call.name,
+            arguments: call.arguments,
+            mode: input.mode,
+            turnId,
+          } satisfies AiToolCallRequest)
+        })
+        stream({ type: 'tool-result', conversationId: id, callId: call.id, result })
+        messages.push({
+          id: `tool-${call.id}`,
+          role: 'tool',
+          content: result.content,
+          createdAt: FIXTURE_NOW,
+          toolCallId: call.id,
+          name: call.name,
+        })
+      }
+    }
+    messages.push({ id: turnId, role: 'assistant', content: 'Fixture reply', createdAt: FIXTURE_NOW })
     const conversation: AiConversationInfo = {
-      id: previous?.id ?? 'fixture-chat',
+      id,
       title: previous?.title ?? 'Fixture chat',
       providerId: input.providerId,
+      mode: input.mode,
       messages,
       createdAt: previous?.createdAt ?? FIXTURE_NOW,
       updatedAt: FIXTURE_NOW,
     }
     state.conversations = [conversation, ...state.conversations.filter((item) => item.id !== conversation.id)]
+    stream({ type: 'done', conversationId: id, conversation })
     return { reply: 'Fixture reply', conversation }
   })
-  h.set(Ipc.aiToolResult, () => null)
+  h.set(Ipc.aiToolResult, (payload) => {
+    const { callId, result } = p<{ callId: string; result: AiToolResult }>(payload)
+    toolResults.get(callId)?.(result)
+    toolResults.delete(callId)
+    return null
+  })
   h.set(Ipc.aiCardAnswer, (payload, { state }) => {
     const { conversationId, messageId, answer } = p<{
       conversationId: string

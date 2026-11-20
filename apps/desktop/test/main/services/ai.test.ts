@@ -48,15 +48,17 @@ function run(
 ) {
   const events: AiStreamEvent[] = []
   const calls: AiToolCall[] = []
+  const turns: string[] = []
   const promise = api.chat(input, {
     emit: (event) => events.push(event),
-    runTool: async (call) => {
+    runTool: async (call, _mode, turnId) => {
       calls.push(call)
+      turns.push(turnId)
       return typeof toolResult === 'function' ? toolResult(call) : toolResult
     },
     tools,
   })
-  return { promise, events, calls }
+  return { promise, events, calls, turns }
 }
 
 describe('providers', () => {
@@ -117,10 +119,13 @@ describe('chat with an OpenAI-compatible provider', () => {
       ]),
     )
     replies.push(() => sse([{ choices: [{ delta: { content: 'Done.' } }] }]))
-    const { promise, events, calls } = run(api, { providerId: id, message: 'look' })
+    const { promise, events, calls, turns } = run(api, { providerId: id, message: 'look' })
     const result = await promise
     expect(calls).toEqual([{ id: 'call_1', name: 'studio_read_context', arguments: '{"a":1}' }])
     expect(events.map((event) => event.type)).toEqual(['start', 'tool', 'tool-result', 'delta', 'done'])
+    // Every call of the turn names it, as the start event did: the Studio makes one undo step of it.
+    const start = events[0]
+    expect(turns).toEqual([start?.type === 'start' ? start.messageId : 'missing'])
     expect(requests[0]!.headers['authorization']).toBeUndefined()
     const second = requests[1]!.body['messages'] as Array<Record<string, unknown>>
     expect(second.slice(-2)).toEqual([

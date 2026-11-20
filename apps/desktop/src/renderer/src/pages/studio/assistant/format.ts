@@ -1,3 +1,4 @@
+import type { AiMessage } from '@shared/ai'
 import { toolByName } from '@shared/agent/registry'
 
 /** Plain-language name of a tool, from the one place that defines it. */
@@ -54,4 +55,28 @@ export function traceHeadline(names: readonly string[]): string {
   }
   const parts = counted.map((item) => (item.count > 1 ? `${item.label} ×${item.count}` : item.label))
   return parts.length > 3 ? `${parts.slice(0, 3).join('、')}等 ${names.length} 步` : parts.join('、')
+}
+
+/**
+ * The tool calls of each turn, keyed by the turn's last assistant message
+ * (where its 撤销这一步 sits). A turn runs from one user message to the next.
+ */
+export function turnCalls(messages: readonly AiMessage[]): Map<string, string[]> {
+  const turns = new Map<string, string[]>()
+  let calls: string[] = []
+  let last: string | null = null
+  const close = (): void => {
+    if (last && calls.length) turns.set(last, calls)
+    calls = []
+    last = null
+  }
+  for (const message of messages) {
+    if (message.role === 'user') close()
+    else if (message.role === 'assistant') {
+      last = message.id
+      for (const call of message.toolCalls ?? []) calls.push(call.id)
+    }
+  }
+  close()
+  return turns
 }
