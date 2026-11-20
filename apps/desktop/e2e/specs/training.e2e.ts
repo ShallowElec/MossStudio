@@ -144,10 +144,26 @@ describe('training: a new training', () => {
     await page.evaluate(() => {
       window.__mock.state.aiProviders = [window.__mock.fixtures.aiProviderFixture({ id: 'text', name: 'DeepSeek' })]
       window.__mock.state.training.captionError = '「助手和漫画」用的语言模型看不了图片。'
+      window.__mock.state.training.captionNoPictures = true
     })
     await app.start()
     await page.getByRole('button', { name: '自动写描述' }).click()
     await expect.poll(() => page.locator('[data-caption-problem]').textContent()).toContain('「助手和漫画」用的语言模型看不了图片。')
+    // The model answered that it takes no pictures: the way out is picking another where models are chosen.
+    expect(await page.getByRole('button', { name: '连接语言模型' }).count()).toBe(0)
+    await page.getByRole('button', { name: '换一个模型' }).click()
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#/settings/llm')
+  })
+
+  it('offers 连接语言模型 when the descriptions failed for another reason', async () => {
+    const page = await app.open({ scenario: 'trainings', route: '/training/tp-aming', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.aiProviders = [window.__mock.fixtures.aiProviderFixture({ id: 'text', name: 'DeepSeek' })]
+      window.__mock.state.training.captionError = '描述没有写成。请确认语言模型能连上，稍后再试。'
+    })
+    await app.start()
+    await page.getByRole('button', { name: '自动写描述' }).click()
+    await expect.poll(() => page.locator('[data-caption-problem]').textContent()).toContain('描述没有写成')
     await expect.poll(() => page.getByRole('button', { name: '连接语言模型' }).isVisible()).toBe(true)
   })
 

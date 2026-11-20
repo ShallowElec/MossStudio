@@ -282,5 +282,9 @@ describe('设置 › 语言模型', () => {
     // Only the services that can read pictures for 解析 and 拆成区域.
     expect(await dialog.getByLabel('接口类型').locator('option').allTextContents()).toEqual(['OpenAI 兼容', 'Anthropic'])
     expect(await dialog.getByRole('button', { name: 'Ollama (local)' }).count()).toBe(0)
+    // Text-only presets are not offered for seeing pictures.
+    expect(await dialog.getByRole('button', { name: 'DeepSeek' }).count()).toBe(0)
+    expect(await dialog.getByRole('button', { name: 'Moonshot' }).count()).toBe(0)
+    expect(await dialog.getByRole('button', { name: 'OpenAI', exact: true }).count()).toBe(1)
   })
 })

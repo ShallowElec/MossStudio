@@ -1,5 +1,6 @@
 import { ChevronLeft, Play } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Ipc } from '@shared/channels'
 import type { AiProviderInfo } from '@shared/ai'
 import {
@@ -18,6 +19,7 @@ import { call } from '../../lib/api'
 import { Notice } from '../../components/common/Notice'
 import { Advanced, Button, FieldLabel, Input, Segmented, Spinner, useToast } from '../../components/ui'
 import { ProviderDialog, useModelGate } from '../../components/common/ProviderDialog'
+import { sectionPath } from '../settings/sections'
 import {
   LENGTH_LABEL,
   advancedSummary,
@@ -79,6 +81,8 @@ export function Editor({
   const [advancedOpen, setAdvancedOpen] = useState(() => readPreference(ADVANCED_KEY) === '1')
   const [captioning, setCaptioning] = useState(false)
   const [captionError, setCaptionError] = useState<string | null>(null)
+  const [noPictures, setNoPictures] = useState(false)
+  const navigate = useNavigate()
   const [providers, setProviders] = useState<AiProviderInfo[] | null>(null)
   const [connecting, setConnecting] = useState(false)
   const gate = useModelGate()
@@ -175,10 +179,12 @@ export function Editor({
   async function autoCaption(): Promise<void> {
     setCaptioning(true)
     setCaptionError(null)
+    setNoPictures(false)
     try {
       const result = await call<TrainingCaptionResult>(Ipc.trainingCaptionAuto, { id: initial.id })
       if (result.error) {
         setCaptionError(result.error)
+        setNoPictures(Boolean(result.noPictures))
         setProviders(await call<AiProviderInfo[]>(Ipc.aiProvidersList).catch(() => []))
       } else {
         toast.push(
@@ -348,7 +354,12 @@ export function Editor({
               tone="warn"
               data-caption-problem
               action={
-                providers !== null ? (
+                // A model that takes no pictures is swapped where the models are chosen; else connect one.
+                noPictures ? (
+                  <Button size="xs" onClick={() => void navigate(sectionPath('llm'))}>
+                    换一个模型
+                  </Button>
+                ) : providers !== null ? (
                   <Button size="xs" onClick={() => setConnecting(true)}>
                     连接语言模型
                   </Button>

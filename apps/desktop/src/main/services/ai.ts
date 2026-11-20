@@ -17,8 +17,10 @@ import type {
 } from '@shared/ai'
 import { agentCardSchema, makeCard, planStepSchema, type AgentCard, type AgentCardAnswer, type PlanStep } from '@shared/agent/cards'
 import { MODE_RULES, TOOL_RULES } from '@shared/agent/registry'
+import { Events } from '@shared/channels'
 import { paths } from '../lib/paths'
 import { codedError } from '../lib/codedError'
+import { emit } from '../lib/events'
 
 interface StoredProvider extends AiProviderInfo {
   apiKey: string
@@ -793,13 +795,27 @@ function errorText(body: unknown, status: number): string {
   return value?.error?.message ?? value?.message ?? `HTTP ${status}`
 }
 
+/**
+ * Tell every window that the connections changed. No payload: events also reach
+ * the LAN web page, and an address may carry credentials. Views ask again.
+ */
+export function providersChanged(): void {
+  emit(Events.aiProviders, null)
+}
+
+/** Whether an error text is a provider saying its model takes no pictures (not a passing failure). */
+export function refusesImages(message: string): boolean {
+  return NO_IMAGE_INPUT.test(message)
+}
+
 /** Remember that this provider's model takes no pictures, so 看图 stops offering it. */
-function markNoImageInput(providerId: string): void {
+export function markNoImageInput(providerId: string): void {
   const store = load()
   const provider = store.providers.find((item) => item.id === providerId)
   if (!provider || provider.noImageInput) return
   provider.noImageInput = true
   save(store)
+  providersChanged()
 }
 
 /** One picture and one question to the provider, answered as plain text (no tools, no streaming). */

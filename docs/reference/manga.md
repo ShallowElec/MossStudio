@@ -14,7 +14,7 @@ One series is one `MangaSeries` (`shared/manga/model.ts`, zod schemas `mangaSeri
 
 | Part | Field | Holds |
 | --- | --- | --- |
-| Series | `title`, `logline`, `readingDirection` (`rtl` \| `ltr`), `providerId` | Name, synopsis, page order, the language model used for storyboard and memory (absent: 设置 › 语言模型 › 助手和漫画, resolved by main for `ai:complete`) |
+| Series | `title`, `logline`, `readingDirection` (`rtl` \| `ltr`), `providerId` | Name, synopsis, page order, the language model used for storyboard and memory (absent: 设置 › 语言模型 › 助手和漫画, resolved by main for `ai:complete`; series from before that section have the connection they used pinned here) |
 | 画风 | `style` | Description, negative description, LoRA, `monochrome` (成品为纯黑白), model (`modelBundleId`, absent = the one 创作 uses), steps and CFG |
 | 人物卡 | `characters[]` | `appearance` (never changes), `personality` (language model only), `triggerWords`, `references` (up to 8), `referenceStrength` (参考强度, 0.1 to 1, absent = 1), `outfits` with `defaultOutfitId`, `adapters` |
 | 章节 | `chapters[]` | `number`, `title`, `outline`, `summary` (剧情记忆), `pages` |

@@ -62,6 +62,25 @@ export function listSeries(): MangaSeriesSummary[] {
   }
 }
 
+/**
+ * Before 设置 › 语言模型, a series without its own model used the newest
+ * connection. The settings migration pins that one on such series once, so they
+ * keep it when 助手和漫画 becomes the default. `updatedAt` is left alone.
+ */
+export function pinSeriesProvider(providerId: string): void {
+  let names: string[]
+  try {
+    names = readdirSync(root())
+  } catch {
+    return // no series yet
+  }
+  for (const name of names) {
+    const id = SERIES_FILE.exec(name)?.[1]
+    const series = id ? readSeries(id) : null
+    if (series && !series.providerId) writeSeries({ ...series, providerId })
+  }
+}
+
 export function getSeries(id: string): MangaSeries | null {
   return readSeries(id)
 }

@@ -6,7 +6,7 @@ import { Events, Ipc } from '@shared/channels'
 import { schemas } from '@shared/schemas'
 import { trainingSchemas } from '@shared/training'
 import { resolveToolset, toolDefinitions } from '@shared/agent/registry'
-import { languageProvider, type AgentMode, type AiToolCall, type AiToolResult } from '@shared/ai'
+import type { AgentMode, AiToolCall, AiToolResult } from '@shared/ai'
 import type { IpcResult, Settings } from '@shared/types'
 import { emit } from './lib/events'
 import { ensureDirs, paths } from './lib/paths'
@@ -39,17 +39,8 @@ import { updaterApi } from './update'
 import { clearEngineAutoUpdateHold, recordManualEngineInstall, startEngineAutoUpdate } from './services/engineAutoUpdate'
 import { cancelMossInferDownload, getMossInferDownloadState, listMossInferReleases } from './services/mossInferDownload'
 import { getWebAccessInfo, startBackend, stopBackend } from './services/backend'
-import {
-  answerAgentCard,
-  chat,
-  complete,
-  listConversations,
-  listProviders,
-  removeConversation,
-  removeProvider,
-  renameConversation,
-  saveProvider,
-} from './services/ai'
+import { answerAgentCard, chat, listConversations, listProviders, removeConversation, renameConversation } from './services/ai'
+import { completeWithDefault, connectProvider, disconnectProvider } from './services/languageModels'
 import {
   cancelGbcJob,
   cancelParse,
@@ -260,15 +251,10 @@ export function registerIpc(): void {
 
   handle(Ipc.aiProvidersList, null, () => listProviders())
 
-  handle(Ipc.aiProviderSave, schemas.aiProviderSave, (input) => {
-    const saved = saveProvider(input)
-    emit(Events.aiProviders, listProviders())
-    return saved
-  })
+  handle(Ipc.aiProviderSave, schemas.aiProviderSave, (input) => connectProvider(input))
 
   handle(Ipc.aiProviderRemove, schemas.projectId, ({ id }) => {
-    removeProvider(id)
-    emit(Events.aiProviders, listProviders())
+    disconnectProvider(id)
     return true
   })
 
@@ -281,10 +267,7 @@ export function registerIpc(): void {
 
   handle(Ipc.aiConversationRename, schemas.aiConversationTitle, ({ id, title }) => renameConversation(id, title))
 
-  // A request that names no model (a 漫画 series that never picked one) goes to 设置's 助手和漫画 model.
-  handle(Ipc.aiComplete, schemas.aiComplete, (input) =>
-    complete({ ...input, providerId: input.providerId ?? languageProvider(listProviders(), getSettings().languageProviderId)?.id }),
-  )
+  handle(Ipc.aiComplete, schemas.aiComplete, (input) => completeWithDefault(input))
 
   handle(Ipc.aiToolResult, schemas.aiToolResult, ({ callId, result }) => {
     pendingToolCalls.get(callId)?.(result)

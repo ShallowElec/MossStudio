@@ -29,7 +29,7 @@ import { emit } from '../lib/events'
 import { paths } from '../lib/paths'
 import { firstLine, run, runStream, tail, type RunResult } from '../lib/run'
 import { installPackages } from './packageInstall'
-import { complete, getProviderSecret, listProviders } from './ai'
+import { complete, getProviderSecret, listProviders, markNoImageInput, refusesImages } from './ai'
 import { createGbcVersion, listGbcBranches, listGbcVersions } from './gbcGit'
 import { pickPython, resolveTorchIndex } from './runtimes'
 import { getSettings, updateSettings } from './settings'
@@ -400,13 +400,17 @@ export async function runGbc(input: GbcRunInput, control: GbcRunControl = {}): P
   if (result.code !== 0) {
     const failures = join(out, 'graphs.failures.jsonl')
     const detail = tail(result.stderr || result.stdout, 20) || (existsSync(failures) ? tail(readFileSync(failures, 'utf8'), 10) : '')
+    // The provider's own words reach the log; when they say the model takes no pictures, 看图 stops offering it.
+    if (refusesImages(detail)) markNoImageInput(input.providerId)
     throw new Error(result.timedOut ? 'GBC 运行超过 30 分钟，已停止' : `GBC 运行失败：${detail || `exit ${result.code}`}`)
   }
   if (!existsSync(graphsFile)) throw new Error('GBC 没有输出 graph')
   const lines = readFileSync(graphsFile, 'utf8').split('\n').filter(Boolean)
   if (!lines.length) {
     const failures = join(out, 'graphs.failures.jsonl')
-    throw new Error(`GBC 没有输出 graph${existsSync(failures) ? `：${tail(readFileSync(failures, 'utf8'), 6)}` : ''}`)
+    const failed = existsSync(failures) ? tail(readFileSync(failures, 'utf8'), 6) : ''
+    if (refusesImages(failed)) markNoImageInput(input.providerId)
+    throw new Error(`GBC 没有输出 graph${failed ? `：${failed}` : ''}`)
   }
   const statsFile = join(out, 'graphs.stats.jsonl')
   const stats = existsSync(statsFile)

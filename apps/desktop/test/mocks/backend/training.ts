@@ -7,6 +7,7 @@
  *   state.training.datasets[id]     a training's pictures
  *   state.training.samples[id]      a training's sample pictures per step
  *   state.training.captionError     自动写描述 answers this error instead of writing descriptions
+ *   state.training.captionNoPictures  …and says the model takes no pictures
  *   state.training.saveError        saving a chosen step fails with this reason
  *   state.training.startError       after 'starting', the start fails with this reason (E_TRAINING_UPLOAD) and goes back to 'draft'
  *   state.training.prepareStepMs    pause between the steps training:prepare plays (download, trainer, environment)
@@ -42,6 +43,8 @@ export interface MockTrainingState {
   datasets: Record<string, DatasetImage[]>
   samples: Record<string, TrainingSamples>
   captionError: string | null
+  /** With captionError: the model answered that it takes no pictures. */
+  captionNoPictures: boolean
   saveError: string | null
   startError: string | null
   prepareStepMs: number
@@ -298,6 +301,7 @@ export function trainingStateFixture(patch: Partial<MockTrainingState> = {}): Mo
     datasets: {},
     samples: {},
     captionError: null,
+    captionNoPictures: false,
     saveError: null,
     startError: null,
     prepareStepMs: 400,
@@ -648,7 +652,7 @@ const handlers: Array<[string, Handler]> = [
       const project = find(context.state, id)
       assertPicturesEditable(project)
       const error = context.state.training.captionError
-      if (error) return { written: 0, failed: 0, error }
+      if (error) return { written: 0, failed: 0, error, ...(context.state.training.captionNoPictures ? { noPictures: true } : {}) }
       let written = 0
       context.state.training.datasets[id] = imagesOf(context, id).map((image) => {
         if (image.caption?.trim()) return image

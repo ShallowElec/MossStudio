@@ -113,15 +113,19 @@ export interface AiToolCallRequest {
   mode?: AgentMode
 }
 
-export const AI_PROVIDER_PRESETS: Array<{
+export interface AiProviderPreset {
   kind: AiProviderKind
   name: string
   baseUrl: string
   model: string
-}> = [
+  /** The preset's model reads text only, so 看图 does not offer it. */
+  textOnly?: true
+}
+
+export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
   { kind: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1-mini' },
-  { kind: 'openai', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-  { kind: 'openai', name: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { kind: 'openai', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', textOnly: true },
+  { kind: 'openai', name: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', textOnly: true },
   { kind: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5' },
   { kind: 'gemini', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash' },
   { kind: 'ollama', name: 'Ollama (local)', baseUrl: 'http://127.0.0.1:11434', model: 'llama3.1' },
@@ -136,6 +140,11 @@ export const PICTURE_KINDS: readonly AiProviderKind[] = ['openai', 'anthropic']
  */
 export function seesPictures(provider: Pick<AiProviderInfo, 'kind' | 'hasKey' | 'noImageInput'>): boolean {
   return provider.hasKey && PICTURE_KINDS.includes(provider.kind) && !provider.noImageInput
+}
+
+/** The presets the connect dialog offers: for 看图, only those whose model can see pictures through KohakuGBC. */
+export function presetsFor(vision: boolean): AiProviderPreset[] {
+  return vision ? AI_PROVIDER_PRESETS.filter((preset) => PICTURE_KINDS.includes(preset.kind) && !preset.textOnly) : AI_PROVIDER_PRESETS
 }
 
 /** The model for 助手和漫画 (the assistant, 漫画 storyboard, training captions): the chosen one, else the first connected. */

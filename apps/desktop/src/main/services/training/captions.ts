@@ -7,9 +7,8 @@ import { nativeImage } from 'electron'
 import type { TrainingCaptionResult, TrainingKind } from '@shared/training'
 import { errorCode } from '../../lib/codedError'
 import { readImageHeader } from '../imageHeaders'
-import { languageProvider } from '@shared/ai'
-import { askAboutImage, E_NO_IMAGE_INPUT, listProviders } from '../ai'
-import { getSettings } from '../settings'
+import { askAboutImage, E_NO_IMAGE_INPUT } from '../ai'
+import { defaultLanguageProviderId } from '../languageModels'
 import { scanDataset, writeCaptions } from './dataset'
 import { getTrainingProject } from './store'
 
@@ -66,7 +65,7 @@ async function pictureForSending(path: string): Promise<{ data: Uint8Array; mime
 
 export async function autoCaption(id: string, names?: string[]): Promise<TrainingCaptionResult> {
   const project = await getTrainingProject(id)
-  const providerId = languageProvider(listProviders(), getSettings().languageProviderId)?.id
+  const providerId = defaultLanguageProviderId()
   if (!providerId) return { written: 0, failed: 0, error: NO_PROVIDER }
   const dataset = await scanDataset(id)
   const wanted = names ? new Set(names) : null
@@ -101,7 +100,7 @@ export async function autoCaption(id: string, names?: string[]): Promise<Trainin
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker))
   await writeCaptions(id, written)
-  if (noImageInput && !written.size) return { written: 0, failed: 0, error: NO_IMAGE_INPUT }
+  if (noImageInput && !written.size) return { written: 0, failed: 0, error: NO_IMAGE_INPUT, noPictures: true }
   const skipped = noImageInput ? targets.length - written.size - failed : 0
   return { written: written.size, failed: failed + skipped, error: written.size === 0 && failed > 0 ? ALL_FAILED : null }
 }

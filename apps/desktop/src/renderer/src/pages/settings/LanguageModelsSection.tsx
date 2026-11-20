@@ -73,7 +73,7 @@ export function LanguageModelsSection(): React.JSX.Element {
                 <Button tone="ghost" aria-label={`编辑 ${provider.name}`} onClick={() => setDialog({ open: true, editing: provider })}>
                   编辑
                 </Button>
-                <Button tone="ghost" aria-label={`移除 ${provider.name}`} onClick={() => setRemoving(provider)}>
+                <Button tone="ghost-danger" aria-label={`移除 ${provider.name}`} onClick={() => setRemoving(provider)}>
                   移除
                 </Button>
               </Row>

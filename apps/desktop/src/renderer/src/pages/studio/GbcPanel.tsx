@@ -1,6 +1,6 @@
 import { ImagePlus, Square, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { visionProvider } from '@shared/ai'
+import { seesPictures, visionProvider } from '@shared/ai'
 import { Events, Ipc } from '@shared/channels'
 import type { GbcLanguage, GbcPicture, GbcPreset, GbcProgram, GbcSetupProgress } from '@shared/gbc'
 import type { ProjectCanvas } from '@shared/types'
@@ -289,7 +289,13 @@ export function GbcPanel({
               size="sm"
               data-gbc-run
               disabled={!canRun}
-              onClick={() => void gate.require({ action: '解析', vision: true }, (connected) => start(false, connected?.id))}
+              onClick={() =>
+                void gate.require({ action: '解析', vision: true }, (connected, providers) => {
+                  // The picker's model while it can still see pictures, else what 设置 chose, from the list as it is now.
+                  const picked = providers.find((item) => item.id === providerId && seesPictures(item))
+                  start(false, connected?.id ?? picked?.id ?? visionProvider(providers, settings?.gbcProviderId)?.id)
+                })
+              }
             >
               解析
             </Button>

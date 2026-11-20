@@ -24,7 +24,14 @@ import { combinationBundle } from '@shared/modelCombos'
 import { isModelFileName } from '@shared/modelImport'
 import { isSharedModelId } from '@shared/sharedModels'
 import { MANGA_SCHEMA_VERSION, seriesSummary, type MangaSeries, type MangaSeriesSave } from '@shared/manga/model'
-import type { AiChatInput, AiConversationInfo, AiMessage, AiProviderInfo, AiProviderInput } from '@shared/ai'
+import {
+  languageProvider,
+  type AiChatInput,
+  type AiConversationInfo,
+  type AiMessage,
+  type AiProviderInfo,
+  type AiProviderInput,
+} from '@shared/ai'
 import type { WebAccessInfo } from '@shared/backend'
 import type { EngineHello } from '@shared/engineProtocol'
 import type { UpdateBusyReason, UpdateRestartResult, UpdaterState } from '@shared/update'
@@ -879,7 +886,13 @@ function defaultHandlers(): Map<string, Handler> {
     return true
   })
   h.set(Ipc.mangaExport, (payload) => `/fixture/export/${p<{ title: string }>(payload).title}`)
-  h.set(Ipc.aiComplete, (_, { state }) => {
+  h.set(Ipc.aiComplete, (payload, { state }) => {
+    // As main: the named model, else 助手和漫画; a named model that is gone fails.
+    const { providerId } = p<{ providerId?: string }>(payload)
+    const provider = providerId
+      ? state.aiProviders.find((item) => item.id === providerId)
+      : languageProvider(state.aiProviders, state.settings.languageProviderId)
+    if (!provider) throw new MockIpcError('E_AI', '还没有连接语言模型。请在 设置 › 语言模型 里连接一个。')
     const answer = state.aiCompletions.shift()
     if (answer === undefined) throw new MockIpcError('E_AI', '语言模型没有回答，请再试一次')
     return answer
@@ -941,6 +954,7 @@ function defaultHandlers(): Map<string, Handler> {
     const input = p<AiProviderInput>(payload)
     const id = input.id ?? `provider-${state.aiProviders.length + 1}`
     const existing = state.aiProviders.find((item) => item.id === id)
+    const inEffect = state.aiProviders.find((item) => item.id === state.settings.languageProviderId) ? null : state.aiProviders[0]
     const saved: AiProviderInfo = {
       id,
       name: input.name.trim(),
@@ -951,13 +965,18 @@ function defaultHandlers(): Map<string, Handler> {
       hasKey: Boolean(input.apiKey || existing?.hasKey),
     }
     state.aiProviders = [saved, ...state.aiProviders.filter((item) => item.id !== id)]
-    emit(Events.aiProviders, state.aiProviders)
+    // As main: with nothing valid chosen, the model in effect becomes 助手和漫画.
+    if (inEffect !== null) {
+      state.settings = { ...state.settings, languageProviderId: inEffect?.id ?? saved.id }
+      emit(Events.settingsChanged, state.settings)
+    }
+    emit(Events.aiProviders, null)
     return saved
   })
   h.set(Ipc.aiProviderRemove, (payload, { state, emit }) => {
     const { id } = p<{ id: string }>(payload)
     state.aiProviders = state.aiProviders.filter((item) => item.id !== id)
-    emit(Events.aiProviders, state.aiProviders)
+    emit(Events.aiProviders, null)
     return true
   })
   h.set(Ipc.aiConversations, (_, { state }) => state.conversations)

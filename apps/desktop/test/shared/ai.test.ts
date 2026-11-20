@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AI_PROVIDER_PRESETS, languageProvider, seesPictures, visionProvider, type AiProviderInfo } from '@shared/ai'
+import { AI_PROVIDER_PRESETS, languageProvider, presetsFor, seesPictures, visionProvider, type AiProviderInfo } from '@shared/ai'
 import { schemas } from '@shared/schemas'
 
 describe('AI_PROVIDER_PRESETS', () => {
@@ -78,5 +78,12 @@ describe('visionProvider', () => {
     expect(visionProvider(list, 'text')?.id).toBe('a')
     expect(visionProvider(list, 'local')?.id).toBe('a')
     expect(visionProvider([connection('local', { kind: 'ollama' })], null)).toBeUndefined()
+  })
+})
+
+describe('presetsFor', () => {
+  it('offers 看图 only presets whose model sees pictures through KohakuGBC', () => {
+    expect(presetsFor(true).map((preset) => preset.name)).toEqual(['OpenAI', 'Anthropic'])
+    expect(presetsFor(false)).toEqual(AI_PROVIDER_PRESETS)
   })
 })

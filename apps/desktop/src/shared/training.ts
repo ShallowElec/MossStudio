@@ -265,4 +265,6 @@ export interface TrainingCaptionResult {
   failed: number
   /** Set when nothing could be written, e.g. no 语言模型 that can read pictures. */
   error: string | null
+  /** The model answered that it takes no pictures: the way out is another one in 设置 › 语言模型. */
+  noPictures?: boolean
 }

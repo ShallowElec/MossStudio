@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTempDataRoot } from '@test/helpers/tempDir'
 import { settingsFixture } from '@test/mocks/backend/fixtures'
+import { mangaSeriesFixture } from '@test/mocks/backend/manga'
 
 const root = useTempDataRoot()
 
@@ -247,7 +248,52 @@ describe('getSettings', () => {
       join(root(), 'ai', 'agent.json'),
       JSON.stringify({ providers: [provider('newest'), provider('older')], conversations: [] }),
     )
+    writeSettings({ theme: 'dark' })
     expect((await load()).getSettings().languageProviderId).toBe('newest')
+  })
+
+  it('pins the newest connection on 漫画 series that had no model of their own, once', async () => {
+    const provider = (id: string) => ({
+      id,
+      name: id,
+      kind: 'openai',
+      baseUrl: 'https://llm.test',
+      model: 'm',
+      temperature: 0.7,
+      hasKey: true,
+      apiKey: 'k',
+    })
+    mkdirSync(join(root(), 'ai'), { recursive: true })
+    writeFileSync(
+      join(root(), 'ai', 'agent.json'),
+      JSON.stringify({
+        providers: [provider('newest'), provider('older')],
+        conversations: [{ id: 'c', title: 't', providerId: 'older', messages: [], createdAt: 'x', updatedAt: '2026-11-02T00:00:00Z' }],
+      }),
+    )
+    const manga = join(root(), 'manga')
+    mkdirSync(manga, { recursive: true })
+    const series = (id: string, providerId?: string) =>
+      writeFileSync(
+        join(manga, `${id}.json`),
+        JSON.stringify(mangaSeriesFixture({ id, providerId, updatedAt: '2026-11-01T00:00:00.000Z' })),
+      )
+    const read = (id: string) => JSON.parse(readFileSync(join(manga, `${id}.json`), 'utf8')) as { providerId?: string; updatedAt: string }
+    series('manga-unset')
+    series('manga-own', 'older')
+    writeSettings({ theme: 'dark' })
+
+    // The assistant keeps the last conversation's model; 漫画 keeps the newest, as before.
+    expect((await load()).getSettings().languageProviderId).toBe('older')
+    expect(read('manga-unset')).toMatchObject({ providerId: 'newest', updatedAt: '2026-11-01T00:00:00.000Z' })
+    expect(read('manga-own').providerId).toBe('older')
+    expect(JSON.parse(readFileSync(join(root(), 'settings.json'), 'utf8')).languageProviderId).toBe('older')
+
+    // Written at once: a series made afterwards follows 助手和漫画 and is never pinned.
+    vi.resetModules()
+    series('manga-later')
+    await load().then((module) => module.getSettings())
+    expect(read('manga-later').providerId).toBeUndefined()
   })
 
   it('keeps a language model chosen in 设置, and has none before any is connected', async () => {

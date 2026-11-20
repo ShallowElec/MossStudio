@@ -129,8 +129,8 @@ export function GbcLabel({
         />
         <Button
           onClick={() =>
-            void gate.require({ action: '打标', vision: true }, (connected) =>
-              candidates.length > 10 ? setConfirming(true) : start(connected?.id),
+            void gate.require({ action: '打标', vision: true }, (connected, providers) =>
+              candidates.length > 10 ? setConfirming(true) : start(connected?.id ?? visionProvider(providers, settings?.gbcProviderId)?.id),
             )
           }
           disabled={running || !candidates.length || Boolean(gbc.blocker)}

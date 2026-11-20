@@ -82,14 +82,14 @@ describe('automatic descriptions', () => {
   it('stops and says so when the model cannot read pictures, and counts other failures', async () => {
     const { captions, project } = await setup('openai')
     reply = () => json({ error: { message: 'This model does not support image input' } }, 400)
-    expect(await captions.autoCaption(project.id)).toEqual({ written: 0, failed: 0, error: captions.NO_IMAGE_INPUT })
+    expect(await captions.autoCaption(project.id)).toEqual({ written: 0, failed: 0, error: captions.NO_IMAGE_INPUT, noPictures: true })
     // A picture the provider cannot take is a failed description, not a model that cannot see.
     reply = () => json({ error: { message: 'image too large: 8 MB, the limit is 5 MB' } }, 400)
     expect(await captions.autoCaption(project.id, ['a.png'])).toEqual({ written: 0, failed: 1, error: captions.ALL_FAILED })
     reply = () => json({ error: { message: 'Invalid image data' } }, 400)
     expect((await captions.autoCaption(project.id, ['a.png'])).error).toBe(captions.ALL_FAILED)
     reply = () => json({ error: { message: 'Vision is not supported for this model' } }, 400)
-    expect((await captions.autoCaption(project.id, ['a.png'])).error).toBe(captions.NO_IMAGE_INPUT)
+    expect(await captions.autoCaption(project.id, ['a.png'])).toMatchObject({ error: captions.NO_IMAGE_INPUT, noPictures: true })
     reply = () => json({ error: { message: 'overloaded' } }, 503)
     expect(await captions.autoCaption(project.id, ['a.png', 'b.png'])).toEqual({ written: 0, failed: 2, error: captions.ALL_FAILED })
   })

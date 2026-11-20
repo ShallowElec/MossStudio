@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
-import { AI_PROVIDER_PRESETS, PICTURE_KINDS, seesPictures, type AiProviderInfo, type AiProviderKind } from '@shared/ai'
+import { PICTURE_KINDS, presetsFor, seesPictures, type AiProviderInfo, type AiProviderKind } from '@shared/ai'
 import { Ipc } from '@shared/channels'
 import { Button, Field, FieldLabel, IconButton, Input, Modal, Select, useToast } from '../ui'
 import { call } from '../../lib/api'
@@ -154,7 +154,7 @@ export function ProviderDialog({
           {listed.length ? <FieldLabel as="h3">{draft.id ? `编辑「${draft.name}」` : '添加新的'}</FieldLabel> : null}
           {!draft.id ? (
             <div className="flex flex-wrap gap-1.5">
-              {AI_PROVIDER_PRESETS.filter((preset) => kinds.includes(preset.kind)).map((preset) => (
+              {presetsFor(visionOnly).map((preset) => (
                 <Button
                   key={preset.name}
                   tone="secondary"
@@ -209,22 +209,33 @@ export function hasModelFor(need: ModelNeed, providers: readonly AiProviderInfo[
   return need.vision ? providers.some(seesPictures) : providers.length > 0
 }
 
+/** What a gated action is handed: the connection just made, if any, and the connections as they are now. */
+export type GatedAction = (connected: AiProviderInfo | undefined, providers: AiProviderInfo[]) => void
+
 /**
  * An action that needs a language model stays clickable: `require` runs it at
  * once when a suitable model is connected, else opens ProviderDialog right
- * there and runs it with the new connection. Cancelling runs nothing.
+ * there and runs it with the new connection. Cancelling runs nothing. A click
+ * while the check is still out is ignored, so a double click sends one request.
  */
 export function useModelGate(): {
-  require: (need: ModelNeed & { action: string }, run: (connected?: AiProviderInfo) => void) => Promise<void>
+  require: (need: ModelNeed & { action: string }, run: GatedAction) => Promise<void>
   dialog: React.JSX.Element
 } {
-  const [asking, setAsking] = useState<{ need: ModelNeed; run: (connected?: AiProviderInfo) => void; open: boolean } | null>(null)
+  const [asking, setAsking] = useState<{ need: ModelNeed; run: GatedAction; open: boolean } | null>(null)
+  const checking = useRef(false)
 
-  const require = useCallback(async (need: ModelNeed & { action: string }, run: (connected?: AiProviderInfo) => void) => {
-    // Asked at the click: another page may have connected or removed one since this one loaded.
-    const providers = await call<AiProviderInfo[]>(Ipc.aiProvidersList).catch(() => [])
-    if (hasModelFor(need, providers)) run()
-    else setAsking({ need, run, open: true })
+  const require = useCallback(async (need: ModelNeed & { action: string }, run: GatedAction) => {
+    if (checking.current) return
+    checking.current = true
+    try {
+      // Asked at the click: another page may have connected or removed one since this one loaded.
+      const providers = await call<AiProviderInfo[]>(Ipc.aiProvidersList).catch(() => [])
+      if (hasModelFor(need, providers)) run(undefined, providers)
+      else setAsking({ need, run, open: true })
+    } finally {
+      checking.current = false
+    }
   }, [])
 
   const dialog = (
@@ -233,7 +244,7 @@ export function useModelGate(): {
       need={asking?.need}
       // The need stays while the dialog closes, so its title does not change on the way out.
       onClose={() => setAsking((current) => (current ? { ...current, open: false } : null))}
-      onConnected={(provider) => asking?.run(provider)}
+      onConnected={(provider) => asking?.run(provider, [provider])}
     />
   )
   return { require, dialog }
