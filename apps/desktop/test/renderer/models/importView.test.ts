@@ -106,5 +106,7 @@ describe('importTitle and importProgress', () => {
     expect(importTitle(checking, [])).toBe('正在识别 3 个文件…')
     expect(importProgress(checking)).toEqual({ done: 1, total: 3, percent: 33 })
     expect(importTitle(null, [])).toBe('导入模型')
+    // Nothing is being checked while there is no engine.
+    expect(importTitle({ ...checking, phase: 'waiting-engine' }, [])).toBe('3 个文件等引擎来识别')
   })
 })

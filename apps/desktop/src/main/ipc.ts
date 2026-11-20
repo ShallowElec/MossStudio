@@ -817,7 +817,6 @@ export function registerIpc(): void {
   })
   handle(Ipc.modelsImportPick, schemas.modelsImportPick, async ({ kind }, event) => {
     await startupModelSources
-    const owner = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions =
       kind === 'files'
         ? {
@@ -826,25 +825,23 @@ export function registerIpc(): void {
             filters: [{ name: '模型文件', extensions: ['safetensors', 'sft', 'gguf', 'ckpt', 'pt', 'pth', 'bin'] }],
           }
         : { title: '选择模型文件夹', properties: ['openDirectory'] }
-    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    const result = await showOpenDialogFor(event.sender, options)
     if (result.canceled || !result.filePaths.length) return null
     // Chosen in the dialog: only such a place may be on the network.
     return startModelImport(result.filePaths, { picked: true, hooks: importHooks })
   })
   handle(Ipc.modelsImportState, null, () => modelImportState())
-  handle(Ipc.modelsRelocate, schemas.modelsRelocate, ({ bundleId }, event) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    return relocateBundle(bundleId, async (title, near) => {
-      const options: Electron.OpenDialogOptions = {
+  handle(Ipc.modelsRelocate, schemas.modelsRelocate, ({ bundleId }, event) =>
+    relocateBundle(bundleId, async (title, near) => {
+      const result = await showOpenDialogFor(event.sender, {
         title,
         ...(near ? { defaultPath: near } : {}),
         properties: ['openFile'],
         filters: [{ name: '模型文件', extensions: ['safetensors', 'sft', 'gguf'] }],
-      }
-      const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+      })
       return result.canceled ? null : (result.filePaths[0] ?? null)
-    })
-  })
+    }),
+  )
   handle(Ipc.modelsForget, schemas.modelsForget, ({ bundleId }) => forgetBundle(bundleId))
 
   // Read-only discovery for a folder the user already has (e.g. a ComfyUI models

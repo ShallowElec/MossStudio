@@ -27,10 +27,12 @@ export function fileStem(path: string): string {
 }
 
 export interface InspectReport {
+  path?: unknown
   kind?: unknown
   loadable?: unknown
   precision?: unknown
   quantization?: unknown
+  tiers?: unknown
   note?: unknown
   base_model?: unknown
   control_kinds?: unknown
@@ -40,6 +42,8 @@ export interface Recognition {
   /** The role the engine loads the file in; null when it cannot use it. */
   kind: 'dit' | 'text_encoder' | 'vae' | 'lora' | 'control_adapter' | null
   precision?: string
+  /** The `load` tiers the engine accepts for a main model: its own decision, not a guess from the file name. */
+  tiers?: string[]
   /** A GGUF main model, converted by the engine the first time it loads. */
   converts?: boolean
   baseModel?: string
@@ -55,15 +59,17 @@ export function catalogPrecision(precision: string): string {
 }
 
 /** What an `inspect` answer means for a person: the role it loads in, or why it cannot be used. */
-export function recognize(report: InspectReport, fileName: string): Recognition {
+export function recognize(report: InspectReport, filePath: string): Recognition {
   const kind = text(report.kind)
-  const note = text(report.note)
-  const gguf = /\.gguf$/i.test(fileName) || /^gguf/i.test(text(report.quantization))
+  const note = withoutPath(text(report.note), [text(report.path), filePath])
+  const gguf = /\.gguf$/i.test(filePath) || /^gguf/i.test(text(report.quantization))
   if (report.loadable === true && (kind === 'dit' || kind === 'text_encoder' || kind === 'vae')) {
     const precision = text(report.precision)
+    const tiers = Array.isArray(report.tiers) ? report.tiers.filter((tier): tier is string => typeof tier === 'string') : []
     return {
       kind,
       ...(precision ? { precision: catalogPrecision(precision) } : {}),
+      ...(kind === 'dit' && tiers.length ? { tiers } : {}),
       ...(gguf && kind === 'dit' ? { converts: true } : {}),
     }
   }
@@ -81,17 +87,34 @@ export function recognize(report: InspectReport, fileName: string): Recognition 
   return { kind: null, problem: problemOf(kind, note, gguf) }
 }
 
-/** Why the engine refused a file, read from its kind and note. The note is the loader's own message. */
+/**
+ * The loader's note starts with the file's path (`<path> is not a supported MOSS-Image DiT (found …)`),
+ * and a name like `flux1-dev-fp8` must not read as the reason: the path and the file name are taken out.
+ */
+function withoutPath(note: string, paths: readonly string[]): string {
+  let rest = note
+  for (const path of paths.filter(Boolean)) {
+    const name = path.split(/[\\/]/).pop() ?? path
+    rest = rest.split(path).join(' ').split(name).join(' ')
+  }
+  return rest
+}
+
+/**
+ * Why the engine refused a file, read from its kind and note (the loader's own message, its path taken out).
+ * Only a MOSS-Image part has a version to name (FP8, FP16, NVFP4, a GGUF type); a file the engine does not
+ * know (`unknown`) is another model, whatever its name says.
+ */
 function problemOf(kind: string, note: string, gguf: boolean): ModelImportProblem {
-  if (/pickle/i.test(note)) return 'format'
+  if (kind === 'lora' || kind === 'control_adapter') return 'lora-other'
+  if (kind !== 'dit' && kind !== 'text_encoder' && kind !== 'vae') return 'not-moss'
   if (/F8_E[45]M[23]|\bFP8\b|float8/i.test(note)) return 'fp8'
   if (/nvfp4/i.test(note)) return 'nvfp4'
   if (gguf) return 'gguf'
   // "BF16" never matches: there is no word boundary between B and F.
   if (/\bF16\b|\bFP16\b|float16/i.test(note)) return 'fp16'
-  if (kind === 'lora' || kind === 'control_adapter') return 'lora-other'
-  if (kind === 'dit' || kind === 'text_encoder' || kind === 'vae') return 'unsupported'
-  return 'not-moss'
+  if (/pickle/i.test(note)) return 'format'
+  return 'unsupported'
 }
 
 /**
@@ -276,7 +299,7 @@ export function isLostOwnFile(model: Pick<ModelEntry, 'provider' | 'tags' | 'ins
 export function lostFile(
   bundle: Pick<ModelBundle, 'components'>,
   models: readonly ModelEntry[],
-): { name: string | null; path: string | null; place: 'drive' | 'file' } | null {
+): { name: string | null; path: string | null; place: 'drive' | 'file' | 'changed' } | null {
   for (const id of [bundle.components.dit, bundle.components.textEncoder, bundle.components.vae]) {
     const model = models.find((entry) => entry.id === id)
     if (model && isLostOwnFile(model)) {
@@ -290,5 +313,6 @@ export function lostFile(
 /** The Studio's blocker for a model whose own file moved: what is missing and the way out. */
 export function lostFileText(bundleName: string, lost: NonNullable<ReturnType<typeof lostFile>>): string {
   const what = lost.name ? `「${lost.name}」${lost.path ? `（${lost.path}）` : ''}` : `「${bundleName}」用到的文件`
+  if (lost.place === 'changed') return `${what}改动过了，重新找到它。`
   return lost.place === 'drive' ? `找不到${what}。插上那块硬盘，或重新找到它。` : `找不到${what}。它被移动或删除了，重新找到它。`
 }

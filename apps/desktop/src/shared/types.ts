@@ -566,11 +566,14 @@ export interface ModelEntry {
   notes?: string
   preview?: string
   localPath?: string
+  /** An own main model's `load` tiers, as the engine's `inspect` named them when it was imported. */
+  tiers?: string[]
   /**
-   * The person's own file (or a catalog part it stands in for) is not where it was added:
-   * `drive` when the disk it was on is not there, `file` when the file itself is gone.
+   * The person's own file (or a catalog part it stands in for) is not as it was added:
+   * `drive` when the disk it was on is not there, `file` when the file itself is gone,
+   * `changed` when it is there with another size or time.
    */
-  missingFile?: 'drive' | 'file'
+  missingFile?: 'drive' | 'file' | 'changed'
   installed: boolean
   installedBytes: number
 }

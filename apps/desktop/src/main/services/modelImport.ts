@@ -17,7 +17,7 @@ import { isSharedModelId } from '@shared/sharedModels'
 import type { Catalog, ModelEntry, ModelImportFile, ModelImportState, Settings } from '@shared/types'
 import { codedError } from '../lib/codedError'
 import { emit } from '../lib/events'
-import { isNetworkPath, modelPathKey } from '../lib/localPath'
+import { isNetworkPath, linksToNetwork, modelPathKey } from '../lib/localPath'
 import { paths } from '../lib/paths'
 import { withEngineRequests, type EngineRequest } from '../lib/probeEngine'
 import { registerControlAdapter } from './controlAdapters'
@@ -114,7 +114,8 @@ function row(path: string, extra: Partial<ModelImportFile>): Work {
 /** What a dropped or picked path holds: one file, a model folder, another app's install, or the model files in a folder. */
 async function expand(input: string, picked: boolean, hooks: ImportHooks): Promise<Work[]> {
   // Opening a share on Windows authenticates with the person's account: only a picked place may be one.
-  if (isNetworkPath(input) && !picked) return [row(input, { kind: 'unusable', problem: 'network' })]
+  // A dropped link is read before it is followed, so a link to a share never contacts it.
+  if (!picked && (isNetworkPath(input) || (await linksToNetwork(input)))) return [row(input, { kind: 'unusable', problem: 'network' })]
   const path = await realpath(input).catch(() => null)
   const info = path ? await stat(path).catch(() => null) : null
   if (!path || !info) return [row(input, { kind: 'unusable', problem: 'unreadable' })]
@@ -145,11 +146,24 @@ async function expand(input: string, picked: boolean, hooks: ImportHooks): Promi
   return items.length ? items : [row(path, { kind: 'unusable', problem: 'empty-folder' })]
 }
 
+/** Files still to check, other than those waiting for an engine. */
+function unfinished(): boolean {
+  return [...work.values()].some((item) => item.file.state === 'checking')
+}
+
 function run(): Promise<void> {
   running ??= recognizeAll().finally(() => {
     running = null
+    // Files dropped as the last check ended joined a run that had already decided it was done.
+    if (!stopping && unfinished()) void run()
   })
   return running
+}
+
+/** Set when the app quits: nothing more is checked, saved or downloaded. */
+let stopping = false
+export function stopModelImport(): void {
+  stopping = true
 }
 
 /** A computer whose GPUs run only 兼容模式 / AMD 原生: no engine to ask, and no single file loads there. */
@@ -158,7 +172,17 @@ function cliOnly(): boolean {
 }
 
 async function recognizeAll(): Promise<void> {
-  while (current) {
+  // Files can join while the models are made (finish awaits the disk); then the check goes round again.
+  do {
+    if (!(await checkAll())) return
+    if (!current || stopping) return
+    await finish()
+  } while (unfinished())
+}
+
+/** Checks every file not checked yet; false when the files wait for an engine. */
+async function checkAll(): Promise<boolean> {
+  while (current && !stopping) {
     const todo = [...work.values()].filter((item) => item.file.state !== 'done')
     if (!todo.length) break
     const catalog = await getCatalog(getSettings())
@@ -178,7 +202,7 @@ async function recognizeAll(): Promise<void> {
       for (const item of weights) item.file.state = 'waiting'
       current.phase = 'waiting-engine'
       publish()
-      return
+      return false
     }
     current.phase = 'checking'
     for (const item of weights) item.file.state = 'checking'
@@ -199,7 +223,7 @@ async function recognizeAll(): Promise<void> {
       }
     }
   }
-  if (current) await finish()
+  return true
 }
 
 async function checkFile(item: Work, request: EngineRequest, engineKey: string, catalog: Catalog): Promise<void> {
@@ -210,7 +234,7 @@ async function checkFile(item: Work, request: EngineRequest, engineKey: string, 
       report = await request('inspect', { path: item.file.path })
       answers.set(key, report)
     }
-    const recognition = recognize(report, item.file.name)
+    const recognition = recognize(report, item.file.path)
     // Two answers can arrive together; the lists they go into are read, changed and written one at a time.
     const step = registering.then(() => useWeights(item.file, recognition, catalog))
     registering = step.catch(() => undefined)
@@ -255,6 +279,7 @@ async function useWeights(file: ModelImportFile, recognition: Recognition, catal
       layout: 'comfyui-single-file',
       inspected: true,
       ...(recognition.precision ? { precision: recognition.precision } : {}),
+      ...(recognition.tiers ? { tiers: recognition.tiers } : {}),
       ...(match ? { catalogId: match.id } : {}),
     },
   ])
@@ -340,10 +365,12 @@ async function finish(): Promise<void> {
     const missing = bundle
       ? [...Object.values(bundle.components), bundle.support].filter((id) => !after.models.find((model) => model.id === id)?.installed)
       : []
-    if (bundle && missing.length === 1 && missing[0] === RUNTIME_CONFIG_ID) {
+    if (bundle && missing.length === 1 && missing[0] === RUNTIME_CONFIG_ID && !stopping) {
       await installBundle(bundle.id, settings).catch((error: unknown) => console.warn('[model-import] runtime config', error))
     }
   }
+  // Files that joined meanwhile are checked first; the import is done after them.
+  if (unfinished() || stopping) return
   current.phase = 'done'
   publish()
   emit(Events.modelsChanged, { reason: 'import' })
@@ -359,10 +386,8 @@ function importIndex(settings: Settings): string {
   return join(paths.modelImports(settings.modelsRoot), 'index.json')
 }
 
-/** Asks the engine what one file is; null when there is no engine to ask. */
-async function inspectOne(path: string): Promise<Recognition | null> {
-  const server = localServerPath()
-  if (!server) return null
+/** Asks the engine what one file is. */
+async function inspectOne(server: string, path: string): Promise<Recognition> {
   return recognize(await withEngineRequests(server, (request) => request('inspect', { path })), path)
 }
 
@@ -379,6 +404,9 @@ export async function relocateBundle(
   const catalog = await getCatalog(settings, true)
   const bundle = catalog.bundles.find((item) => item.id === bundleId)
   if (!bundle) throw codedError('E_NOT_FOUND', '这个模型已经不在了')
+  // The picked file is checked like an imported one; without an engine nothing could tell a wrong file.
+  const server = localServerPath()
+  if (!server) throw codedError('E_ENGINE', '装好引擎后才能重新找到模型文件')
   let found = 0
   for (const slot of SLOTS) {
     const id = bundle.components[slot]
@@ -387,12 +415,22 @@ export async function relocateBundle(
     if (!lost) continue
     const path = await pick(`重新找到「${model?.name ?? SLOT_LABEL[slot]}」`, model?.localPath ? dirname(model.localPath) : undefined)
     if (!path) break
-    const recognition = await inspectOne(path)
-    if (recognition && recognition.kind !== SLOT_ROLE[slot]) {
+    const recognition = await inspectOne(server, path)
+    const role = SLOT_ROLE[slot] as 'dit' | 'text_encoder' | 'vae'
+    if (recognition.kind !== role) {
       throw codedError('E_WRONG_FILE', `这个文件不是${SLOT_LABEL[slot]}，请选原来那个文件`)
     }
     if (model) {
-      await relocateImportedModel(importIndex(settings), id, path)
+      // Whether it is a catalog part is asked again: another file must not stand in for an official one.
+      const match = catalogFileMatch({ name: basename(path), sizeBytes: (await stat(path)).size }, catalog.models, role)
+      const record = await relocateImportedModel(importIndex(settings), id, path, {
+        precision: recognition.precision,
+        tiers: recognition.tiers,
+        catalogId: match?.id ?? null,
+      })
+      const now = match?.id ?? record.id
+      if (now !== id && bundle.custom)
+        saveCombination({ id: bundle.id, name: bundle.name, components: { ...bundle.components, [slot]: now } })
     } else if (bundle.custom) {
       // A shared folder's file that is gone has no record left: the picked file is added and takes its place.
       const registered = await registerScannedModels(settings, [
@@ -400,8 +438,9 @@ export async function relocateBundle(
           path,
           role: SLOT_ROLE[slot] as 'dit' | 'text_encoder' | 'vae',
           layout: 'comfyui-single-file',
-          precision: recognition?.precision,
-          inspected: Boolean(recognition),
+          precision: recognition.precision,
+          tiers: recognition.tiers,
+          inspected: true,
         },
       ])
       const added = registered.ids[0]

@@ -489,6 +489,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
   }
   const folders = await localDiffusersFolders(settings)
   const imported = await readImportedModels(importedModelsIndex(settings))
+  // One stand-in per catalog part; of several an older version left, the last (as `importedRecord` picks).
   const standIns = new Map(imported.filter((item) => item.catalogId).map((item) => [item.catalogId!, item]))
   const models: ModelEntry[] = await Promise.all(
     raw.models.map(async (model) => {
@@ -530,7 +531,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
           entry.installState = 'ready'
         } else {
           entry.installState = 'error'
-          entry.missingFile = await missingPlace(own.path)
+          entry.missingFile = await notHere(own.path)
         }
         return entry
       }
@@ -576,6 +577,8 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
   )
   // A catalog part's own copy is that part (above), not a row of its own.
   const importedRecords = imported.filter((item) => !item.catalogId || !raw.models.some((model) => model.id === item.catalogId))
+  // A combination saved before its file was taken for a catalog part names the record's own id: it now means that part.
+  const aliases = new Map(imported.filter((item) => !importedRecords.includes(item)).map((item) => [item.id, item.catalogId!]))
   for (const imported of importedRecords) {
     let installed = false
     let precision = imported.precision ?? 'local'
@@ -587,7 +590,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
     } else {
       installed = await ownFileHere(imported)
     }
-    const missingFile = installed ? undefined : await missingPlace(imported.path)
+    const missingFile = installed ? undefined : await notHere(imported.path)
     models.push({
       id: imported.id,
       name: imported.name,
@@ -614,6 +617,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
             ? `外部文件引用；移除记录不会删除原文件。SHA256 ${imported.sha256}`
             : '扫描登记的外部文件；不复制、不移动，移除记录也不会删除原文件。使用前不校验哈希。',
       localPath: imported.path,
+      ...(imported.tiers ? { tiers: imported.tiers } : {}),
       ...(missingFile ? { missingFile } : {}),
       installState: installed ? 'ready' : 'error',
       installed,
@@ -658,7 +662,17 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
     ...(raw.bundles ?? BUILTIN.bundles ?? []),
     ...(raw.single_file_bundles ?? []),
     ...catalogCombinations(models.filter((model) => !isSharedModelId(model.id))).map((combination) =>
-      combinationBundle(combination, models),
+      combinationBundle(
+        {
+          ...combination,
+          components: {
+            dit: aliases.get(combination.components.dit) ?? combination.components.dit,
+            textEncoder: aliases.get(combination.components.textEncoder) ?? combination.components.textEncoder,
+            vae: aliases.get(combination.components.vae) ?? combination.components.vae,
+          },
+        },
+        models,
+      ),
     ),
     ...external
       .filter((model) => model.role === 'full')
@@ -679,6 +693,11 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
     source,
   }
   return catalogCache
+}
+
+/** Why an own file is not used: changed where it is, or gone (its disk, or the file itself). */
+async function notHere(path: string): Promise<NonNullable<ModelEntry['missingFile']>> {
+  return (await fileSize(path)) >= 0 ? 'changed' : missingPlace(path)
 }
 
 /** An own file is used while it still has the size and time it was added with. */

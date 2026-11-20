@@ -30,15 +30,34 @@ export function localFilesBundle(models: readonly ModelEntry[]): ModelBundle | n
 
 const RTX_50 = { computeCapability: { major: 12, minor: 0 }, label: 'RTX 50 系列显卡' }
 
+const TIERS = ['high', 'turbo'] as const
+
 /**
- * The tier a scanned DiT needs, when its precision or file name says what it
- * is: INT4 and NVFP4 run only under turbo (NVFP4 on an RTX 50), INT8 and GGUF
- * files under high. Unknown files keep the tier from 设置.
+ * The tier (and GPU) an own DiT needs. From what the engine's `inspect` said:
+ * the one tier it accepts, else its precision (INT4 and NVFP4 run under turbo,
+ * NVFP4 only on an RTX 50, INT8 under high); a bf16 file keeps the tier from 设置.
+ * A file registered before the engine was asked has only its own file name to
+ * go by, never the folders above it.
  */
-export function localDitNeeds(dit: Pick<ModelEntry, 'name' | 'precision' | 'localPath' | 'files'>): Pick<ModelBundle, 'tier' | 'requires'> {
-  const text = [dit.precision, dit.name, dit.localPath, ...(dit.files ?? [])].join(' ').toLowerCase()
-  if (/nvfp4/.test(text)) return { tier: 'turbo', requires: RTX_50 }
-  if (/int4/.test(text)) return { tier: 'turbo' }
-  if (/int8|\.gguf\b/.test(text)) return { tier: 'high' }
+export function localDitNeeds(
+  dit: Pick<ModelEntry, 'name' | 'precision' | 'localPath' | 'files' | 'tiers'>,
+): Pick<ModelBundle, 'tier' | 'requires'> {
+  const precision = dit.precision && dit.precision !== 'local' ? dit.precision : null
+  if (precision || dit.tiers?.length) {
+    const requires = precision === 'nvfp4' ? { requires: RTX_50 } : {}
+    const only = dit.tiers?.length === 1 ? TIERS.find((tier) => tier === dit.tiers![0]) : undefined
+    if (only) return { tier: only, ...requires }
+    if (precision === 'nvfp4' || precision === 'int4') return { tier: 'turbo', ...requires }
+    if (precision === 'int8') return { tier: 'high' }
+    return {}
+  }
+  const names = [dit.name, dit.localPath, ...(dit.files ?? [])]
+    .filter((item): item is string => Boolean(item))
+    .map((item) => item.split(/[\\/]/).pop()!)
+    .join(' ')
+    .toLowerCase()
+  if (/nvfp4/.test(names)) return { tier: 'turbo', requires: RTX_50 }
+  if (/int4/.test(names)) return { tier: 'turbo' }
+  if (/int8|\.gguf\b/.test(names)) return { tier: 'high' }
   return {}
 }

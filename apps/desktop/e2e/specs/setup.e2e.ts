@@ -300,6 +300,7 @@ describe('first run', () => {
     await page.getByRole('button', { name: '使用已有模型', exact: true }).click()
     const idle = page.getByRole('dialog', { name: '导入模型' })
     await expect.poll(() => idle.isVisible()).toBe(true)
+    await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.trim())).toBe('选择文件…')
     await idle.getByRole('button', { name: '选择文件夹…' }).click()
     // A model folder is read without the engine, so it is recognised before one is installed.
     const done = page.getByRole('dialog', { name: '可以用了：MOSS-Image SFT' })

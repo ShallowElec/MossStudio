@@ -23,6 +23,8 @@ export interface ImportedModelFile {
   catalogId?: string
   /** The engine's `inspect` recognised the file in this role (导入模型); older registrations went by folder names. */
   inspected?: boolean
+  /** A main model's `load` tiers as `inspect` named them. */
+  tiers?: string[]
   importedAt: string
 }
 
@@ -52,6 +54,7 @@ function isImportedModelFile(value: unknown): value is ImportedModelFile {
     (model.precision === undefined || typeof model.precision === 'string') &&
     (model.catalogId === undefined || typeof model.catalogId === 'string') &&
     (model.inspected === undefined || typeof model.inspected === 'boolean') &&
+    (model.tiers === undefined || (Array.isArray(model.tiers) && model.tiers.every((tier) => typeof tier === 'string'))) &&
     typeof model.importedAt === 'string'
   )
 }
@@ -214,12 +217,33 @@ export function diffusersFolderName(directory: string, flavor: DiffusersFolderIn
   return basename(directory)
 }
 
-export async function removeImportedModel(indexFile: string, id: string): Promise<void> {
-  const models = await readImportedModels(indexFile)
-  // A catalog part's own copy is known by the part's id.
-  const next = models.filter((model) => model.id !== id && model.catalogId !== id)
-  if (next.length === models.length) throw new Error('本地导入模型记录不存在')
-  await writeImportedModels(indexFile, next)
+/** Every change to the index reads it, changes it and writes it back, so changes run one at a time. */
+let writing: Promise<unknown> = Promise.resolve()
+function inTurn<T>(task: () => Promise<T>): Promise<T> {
+  const run = writing.then(task)
+  // The next change waits for this one, whether it worked or not.
+  writing = run.catch(() => undefined)
+  return run
+}
+
+/**
+ * The record of an id: its own, else the one standing in for that catalog part. There is one stand-in
+ * per part (registering another takes the part over); of several left by an older version, the last.
+ */
+export function importedRecord(models: readonly ImportedModelFile[], id: string): ImportedModelFile | undefined {
+  return models.find((model) => model.id === id) ?? [...models].reverse().find((model) => model.catalogId === id)
+}
+
+export function removeImportedModel(indexFile: string, id: string): Promise<void> {
+  return inTurn(async () => {
+    const models = await readImportedModels(indexFile)
+    const record = importedRecord(models, id)
+    if (!record) throw new Error('本地导入模型记录不存在')
+    await writeImportedModels(
+      indexFile,
+      models.filter((model) => model !== record),
+    )
+  })
 }
 
 export interface ScannedRegistration {
@@ -231,6 +255,7 @@ export interface ScannedRegistration {
   precision?: string
   catalogId?: string
   inspected?: boolean
+  tiers?: string[]
 }
 
 export interface RegisterScanResult {
@@ -246,7 +271,11 @@ export interface RegisterScanResult {
  * ComfyUI folder is only read, and the record points at the original file.
  * Re-registering the same path updates its role/size instead of adding a row.
  */
-export async function registerScannedModels(indexFile: string, items: ScannedRegistration[]): Promise<RegisterScanResult> {
+export function registerScannedModels(indexFile: string, items: ScannedRegistration[]): Promise<RegisterScanResult> {
+  return inTurn(() => register(indexFile, items))
+}
+
+async function register(indexFile: string, items: ScannedRegistration[]): Promise<RegisterScanResult> {
   const models = await readImportedModels(indexFile)
   const byPath = new Map(models.map((model) => [model.path.toLowerCase(), model]))
   const result: RegisterScanResult = { added: 0, updated: 0, missing: [], ids: [] }
@@ -286,6 +315,17 @@ export async function registerScannedModels(indexFile: string, items: ScannedReg
       mtimeMs = info.mtimeMs
     }
     const relativePath = item.relativePath && item.relativePath !== '.' ? item.relativePath : basename(path)
+    const catalogId = item.catalogId ?? existing?.catalogId
+    // One stand-in per catalog part: a file registered for it takes it over from any other.
+    if (item.catalogId) {
+      for (const [index, other] of models.entries()) {
+        if (other !== existing && other.catalogId === item.catalogId) {
+          const { catalogId: _taken, ...rest } = other
+          models[index] = rest
+          byPath.set(other.path.toLowerCase(), rest)
+        }
+      }
+    }
     const record: ImportedModelFile = {
       id: existing?.id ?? `local-scan-${createHash('sha1').update(path.toLowerCase()).digest('hex').slice(0, 20)}`,
       name: name ?? basename(path),
@@ -297,7 +337,8 @@ export async function registerScannedModels(indexFile: string, items: ScannedReg
       importedAt: existing?.importedAt ?? new Date().toISOString(),
       ...(layout ? { layout } : {}),
       ...(item.precision ? { precision: item.precision } : {}),
-      ...(item.catalogId ? { catalogId: item.catalogId } : {}),
+      ...(item.tiers?.length ? { tiers: item.tiers } : {}),
+      ...(catalogId ? { catalogId } : {}),
       ...(item.inspected || existing?.inspected ? { inspected: true } : {}),
       ...(existing?.sha256 ? { sha256: existing.sha256 } : {}),
     }
@@ -315,32 +356,45 @@ export async function registerScannedModels(indexFile: string, items: ScannedReg
   return result
 }
 
+/** What the engine said about the file picked in 重新找到…, and the catalog part it is (null: none). */
+export interface RelocatedFacts {
+  precision?: string
+  tiers?: string[]
+  catalogId: string | null
+}
+
 /**
  * 重新找到…: the record keeps its id (so every combination and 画面 using it keeps
- * working) and now points at the file where it is.
+ * working) and now points at the file where it is, with what the engine says that
+ * file is: a file that is not the catalog part any more stops standing in for it.
  */
-export async function relocateImportedModel(indexFile: string, id: string, path: string): Promise<ImportedModelFile> {
-  const models = await readImportedModels(indexFile)
-  // A catalog part's own copy is known by the part's id.
-  const existing = models.find((model) => model.id === id || model.catalogId === id)
-  if (!existing) throw new Error('本地导入模型记录不存在')
-  const actual = await realpath(resolve(path))
-  const info = await stat(actual)
-  if (!info.isFile() || info.size <= 0) throw new Error('请选择模型文件')
-  const record: ImportedModelFile = {
-    ...existing,
-    name: basename(actual),
-    path: actual,
-    relativePath: basename(actual),
-    size: info.size,
-    mtimeMs: info.mtimeMs,
-  }
-  delete record.sha256
-  await writeImportedModels(
-    indexFile,
-    models.map((model) => (model === existing ? record : model)),
-  )
-  return record
+export function relocateImportedModel(indexFile: string, id: string, path: string, facts: RelocatedFacts): Promise<ImportedModelFile> {
+  return inTurn(async () => {
+    const models = await readImportedModels(indexFile)
+    const existing = importedRecord(models, id)
+    if (!existing) throw new Error('本地导入模型记录不存在')
+    const actual = await realpath(resolve(path))
+    const info = await stat(actual)
+    if (!info.isFile() || info.size <= 0) throw new Error('请选择模型文件')
+    const { sha256: _hash, catalogId: _part, precision: _precision, tiers: _tiers, ...rest } = existing
+    const record: ImportedModelFile = {
+      ...rest,
+      name: basename(actual),
+      path: actual,
+      relativePath: basename(actual),
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      inspected: true,
+      ...(facts.precision ? { precision: facts.precision } : {}),
+      ...(facts.tiers?.length ? { tiers: facts.tiers } : {}),
+      ...(facts.catalogId ? { catalogId: facts.catalogId } : {}),
+    }
+    await writeImportedModels(
+      indexFile,
+      models.map((model) => (model === existing ? record : model)),
+    )
+    return record
+  })
 }
 
 export async function verifyImportedModelFile(model: ImportedModelFile, sha256: string, size: number): Promise<boolean> {

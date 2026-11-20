@@ -63,6 +63,24 @@ describe('withEngineRequests', () => {
     )
   })
 
+  it('times out only the request that got no answer; the one beside it is still answered', async () => {
+    const path = await server(
+      `if (method === 'hello') reply(id, hello); else if (params.path !== 'stuck') setTimeout(() => reply(id, { path: params.path }), 150)`,
+    )
+    const results = await withEngineRequests(
+      path,
+      // The second is asked later, so it is still waiting when the first one times out.
+      (request) =>
+        Promise.allSettled([
+          request('inspect', { path: 'stuck' }),
+          new Promise((done) => setTimeout(done, 100)).then(() => request('inspect', { path: 'slow' })),
+        ]),
+      { requestMs: 160 },
+    )
+    expect(results[0]).toMatchObject({ status: 'rejected', reason: new Error('moss-server 请求超时：inspect') })
+    expect(results[1]).toEqual({ status: 'fulfilled', value: { path: 'slow' } })
+  })
+
   it('refuses an engine whose hello says it cannot inspect', async () => {
     const path = await server(`reply(id, { ...hello, capabilities: { inspect: false } })`)
     await expect(withEngineRequests(path, async () => 'never')).rejects.toThrow('请更新 MossInfer')

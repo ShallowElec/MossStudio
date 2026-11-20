@@ -44,7 +44,7 @@ describe('recognize: what an inspect answer means', () => {
   it.each([
     [
       {
-        kind: 'unknown',
+        kind: 'dit',
         loadable: false,
         note: 'found block weights stored as F8_E4M3 (FP8), a quantization format the engine does not read',
       },
@@ -52,14 +52,14 @@ describe('recognize: what an inspect answer means', () => {
       'fp8',
     ],
     [{ kind: 'dit', loadable: false, note: 'NVFP4 needs an RTX 50 GPU (compute capability 12.0)' }, 'x.safetensors', 'nvfp4'],
-    [{ kind: 'unknown', loadable: false, note: 'GGUF tensors of types the engine does not read: Q3_K' }, 'x.gguf', 'gguf'],
+    [{ kind: 'dit', loadable: false, note: 'GGUF tensors of types the engine does not read: Q3_K' }, 'x.gguf', 'gguf'],
     [
       { kind: 'dit', loadable: false, note: 'block weights stored as F16, which the engine does not load as a DiT' },
       'x.safetensors',
       'fp16',
     ],
     [
-      { kind: 'unknown', loadable: false, note: 'found a PyTorch pickle (.bin / .pt / .ckpt); the engine reads safetensors files' },
+      { kind: 'text_encoder', loadable: false, note: 'found a PyTorch pickle (.bin / .pt / .ckpt); the engine reads safetensors files' },
       'x.ckpt',
       'format',
     ],
@@ -68,6 +68,34 @@ describe('recognize: what an inspect answer means', () => {
     [{ kind: 'unknown', loadable: false, note: '' }, 'sd_xl_base_1.0.safetensors', 'not-moss'],
   ])('reads why the engine refused %j', (report, name, problem) => {
     expect(recognize(report, name)).toEqual({ kind: null, problem })
+  })
+
+  it('reads a file the engine does not know as another model, whatever its name or note says', () => {
+    // The loader's note starts with the file's path; its name (fp8, fp16) is not the reason.
+    for (const path of ['/m/flux1-dev-fp8.safetensors', 'D:\\SD\\v1-5-pruned-emaonly-fp16.safetensors', '/m/sdxl-nvfp4.safetensors']) {
+      const report = {
+        path,
+        kind: 'unknown',
+        loadable: false,
+        note: `${path} is not a supported MOSS-Image DiT (found 'double_blocks.0.img_attn.qkv.weight' F8_E4M3)`,
+      }
+      expect(recognize(report, path)).toEqual({ kind: null, problem: 'not-moss' })
+    }
+    expect(recognize({ kind: 'unknown', loadable: false, note: 'GGUF file' }, '/m/flux-Q4.gguf').problem).toBe('not-moss')
+  })
+
+  it('does not read the path in a MOSS-Image part’s note as its version', () => {
+    const path = '/models/fp16-backup/moss_dit.safetensors'
+    const report = { path, kind: 'dit', loadable: false, note: `${path}: needs decoding with moss-infer quantize` }
+    expect(recognize(report, path).problem).toBe('unsupported')
+  })
+
+  it('keeps the tiers the engine accepts for a main model', () => {
+    expect(recognize({ kind: 'dit', loadable: true, precision: 'nvfp4', tiers: ['turbo'] }, 'x.safetensors')).toEqual({
+      kind: 'dit',
+      precision: 'nvfp4',
+      tiers: ['turbo'],
+    })
   })
 
   it('never takes BF16 in a note for FP16', () => {
@@ -217,6 +245,13 @@ describe('lostFile', () => {
     )
     expect(lostFileText('我的模型', { ...lost, place: 'file' })).toBe(
       '找不到「moss_image_sft_int8」（E:\\Models\\moss_image_sft_int8.safetensors）。它被移动或删除了，重新找到它。',
+    )
+  })
+
+  it('says a file that changed where it is changed, not that it moved', () => {
+    const lost = lostFile(bundle, [...catalog.models, { ...own, missingFile: 'changed' }])!
+    expect(lostFileText('我的模型', lost)).toBe(
+      '「moss_image_sft_int8」（E:\\Models\\moss_image_sft_int8.safetensors）改动过了，重新找到它。',
     )
   })
 

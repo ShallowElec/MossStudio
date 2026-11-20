@@ -144,7 +144,12 @@ export function ModelImportSheet({
 
   const pickButtons = (
     <div className="flex flex-wrap gap-2">
-      <Button tone="secondary" size="md" onClick={() => void run('pick', () => pick('files'))}>
+      <Button
+        tone="secondary"
+        size="md"
+        data-dialog-initial-focus={!state || undefined}
+        onClick={() => void run('pick', () => pick('files'))}
+      >
         <FileUp className="size-4" strokeWidth={1.6} />
         选择文件…
       </Button>
@@ -162,13 +167,14 @@ export function ModelImportSheet({
           自己组合
         </Button>
       ) : null}
-      <Button tone="ghost" size="md" onClick={close}>
+      <Button tone="ghost" size="md" data-dialog-initial-focus={!ready[0] || undefined} onClick={close}>
         留在这里
       </Button>
       {ready[0] ? (
         <Button
           tone="primary"
           size="md"
+          data-dialog-initial-focus
           onClick={() => {
             close()
             onUse(ready[0]!.bundle.id)
@@ -179,7 +185,7 @@ export function ModelImportSheet({
       ) : null}
     </>
   ) : (
-    <Button tone="ghost" size="md" onClick={close}>
+    <Button tone="ghost" size="md" data-dialog-initial-focus onClick={close}>
       在后台继续
     </Button>
   )

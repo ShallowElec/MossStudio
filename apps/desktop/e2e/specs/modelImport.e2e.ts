@@ -109,6 +109,8 @@ describe('导入模型', () => {
       const dialog = page.getByRole('dialog', { name: '可以用了：my-finetune' })
       await expect.poll(() => dialog.isVisible()).toBe(true)
       expect(await dialog.getByText('在原位置使用，不占额外空间').isVisible()).toBe(true)
+      // The main action has the focus, not the close button.
+      await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.trim())).toBe('去创作')
       // The LoRA went to its own list.
       const lora = dialog.getByText('ink-style.safetensors').locator('xpath=ancestor::*[.//span[text()="LoRA"]][1]')
       expect(await lora.getByText('已加入').isVisible()).toBe(true)

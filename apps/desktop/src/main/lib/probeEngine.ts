@@ -145,7 +145,8 @@ export async function withEngineRequests<T>(
     try {
       return await new Promise<Record<string, unknown>>((resolve, reject) => {
         pending.set(id, { resolve, reject })
-        timer = setTimeout(() => fail(new Error('moss-server 请求超时：' + method)), timeoutMs)
+        // Only this request gave up: the others (an inspect of another file) may still be answered.
+        timer = setTimeout(() => reject(new Error('moss-server 请求超时：' + method)), timeoutMs)
         proc.stdin.write(JSON.stringify({ id, method, params }) + '\n')
       })
     } finally {

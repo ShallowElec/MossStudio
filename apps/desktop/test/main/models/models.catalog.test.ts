@@ -467,6 +467,43 @@ describe('local imports and bundles in the catalog', () => {
     expect(byId(catalog.models, 'vae-single')!.localPath).toBeUndefined()
   })
 
+  it('keeps a combination working when its own file is later found to be a catalog part', async () => {
+    // A combination an older version saved names the record's own id; importing the file again matched it to the catalog.
+    const single = rawModel({
+      id: 'vae-single',
+      repo: 'org/single',
+      role: 'vae',
+      format: 'comfyui',
+      files: ['vae/flux2-vae_small.safetensors'],
+      size_bytes: 9,
+    })
+    writeCatalog(releaseDir(), { schema_version: 3, models: [vae, single], bundles: [bundle], adapters: [] })
+    const file = join(dataRoot(), 'ComfyUI', 'vae', 'flux2-vae_small.safetensors')
+    mkdirSync(join(file, '..'), { recursive: true })
+    writeFileSync(file, 'vae-bytes')
+    const { ids } = await models.registerScannedModels(settings, [{ path: file, role: 'vae', layout: 'comfyui-single-file' }])
+    const own = ids[0]!
+    const { saveCombination } = await import('@main/services/modelCombinations')
+    const saved = saveCombination({ name: '我的', components: { dit: own, textEncoder: own, vae: own } })
+    await models.registerScannedModels(settings, [{ path: file, role: 'vae', layout: 'comfyui-single-file', catalogId: 'vae-single' }])
+    const catalog = await models.getCatalog(settings, true)
+    const combination = catalog.bundles.find((item) => item.id === saved.id)!
+    expect(combination.components).toEqual({ dit: 'vae-single', textEncoder: 'vae-single', vae: 'vae-single' })
+    expect(byId(catalog.models, 'vae-single')).toMatchObject({ installed: true, localPath: file })
+  })
+
+  it('says an own file changed where it is, rather than gone', async () => {
+    const file = join(dataRoot(), 'own', 'changed.safetensors')
+    mkdirSync(join(file, '..'), { recursive: true })
+    writeFileSync(file, 'dit')
+    await models.registerScannedModels(settings, [{ path: file, role: 'dit', layout: 'comfyui-single-file' }])
+    writeFileSync(file, 'dit-rewritten')
+    expect((await models.getCatalog(settings, true)).models.find((m) => m.provider === 'local')).toMatchObject({
+      installed: false,
+      missingFile: 'changed',
+    })
+  })
+
   it('refuses to start a remote download for a local import', async () => {
     await register(join(dataRoot(), 'x', 'vae', 'v.safetensors'), 'vae')
     const local = (await models.getCatalog(settings)).models.find((m) => m.provider === 'local')!

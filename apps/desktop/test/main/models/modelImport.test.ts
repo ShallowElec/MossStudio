@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Events } from '@shared/channels'
@@ -14,7 +14,20 @@ const mocks = vi.hoisted(() => ({
   most: 0,
   emit: vi.fn(),
   release: vi.fn<() => string | null>(),
+  /** Runs right after a combination is saved, while the import is making its models. */
+  onSave: null as null | (() => void),
 }))
+vi.mock('@main/services/modelCombinations', async (load) => {
+  const actual = await load<typeof import('@main/services/modelCombinations')>()
+  return {
+    ...actual,
+    saveCombination: (input: Parameters<typeof actual.saveCombination>[0]) => {
+      const saved = actual.saveCombination(input)
+      mocks.onSave?.()
+      return saved
+    },
+  }
+})
 vi.mock('@main/lib/content', () => ({ contentDir: mocks.release, catalogOverrideDir: () => mocks.release() }))
 vi.mock('@main/services/supervisor', () => ({ listJobs: async () => [] }))
 vi.mock('@main/services/network', () => ({ getLastNetwork: () => null }))
@@ -68,7 +81,7 @@ const ANSWERS: Record<string, Record<string, unknown>> = {
   'style.safetensors': { kind: 'lora', loadable: true, base_model: 'moss-sft' },
   'depth.safetensors': { kind: 'control_adapter', loadable: true, control_kinds: ['depth'] },
   'sd_xl_base_1.0.safetensors': { kind: 'unknown', loadable: false, note: 'not a MOSS-Image model' },
-  'moss_image_sft_fp8.safetensors': { kind: 'unknown', loadable: false, note: 'found block weights stored as F8_E4M3 (FP8)' },
+  'moss_image_sft_fp8.safetensors': { kind: 'dit', loadable: false, note: 'found block weights stored as F8_E4M3 (FP8)' },
 }
 
 async function finished(): Promise<ModelImportState> {
@@ -83,6 +96,7 @@ beforeEach(async () => {
   mocks.running = 0
   mocks.most = 0
   mocks.emit.mockReset()
+  mocks.onSave = null
   mocks.inspect.mockReset().mockImplementation(async (path) => {
     const answer = ANSWERS[path.split(/[\\/]/).pop()!]
     if (!answer) throw new Error('io: cannot read')
@@ -181,6 +195,29 @@ describe('导入模型', () => {
     expect((await finished()).files[0]).toMatchObject({ kind: 'unusable', problem: 'cli' })
   })
 
+  it('checks a file dropped while the models are being made, instead of leaving it spinning', async () => {
+    const files = ['my-finetune.safetensors', 'qwen-int8.safetensors', 'vae.safetensors'].map((name) => weights(join(disk(), 'late', name)))
+    const lora = weights(join(disk(), 'late', 'style.safetensors'))
+    const late: { import?: Promise<unknown> } = {}
+    mocks.onSave = () => {
+      mocks.onSave = null
+      late.import = service.startModelImport([lora])
+    }
+    await service.startModelImport(files)
+    await vi.waitFor(() => expect(late.import).toBeDefined())
+    await late.import
+    const state = await finished()
+    expect(state.files.find((file) => file.path === lora)).toMatchObject({ state: 'done', kind: 'lora' })
+    expect(state.files.every((file) => file.state === 'done')).toBe(true)
+  })
+
+  it('refuses a dropped link to a network place without following it', async () => {
+    const link = join(disk(), 'share-link.safetensors')
+    symlinkSync('//nas/models/moss.safetensors', link)
+    await service.startModelImport([link])
+    expect((await finished()).files[0]).toMatchObject({ kind: 'unusable', problem: 'network' })
+  })
+
   it('checks a file dropped twice once, and refuses a dropped network place', async () => {
     const file = weights(join(disk(), 'vae.safetensors'))
     await service.startModelImport([file, file, '\\\\nas\\models\\vae.safetensors'])
@@ -242,6 +279,28 @@ describe('重新找到… and 移除', () => {
     expect(await service.relocateBundle(bundleId, pick)).toEqual({ found: 1 })
     expect(pick).toHaveBeenCalledWith('重新找到「my-finetune.safetensors」', join(disk(), 'E'))
     expect((await catalog()).models.find((model) => model.id === lost.id)).toMatchObject({ installed: true, localPath: moved })
+  })
+
+  it('needs an engine to tell the picked file is the right one', async () => {
+    const { bundleId, dit } = await ownModel()
+    rmSync(dit)
+    mocks.server = null
+    const pick = vi.fn(async () => weights(join(disk(), 'F', 'my-finetune.safetensors')))
+    await expect(service.relocateBundle(bundleId, pick)).rejects.toMatchObject({ code: 'E_ENGINE' })
+    expect(pick).not.toHaveBeenCalled()
+  })
+
+  it('stops a picked file from standing in for a catalog part it is not', async () => {
+    const int8 = weights(join(disk(), 'E', 'moss_image_sft_int8_convrot.safetensors'), 5_413_698_958)
+    await service.startModelImport([int8])
+    await finished()
+    rmSync(int8)
+    // Same name, other size: not the catalog file, so it is the person's own file from now on.
+    const other = weights(join(disk(), 'F', 'moss_image_sft_int8_convrot.safetensors'))
+    expect(await service.relocateBundle('moss-sft-int8', async () => other)).toEqual({ found: 1 })
+    const after = await catalog()
+    expect(after.models.find((model) => model.id === 'moss-sft-comfy-int8_convrot')).toMatchObject({ installed: false })
+    expect(after.models.find((model) => model.localPath === other)).toMatchObject({ provider: 'local', installed: true, precision: 'int8' })
   })
 
   it('移除 drops the moved file and the combination, and leaves every file where it is', async () => {

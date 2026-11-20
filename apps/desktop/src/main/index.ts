@@ -30,6 +30,7 @@ import {
 import { resolveServerPath, runMossInferJob, shutdownMossInfer } from './services/mossInfer'
 import { shutdownCliEngines } from './services/cliEngine'
 import { probeEngine, stopEngineRequests } from './lib/probeEngine'
+import { stopModelImport } from './services/modelImport'
 import { recoverEngineInstall } from './lib/engineStore'
 import { protocolCompatible } from '@shared/engineProtocol'
 import { closeAllSshTerminals } from './services/sshSessions'
@@ -1975,6 +1976,7 @@ app.on('before-quit', () => {
   stopTrainingJobs()
   stopGbcProcesses()
   stopModelSourceDiscovery()
+  stopModelImport()
   stopEngineRequests()
   closeAllSshTerminals()
   stopUpdater()

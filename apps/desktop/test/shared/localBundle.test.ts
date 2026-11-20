@@ -88,6 +88,17 @@ describe('localDitNeeds', () => {
     expect(localDitNeeds(entry('e', 'dit'))).toEqual({})
   })
 
+  it('goes by what the engine said, never by the folders the file sits in', () => {
+    const inInt8Folder = { localPath: 'D:/models/int8/my-finetune.safetensors', name: 'my-finetune.safetensors' }
+    expect(localDitNeeds(entry('f', 'dit', { ...inInt8Folder, precision: 'bf16' }))).toEqual({})
+    expect(localDitNeeds(entry('g', 'dit', { ...inInt8Folder }))).toEqual({})
+    expect(localDitNeeds(entry('h', 'dit', { ...inInt8Folder, precision: 'int8', tiers: ['high'] }))).toEqual({ tier: 'high' })
+    expect(localDitNeeds(entry('i', 'dit', { name: 'x.safetensors', precision: 'nvfp4', tiers: ['turbo'] }))).toEqual({
+      tier: 'turbo',
+      requires: { computeCapability: { major: 12, minor: 0 }, label: 'RTX 50 系列显卡' },
+    })
+  })
+
   it('carries it into the local-files bundle', () => {
     const files = [entry('dit-int8', 'dit', { name: 'moss_image_sft_int8_convrot' }), entry('te-1', 'text_encoder'), entry('vae-1', 'vae')]
     expect(localFilesBundle(files)).toMatchObject({ id: 'local-files', tier: 'high' })

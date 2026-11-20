@@ -213,8 +213,15 @@ describe('relocateImportedModel (重新找到…)', () => {
     const { ids } = await registerScannedModels(indexFile(), [{ path: before, role: 'dit', precision: 'int8' }])
     await rm(join(tempDir(), 'E'), { recursive: true })
     const after = await put(join(tempDir(), 'F', 'moved', 'moss-renamed.safetensors'), 'dit-longer')
-    const record = await relocateImportedModel(indexFile(), ids[0]!, after)
-    expect(record).toMatchObject({ id: ids[0], path: after, name: 'moss-renamed.safetensors', size: 10, precision: 'int8' })
+    const record = await relocateImportedModel(indexFile(), ids[0]!, after, { precision: 'w4a8', catalogId: null })
+    expect(record).toMatchObject({
+      id: ids[0],
+      path: after,
+      name: 'moss-renamed.safetensors',
+      size: 10,
+      precision: 'w4a8',
+      inspected: true,
+    })
     expect(await readImportedModels(indexFile())).toEqual([record])
   })
 
@@ -222,8 +229,32 @@ describe('relocateImportedModel (重新找到…)', () => {
     const file = await put(join(tempDir(), 'a', 'vae.safetensors'), 'vae')
     await registerScannedModels(indexFile(), [{ path: file, role: 'vae', catalogId: 'flux2-vae-comfy-small' }])
     const moved = await put(join(tempDir(), 'b', 'vae.safetensors'), 'vae')
-    expect((await relocateImportedModel(indexFile(), 'flux2-vae-comfy-small', moved)).path).toBe(moved)
-    await expect(relocateImportedModel(indexFile(), 'flux2-vae-comfy-small', tempDir())).rejects.toThrow('请选择模型文件')
-    await expect(relocateImportedModel(indexFile(), 'nope', moved)).rejects.toThrow('本地导入模型记录不存在')
+    const facts = { catalogId: 'flux2-vae-comfy-small' }
+    expect((await relocateImportedModel(indexFile(), 'flux2-vae-comfy-small', moved, facts)).path).toBe(moved)
+    await expect(relocateImportedModel(indexFile(), 'flux2-vae-comfy-small', tempDir(), facts)).rejects.toThrow('请选择模型文件')
+    await expect(relocateImportedModel(indexFile(), 'nope', moved, facts)).rejects.toThrow('本地导入模型记录不存在')
+    // A file that is not that catalog part any more stops standing in for it.
+    expect(await relocateImportedModel(indexFile(), 'flux2-vae-comfy-small', moved, { catalogId: null })).not.toHaveProperty('catalogId')
+  })
+
+  it('keeps one stand-in per catalog part, and relocates and removes that one only', async () => {
+    const first = await put(join(tempDir(), 'a', 'vae.safetensors'), 'vae')
+    const second = await put(join(tempDir(), 'b', 'vae.safetensors'), 'vae')
+    await registerScannedModels(indexFile(), [{ path: first, role: 'vae', catalogId: 'flux2-vae-comfy-small' }])
+    await registerScannedModels(indexFile(), [{ path: second, role: 'vae', catalogId: 'flux2-vae-comfy-small' }])
+    // The newer file takes the part over; the older one is an own file again.
+    const records = await readImportedModels(indexFile())
+    expect(records.map((record) => [record.path, record.catalogId])).toEqual([
+      [first, undefined],
+      [second, 'flux2-vae-comfy-small'],
+    ])
+    await removeImportedModel(indexFile(), 'flux2-vae-comfy-small')
+    expect((await readImportedModels(indexFile())).map((record) => record.path)).toEqual([first])
+  })
+
+  it('writes changes that arrive together one after the other, losing none', async () => {
+    const files = await Promise.all(['a', 'b', 'c', 'd'].map((name) => put(join(tempDir(), `${name}.safetensors`), name)))
+    await Promise.all(files.map((path) => registerScannedModels(indexFile(), [{ path, role: 'vae' }])))
+    expect((await readImportedModels(indexFile())).map((record) => record.path).sort()).toEqual(files.sort())
   })
 })

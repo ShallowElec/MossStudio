@@ -123,6 +123,7 @@ export function importModels(
 /** The sheet's title: how many files are being checked, then the model that can be used. */
 export function importTitle(state: ModelImportState | null, models: readonly ImportModelView[]): string {
   if (!state) return '导入模型'
+  if (state.phase === 'waiting-engine') return `${state.files.length} 个文件等引擎来识别`
   if (state.phase !== 'done') return `正在识别 ${state.files.length} 个文件…`
   const ready = models.filter((model) => model.status === 'ready')
   return ready.length === 1 ? `可以用了：${ready[0]!.bundle.name}` : '识别完了'

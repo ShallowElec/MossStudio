@@ -357,7 +357,7 @@ describe('shared model index', () => {
     mocks.inspect.mockImplementation(async (_server: string, _method: string, { path }: { path: string }) =>
       path.includes('Q4_K_M')
         ? { kind: 'dit', loadable: true, precision: 'int8', quantization: 'GGUF Q4_K + Q6_K + BF16 + F32, runs as INT8 ConvRot' }
-        : { kind: 'unknown', loadable: false, note: 'GGUF tensors of types the engine does not read: Q3_K' },
+        : { kind: 'dit', loadable: false, note: 'GGUF tensors of types the engine does not read: Q3_K' },
     )
     const settings = settingsFixture({ modelsRoot: join(base, 'moss-studio'), modelSources: [{ id: 'gguf', kind: 'custom', path: base }] })
     await refreshModelSources(settings)
