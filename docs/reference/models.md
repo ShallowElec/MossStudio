@@ -1,12 +1,12 @@
 ---
 status: current
-last-verified: 2026-11-08 (d0883df)
-code: apps/desktop/resources/models.json, apps/desktop/src/shared/modelCatalog.ts, apps/desktop/src/main/lib/content.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/bundleFit.ts, apps/desktop/src/shared/localBundle.ts, apps/desktop/src/shared/adapters.ts, apps/desktop/src/main/lib/paths.ts, apps/desktop/src/main/services/models.ts, apps/desktop/src/main/services/modelBundles.ts, apps/desktop/src/main/services/modelScan.ts, apps/desktop/src/main/services/modelImports.ts, apps/desktop/src/main/services/modelFiles.ts, apps/desktop/src/main/services/controlAdapters.ts, apps/desktop/src/main/services/weightPrecision.ts, apps/desktop/src/renderer/src/pages/models/, apps/desktop/src/renderer/src/components/ModelDirectoriesCard.tsx
+last-verified: 2026-11-20 (bc8d71b)
+code: apps/desktop/resources/models.json, apps/desktop/src/shared/modelCatalog.ts, apps/desktop/src/main/lib/content.ts, apps/desktop/src/shared/types.ts, apps/desktop/src/shared/bundleFit.ts, apps/desktop/src/shared/localBundle.ts, apps/desktop/src/shared/adapters.ts, apps/desktop/src/main/lib/paths.ts, apps/desktop/src/main/services/models.ts, apps/desktop/src/main/services/modelBundles.ts, apps/desktop/src/main/services/modelScan.ts, apps/desktop/src/main/services/modelImports.ts, apps/desktop/src/main/services/modelFiles.ts, apps/desktop/src/main/services/controlAdapters.ts, apps/desktop/src/main/services/weightPrecision.ts, apps/desktop/src/main/services/modelSources.ts, apps/desktop/src/main/services/modelSourcePaths.ts, apps/desktop/src/main/services/modelSourceDiscovery.ts, apps/desktop/src/main/services/modelSourceServices.ts, apps/desktop/src/main/lib/localPath.ts, apps/desktop/src/shared/sharedModels.ts, apps/desktop/src/renderer/src/pages/models/, apps/desktop/src/renderer/src/components/ModelDirectoriesCard.tsx
 ---
 
 # Models
 
-How MossStudio describes, downloads, finds and hands model files to the engine: the catalog of components and bundles, the models root, files used in place from a folder the person already has, LoRA and control adapters, and the 模型 page. A job loads one file set, either a prepared diffusers folder or three component files, never a mix.
+How MossStudio describes, downloads, finds and hands model files to the engine: the catalog of components and bundles, the models root, files used in place from a folder the person already has or from another app's model folders, LoRA and control adapters, and the 模型 page. A job loads one file set, either a prepared diffusers folder or three component files, never a mix.
 
 Paths in this doc are relative to `apps/desktop/src/` unless they start with `apps/`, `docs/` or `tools/`. Engine-side facts (what `load` and `inspect` accept) live in the [MossInfer repository](https://github.com/mossimage-cpp/mossimage.cpp); the engine packages and tiers are in [`engines.md`](/docs/reference/engines.md).
 
@@ -92,8 +92,8 @@ Every download progress block on the 模型 page (featured card, model rows, 下
 | Credentials | `hfCredentials.ts` | A token saved in 设置 › 网络 › 访问令牌（Token） is encrypted with Electron `safeStorage` into `<data root>/hf-credentials.json` and sent as `Authorization: Bearer`. Saving is refused when the OS offers no encrypted store (Linux `basic_text`). |
 | Transfer | `downloadFile` in `modelFiles.ts` | Writes `<blob>.part`, resumes with a `Range` header, rejects a mismatched `Content-Range`, restarts on HTTP 416, verifies the size and the SHA-256 against the LFS hash, then renames into `blobs/`. `Settings.modelDownloadConcurrency` (同时下载的文件数, 1 to 16, default 4) limits parallel files. |
 | Reuse | `runModelDownload` | Before requesting bytes, a blob with the same hash is hard-linked from any other repository cache under the models root, or copied from a hashed registered file (`verifyImportedModelFile`). |
-| Space | `assertFreeSpace` in `main/lib/disk.ts` | Checked on the target role folder for the missing bytes plus 1 GiB. |
-| Record | `InstallRecord` in `models.ts` | `.clover-<id>.json` next to `blobs/` lists the files and which blobs this entry owns; `.clover-<id>.json.pending` holds the same while a download runs; `refs/<revision>` gets the commit. `installState` is `partial` while either a pending record or a snapshot file exists. |
+| Space | `assertFreeSpace` in `main/lib/disk.ts` | Checked on the target role folder for the missing bytes plus 1 GiB, with 10 % to spare. |
+| Record | `InstallRecord` in `models.ts` | `.clover-<id>.json` next to `blobs/` lists the files and which blobs this entry owns; `.clover-<id>.json.pending` holds the same while a download runs; `refs/<revision>` gets the commit. `installState` is `partial` while a record (final or pending) or a snapshot file exists but the files are not complete. |
 | Validation | `validateSnapshot` in `modelFiles.ts` | A component counts as installed only when every file has its size, `config.json` exists for the part, every shard named in a `*.index.json` exists, and a text encoder has its tokenizer. |
 
 Deleting a component (`deleteModel`) removes the prepared bundles that contain it, then only the blobs this record owns and no other record shares; it refuses while a download or a job runs. The UI plans a bundle delete with `bundleDeletePlan` (`logic.ts`): parts another complete bundle still uses are kept and named in the confirm.
@@ -106,33 +106,33 @@ Two ways exist to use files the person already has without downloading or copyin
 
 ### 4.1 Scanning a folder
 
-`scanModelDirectory` in `main/services/modelScan.ts` is read only. It walks up to 6 levels and 4000 files, skips `.git`, `hf`, `blobs`, `snapshots`, `custom_nodes`, `controlnet`, `embeddings`, `upscale_models` and the other ComfyUI side folders listed in `skippedDirectories`, and reports every `.safetensors`, `.ckpt`, `.pt`, `.pth`, `.bin`, `.gguf` and `.onnx` file as a `ScannedModel` with a role and a confidence:
+`scanModelDirectory` in `main/services/modelScan.ts` is read only. It walks up to 6 levels, 4000 files and 5000 folders for at most 30 seconds (`MAX_SCAN_DIRECTORIES`, `SCAN_TIME_LIMIT_MS`; the reason it stopped is in `skipped`), skips `.git`, `hf`, `blobs`, `snapshots`, `custom_nodes`, `controlnet`, `embeddings`, `upscale_models` and the other ComfyUI side folders listed in `skippedDirectories`, and reports every `.safetensors`, `.ckpt`, `.pt`, `.pth`, `.bin`, `.gguf` and `.onnx` file as a `ScannedModel` with a role and a confidence:
 
 | Signal | Role | Confidence |
 | --- | --- | --- |
-| Folder `diffusion_models`, `unet`, `checkpoints`, `transformer` | `dit` | high |
+| Folder `loras`, `lora`, `lycoris`, wherever it sits in the path | `lora` | high; shown but not registrable here (section 5) |
+| Folder `diffusion_models`, `stable-diffusion`, `unet`, `checkpoints`, `transformer` | `dit` | high |
 | Folder `text_encoders`, `clip`, `text_encoder` | `text_encoder` | high |
 | Folder `vae`, `vaes` | `vae` | high |
 | Folder `support`, `scheduler`, `pipeline`, `configs` | `support` | high |
-| Folder `loras`, `lora`, `lycoris` | `lora` | high; shown but not registrable here (section 5) |
 | File name matching `moss_image`, `qwen3.5`, `vae`, `scheduler` and the other `names` patterns | as matched | medium |
 | Anything else | `full` | low, unchecked by default |
 
-A folder that holds `model_index.json` or `transformer/config.json` is reported as one candidate with `layout: 'diffusers-folder'` instead of its files.
+A folder that holds `model_index.json` is reported as one candidate with `layout: 'diffusers-folder'` instead of its files.
 
 UI: 模型 › 其他模型 › 自己组合 › 用电脑上的模型文件… (`Ipc.modelsUseFolder` in `main/ipc.ts`). A folder holding a complete diffusers folder is added as in section 4.3. Otherwise the 主模型, 文本编码器 and VAE files found (confidence high or medium) are registered and 自己组合 opens with its slots filled from them, the first of each role; a slot with nothing found keeps its default download. Picking a per-role folder (模型 › 高级 › 文件夹 › 更改, `ModelDirectoriesCard.tsx`) scans it and lists the candidates in 找到的模型文件 to register.
 
 ### 4.2 Registering files
 
-`registerScannedModels` in `main/services/modelImports.ts` writes one `ImportedModelFile` per path into `imports/index.json` (`schema_version: 2`): path, relative path, size, mtime, role, layout. Nothing is hashed; the id is `local-scan-<sha1 of the path>`. Registering the same path again updates the record.
+`registerScannedModels` in `main/services/modelImports.ts` writes one `ImportedModelFile` per path into `imports/index.json` (`schema_version: 2`): path, relative path, size, mtime, role, layout. Nothing is hashed; the id is `local-scan-` plus the first 20 hex characters of the SHA-1 of the lowercased path. Registering the same path again updates the record.
 
 In the catalog these records become `ModelEntry` rows with `provider: 'local'`, `family: 'local'`, `format: 'comfyui'` for a file or `'diffusers'` for a folder, `precision: 'local'` (a folder gets the dtype read from its first transformer shard), tags `local-import` and `unhashed` or `sha256:<hash>`. The entry is installed while the file still has the registered size and mtime; otherwise the 模型 page shows 找不到原文件. Removing an entry (移除) deletes the record only.
 
-An older path still exists for a folder of loose weight files without a diffusers layout: `importModelFolder` in `modelImports.ts` hashes every file (SHA-256), ids `local-file-<hash>`, and skips duplicates by content. It is reached through first-run setup's 已有模型文件… when the chosen folder contains no diffusers folder.
+An older path still exists for a folder of loose weight files without a diffusers layout: `importModelFolder` in `modelImports.ts` hashes every file (SHA-256), ids `local-file-` plus the first 20 hex characters of that hash, and skips duplicates by content. It is reached through first-run setup's 使用已有模型 › 已有模型文件… when the chosen folder contains no diffusers folder.
 
 ### 4.3 Diffusers folders used in place
 
-用电脑上的模型文件… (`Ipc.modelsUseFolder`) and first-run setup's 已有模型文件… (`Ipc.modelsImportFolder`) register a complete diffusers folder where it is. `inspectDiffusersFolder` accepts a folder with `model_index.json` and a `config.json` plus `.safetensors` weights in each of `transformer/`, `text_encoder/` and `vae/`. The flavour (`sft` or `base`) is read from the README title or the folder name; the folder is listed as `MOSS-Image SFT（<folder>）` or `MOSS-Image Base（<folder>）`.
+用电脑上的模型文件… (`Ipc.modelsUseFolder`) and first-run setup's 使用已有模型 › 已有模型文件… (`Ipc.modelsImportFolder`) register a complete diffusers folder where it is. `inspectDiffusersFolder` accepts a folder with `model_index.json` and a `config.json` plus `.safetensors` weights in each of `transformer/`, `text_encoder/` and `vae/`. The flavour (`sft` or `base`) is read from the README title or the folder name; the folder is listed as `MOSS-Image SFT（<folder>）` or `MOSS-Image Base（<folder>）`.
 
 The folder is one `role: 'full'` entry, and `localFolderInstall` in `models.ts` also lets it stand in for the official components: entries of `OpenMOSS-Team/MOSS-Image-SFT` and `OpenMOSS-Team/MOSS-Image-Base` (`MOSS_REPOS`) count as installed when the folder passes `validateSnapshot` for that component. The DiT must be the same flavour; the text encoder, VAE and pipeline files are shared by both. Such a component shows the `local-folder` tag and its `localPath`. When a job prepares the bundle (section 4.4), the folder's files are hard-linked, or symlinked when a hard link is refused (`linkInPlace`), never copied.
 
@@ -145,13 +145,39 @@ The folder is one `role: 'full'` entry, and `localFolderInstall` in `models.ts` 
 | Three folders (`format: 'diffusers'`) | `{ model: <prepared folder> }` with the bundle's `support` (`moss-pipeline`) | `model` |
 | At least one single file (`format: 'comfyui'`, downloaded or the person's own) | `{ model: <prepared folder>, ditFile?, textEncoderFile?, vaeFile? }`: the folder holds `moss-runtime-config` plus the parts that are folders | `model` and a `*_file` per single file |
 
-A prepared folder is `<models root>/bundles/<key>/`, where `<key>` is the first 24 hex characters of the SHA-256 of `clover_model.json` (bundle id, the folder's component ids, repositories, commits, precisions). `materializeBundle` builds it in a staging directory with hard links to the snapshot files (`materialize`: link, else copy after a free-space check) and renames it into place; a path two parts share is taken from the first. An existing folder with the same manifest and file sizes is reused. The layout is a diffusers model: `transformer/`, `text_encoder/`, `tokenizer/`, `vae/`, plus the support files at the root. For three folders, `prepareModelBundle` first checks the binding (`validateBinding`: every component `format: 'diffusers'`, `family: 'moss-image'`). A single file is passed where it is: the person's file by its `localPath`, a downloaded one from its snapshot.
+A prepared folder is `<models root>/bundles/<key>/`, where `<key>` is the first 24 hex characters of the SHA-256 of `clover_model.json` (bundle id, the folder's component ids, repositories, commits, precisions). `materializeBundle` builds it in a staging directory with hard links to the snapshot files (`materialize`: link, else copy after a free-space check) and renames it into place; a path two parts share is taken from the first. An existing folder with the same manifest and file sizes is reused. The layout is a diffusers model: `transformer/`, `text_encoder/`, `tokenizer/`, `vae/`, plus the support files at the root. For three folders, `prepareModelBundle` first checks the binding (`validateBinding`: every component `family: 'moss-image'` and either all `format: 'diffusers'`, or all `comfyui` with a `support` entry); a folder with the same key but another manifest is built beside it as `<key>-<8 characters>`. A single file is passed where it is: the person's file by its `localPath`, a downloaded one from its snapshot.
 
 Combinations: `shared/modelCombos.ts` holds the rules (`slotChoices`, `supportFor`: `moss-runtime-config` once any part is a single file, else `moss-pipeline`; `combinationBundle`; `unusedDownloads`). `main/services/modelCombinations.ts` keeps them in `<data root>/model-combinations.json`, and `getCatalog` appends them to `bundles` with `custom: true`. When that file does not exist yet and the catalog has an installed local DiT, text encoder and VAE, the bundle older versions made by themselves (`localFilesBundle` in `shared/localBundle.ts`, id `local-files`) is saved once as the combination 电脑上的模型, so 画面 that use it keep working.
 
-The local-files bundle: `localFilesBundle` in `shared/localBundle.ts` builds `ModelBundle` `local-files`, 本地文件（扫描）, as soon as an installed local DiT, text encoder and VAE exist in the catalog, and `getCatalog` puts it first in `bundles`. `localDitNeeds` gives it a `tier` (and `requires` for NVFP4) guessed from the DiT's precision or file name.
+The local-files bundle: `localFilesBundle` in `shared/localBundle.ts` builds `ModelBundle` `local-files`, 本地文件（扫描）, from an installed local DiT, text encoder and VAE; `legacyLocalCombination` (`shared/modelCombos.ts`) is its only caller, which saves it once as the combination above. `localDitNeeds` gives it a `tier` (and `requires` for NVFP4) guessed from the DiT's precision or file name.
 
 Precision and tier: for component files `jobWeightPrecisions` (`main/services/weightPrecision.ts`) asks the engine's `inspect` what the DiT and text encoder are; `tierForWeights` in `shared/gpuProfile.ts` then settles the tier (an INT4 DiT runs Turbo, an INT8 DiT or INT8/W4A8 text encoder runs High). A prepared bundle folder counts as bf16. When the engine cannot name a file's precision (NVFP4, or an engine without `inspect`), the bundle's own `tier` decides instead (`profileForBundle` in `shared/bundleFit.ts`); either way the job records `source: 'model-weights'`. The CLI engines (兼容模式, AMD 原生) read only a prepared bf16 folder (section 8).
+
+### 4.5 Shared model folders
+
+Weights another app keeps (ComfyUI, Stable Diffusion WebUI, Forge, or any folder) are used where they are. A source (`ModelSource` in `shared/types.ts`, kept in `Settings.modelSources`) is an install, a models folder or a ComfyUI YAML config, added in 模型 › 共享模型目录 (`ModelSources.tsx`) or first-run setup's 使用已有模型. `main/services/modelSources.ts` turns the sources into catalog entries.
+
+| Step | Code | Behaviour |
+| --- | --- | --- |
+| Roots | `sourceRoots` in `modelSourcePaths.ts` | The install's `models` folder; ComfyUI's `extra_model_paths.yaml` and `extra_models_config.yaml`; Comfy Desktop's `modelsDirs` and `basePath`; the `--*-dir` arguments in `webui-user.bat` and `webui-user.sh`, read and never run (a line over 8192 characters is skipped). Only `~`, `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `ProgramFiles` and `ProgramFiles(x86)` are expanded (`expandPathVariables` in `main/lib/localPath.ts`); a launch argument with another variable is dropped. |
+| Local only | `isNetworkPath` in `main/lib/localPath.ts` | A network place (UNC and WebDAV shares, `\\?\` and `\\.\` paths, URLs) named by a config, reached through a link or found by discovery is skipped, and a source that names one says so (已跳过网络位置) without repeating the path. A link is read before it is followed (`linksToNetwork`). Only a folder picked in the folder dialog, and what lies inside it, may be on the network. A drive root or the home folder is refused as a source (请选择具体的模型目录) and skipped as a root. |
+| Overlap | `separateFromDownloads` in `modelSources.ts` | A root inside the models root or a per-role folder is skipped; a download folder inside a root is left out of that root's scan. So a per-role folder may point into a ComfyUI tree (section 2) and both keep working; the source says 已跳过与 Moss Studio 下载位置重叠的目录. |
+| Scan | `scanModelDirectory(root, { shared })` | The walk of section 4.1 with its limits, plus: folder links are followed when the target is local, `diffusers` and `controlnet` are read, and the root's own name (`checkpoints`, `loras`) gives the role. |
+| Check | `inspectWeight` in `modelSources.ts` | A `.safetensors` file not checked at its current size and mtime goes to the engine's `inspect`, all through one sidecar (`withEngineRequests` in `main/lib/probeEngine.ts`: `ENGINE_HELLO_TIMEOUT_MS`, `ENGINE_INSPECT_TIMEOUT_MS`). A diffusers folder is read instead: a MOSS-Image `model_index.json`, not FP16, with its runtime configs. Anything else is `incompatible` (listed under 不兼容的模型和 LoRA). A file the engine could not check stays `pending`, and the source shows why. |
+| Entries | `sharedModels`, `sharedAdapters`, `sharedControlAdapters` | Id `shared-` plus the first 24 hex characters of the SHA-256 of the path (lowercased on Windows) (`SHARED_MODEL_PREFIX` and `isSharedModelId` in `shared/sharedModels.ts`), tag `shared-directory`. Main-model parts join the catalog's models, and a diffusers folder also becomes a bundle with the same id, which the model lists leave out; LoRAs join section 5's list and control adapters section 6's. None is deleted or removed by itself: 移除来源 drops the whole source and keeps every file. |
+
+At job start `requireSharedWeight` checks the path, size and mtime the scan saw; a file that changed or is gone fails the job with a message that says which and asks for 自动扫描. A shared single file is passed like the person's own file (section 4.4). A shared diffusers folder is passed as `model` itself and nothing is prepared (`directFolder` in `prepareModelSource`). A file also registered through 用电脑上的模型文件… keeps both entries, so a combination saved with either id still runs; 自己组合 lists it once (`duplicatesImportedFile`).
+
+Two caches, both in `<data root>/cache/` (`paths.sharedModelIndex`, `paths.modelSourceDiscovery`):
+
+| File | Holds |
+| --- | --- |
+| `shared-models.json` | The engine key (`moss-server` path and mtime); per checked file its size, mtime and `inspect` answer; a snapshot of every source's status and usable weights, keyed by the sources and the download folders. |
+| `model-source-discovery.json` | The suggested sources (kind and path) of the last discovery. Running apps are not saved. |
+
+At start the snapshot is restored before the first catalog, and nothing is scanned. When there is no snapshot, or it was taken for other sources or download folders or by another engine, a scan runs in the background, the restored weights stay usable meanwhile, and `Events.modelsChanged` refreshes the windows when it ends. A new engine (installed by hand or by auto-update) and a change of 模型文件夹 or a per-role folder start the same background scan. 自动扫描, adding, moving and removing a source scan in the foreground.
+
+Discovery (`nearbyModelSources` in `modelSourcePaths.ts`) reads the Comfy Desktop profiles (`desktopProfileLocations`) and looks one folder deep in Desktop, Documents, Downloads and Apps in the home folder, plus `~/Applications` and `/opt` on macOS and Linux, or on Windows `%LOCALAPPDATA%\Programs`, `ProgramFiles`, `ProgramFiles(x86)`, each fixed drive's Program Files folders and the Desktop and Documents known folders. On Windows one PowerShell query (`modelSourceDiscovery.ts`, its script on stdin, ended at quit) adds the install folders from the Uninstall registry keys (HKCU, HKLM and WOW6432Node) and from the Start Menu and Desktop shortcuts of these apps. Discovery does not read shell history, the Run box history, recent-file shortcuts, installer logs or the process list. 自动扫描 also asks ports 8188 and 7860 on `127.0.0.1` whether ComfyUI or WebUI answers (`modelSourceServices.ts`).
 
 ## 5. LoRA
 
@@ -161,6 +187,7 @@ A LoRA is an `AdapterEntry` (`kind: 'lora' | 'lycoris' | 'dmd'`) in the catalog'
 | --- | --- | --- |
 | Catalog download | `runAdapterDownload` | The repository files listed in the entry, then `adapter.json` (the entry itself). Installed when `adapter.json` and every file exist. |
 | Imported file, 导入 LoRA 文件 | `importAdapterFile` | A `.safetensors` file (LoRA or LyCORIS) is copied into `<adapters root>/<id>/`, id from the file name with `-2`, `-3` on collision; origin `imported`, tag `local-import`. Copied, not referenced, because the engine opens the path itself and people move downloads. |
+| Shared model folder | `sharedAdapters` in `modelSources.ts` | A LoRA found in a shared source (section 4.5), used where it is; shown as 共享模型目录 with no 删除. |
 | Trained in 训练 | `registerTrainedAdapter` | The checkpoint of the step the person keeps is copied in as `trained-<training id>`; origin `trained`, tag `trained`. Keeping another step registers the same id again and replaces the file ([training.md](/docs/reference/training.md#10-choosing-a-step-and-the-lora)). |
 
 Local adapters are indexed in `<adapters root>/index.json` (`LocalAdapterIndex`). Deleting one removes its folder and its index row.
@@ -171,7 +198,7 @@ UI: 模型 › LoRA (`LoraTab.tsx`): 已安装 with 导入 LoRA 文件 and 删�
 
 ## 6. Control adapters
 
-A control adapter (控制适配器) is the file that makes a 控制图 (role `control`) usable. `main/services/controlAdapters.ts` keeps them in `<data root>/control-adapters.json` as `ControlAdapterEntry` rows. `addControlAdapter` asks the engine to `inspect` the file (the running `moss-server`, else a short-lived one from the local package) and accepts it only when the report says `kind: 'control_adapter'` and not `loadable: false`; it stores the `control_kinds` (for example `depth`, `canny`) and `base_model` the engine reports. A file of another kind is refused with a hint (这是 LoRA，请在 LoRA 中添加, and the same for DiT, text encoder, VAE). Removing an entry drops the record; the file stays.
+A control adapter (控制适配器) is the file that makes a 控制图 (role `control`) usable. `main/services/controlAdapters.ts` keeps them in `<data root>/control-adapters.json` as `ControlAdapterEntry` rows. `addControlAdapter` asks the engine to `inspect` the file (the running `moss-server`, else a short-lived one from the local package) and accepts it only when the report says `kind: 'control_adapter'` and not `loadable: false`; it stores the `control_kinds` (for example `depth`, `canny`) and `base_model` the engine reports. A file of another kind is refused with a hint (这是 LoRA，请在 LoRA 中添加, and the same for DiT, text encoder, VAE). Removing an entry drops the record; the file stays. Control adapters found in a shared source (section 4.5) are listed too, without 移除, unless a registered entry has the same path.
 
 UI: 模型 › 控制适配器 › 添加文件 (`ControlAdaptersSection.tsx`). The section is hidden when the engine has no `control` feature and nothing is registered, and disabled until an engine is installed. A control port on the board asks for one before it accepts a wire (`renderer/src/pages/studio/ports.ts`).
 
@@ -183,15 +210,17 @@ Route `/models`, Rail entry 模型, `renderer/src/pages/models/ModelsPage.tsx`. 
 | --- | --- | --- |
 | 推荐模型 | `FeaturedModel` in `ModelEntries.tsx`, then `ModelList` | The bundle that suits this computer first (`bestBundleFor`), with the reason, name, description and total size and one main action: 下载, 暂停, 继续 or 重试; 可以使用 and 去创作 when installed. Below it every other `certified` bundle. A bundle this GPU cannot run says why; a paused or failed download of it can still be continued or retried. |
 | 其他模型 | `ModelList`, `CombinationDialog.tsx` | Every bundle that is not `certified` as a row (the shipped catalog has none), and each combination tagged 我的组合 (hidden on a remote host). 自己组合 (local only) offers 挑选要下载的部件 and 用电脑上的模型文件…: the dialog has 名字 and one select per slot (下载: each `choice` label once, the copy already here first, else the folder version; 电脑上的文件: registered single files and 选择文件…), counts 还要下载 and saves with 下载并保存 or 保存. Deleting a combination removes the downloads only it needs, never the person's files (`DeleteModelDialog`). |
+| 共享模型目录 | `ModelSources.tsx` | Local only. The sources with their path and problems (更换路径, 移除来源), the suggestions to 接入, 添加来源 (ComfyUI, Stable Diffusion WebUI, Forge, 自定义目录) and 自动扫描, which also says which of these apps is running. |
+| 可用模型 | `ModelsTab` in `ModelsPage.tsx` | The main-model parts found in the sources, and under 不兼容的模型和 LoRA (closed at first) the files the engine cannot use. |
 | 控制适配器 | section 6 | Local only. |
 | 存储位置 | `StorageRow` | 模型文件夹 with 打开模型文件夹 and 在 设置 › 存储 中更改; on a host, 模型保存在 … 上. |
-| 高级 | `AdvancedPanel.tsx` | 文件夹 (`ModelDirectoriesCard`) and 没有用到的文件 (downloads no bundle or combination needs, `unusedDownloads`, with 查看 and 全部删除), or on a host 主机上的文件夹 (模型保存目录, 生成时使用的模型文件夹 with 自动查找, 下载完整的默认模型). |
+| 高级 | `AdvancedPanel.tsx` | 文件夹 (`ModelDirectoriesCard`) and 没有用到的文件 (downloads no bundle or combination needs, `unusedDownloads`, with 查看 and 全部删除), or on a host `<host name> 上的文件夹` (模型保存目录, 生成时使用的模型文件夹 with 自动查找, 下载完整的默认模型). |
 
 State texts come from `bundleView` and `itemState` in `logic.ts`: 可以使用, 下载中 N%, 正在校验文件, 已暂停, 下载没有完成, 还差 N 个文件, 未下载, 已下载, 已添加, 找不到原文件, 文件不完整 (action 修复). Files the app downloaded are 删除d; registered files are 移除d from the list. Deep links take `?bundle=<id>&component=<role>&hostId=<id>&tab=models|lora|downloads` (`parseModelsQuery`); first-run setup uses them to point at the model with the missing part.
 
 ## 8. Limits
 
-As built at d0883df. None of these is planned work; they describe what the code does today.
+As built at bc8d71b. None of these is planned work; they describe what the code does today.
 
 - A combination's own file must be a single file (`format: 'comfyui'`); a registered diffusers folder is a whole model (section 4.3), not a slot choice.
 - A combination is not edited in place: it is deleted and built again.
@@ -202,4 +231,5 @@ As built at d0883df. None of these is planned work; they describe what the code 
 - Single-file bundles and combinations with a single file run only on this computer's moss-server. A remote host uses its own model folder, and a GPU running a CLI engine refuses them with the reason the 模型 page and Studio also show.
 - The CLI engines refuse any `format: 'comfyui'` component (so a combination with a single file) and any non-bf16 DiT or text encoder (`cliBundleProblem` in `shared/cliEngine.ts`; `cliBundleDtypeProblem` reads the shard dtypes of a prepared folder).
 - Remote hosts take no LoRA (`resolveCanvasAdapters` refuses when `hostId` is set), show no combinations and no control adapters; 自己组合 is local only.
-- Adding a control adapter needs an engine whose `hello` lists `inspect`; an older engine is refused with 当前引擎版本不能识别控制适配器.
+- Shared model folders serve only this computer: remote hosts and SSH engines cannot use their files (`isLocalOnlyBundle` in `shared/bundleFit.ts`). A CLI engine takes a shared diffusers folder only when it is bf16, and no shared single file.
+- Adding a control adapter needs an engine that answers `inspect`; one whose `hello` says `inspect: false`, or that answers `method_not_found`, is refused with 当前引擎版本不能识别控制适配器.

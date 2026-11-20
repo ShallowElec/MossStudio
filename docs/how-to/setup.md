@@ -2,7 +2,7 @@
 status: current
 last-verified: 2026-11-08 (fec4fe3)
 audience: users
-code: apps/desktop/src/renderer/src/pages/install/, apps/desktop/src/renderer/src/pages/setup/, apps/desktop/src/renderer/src/components/shell/PreparationChip.tsx, apps/desktop/src/shared/engineChoice.ts, apps/desktop/src/shared/machineFit.ts, apps/desktop/src/shared/enginePackages.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/renderer/src/pages/settings/sections.ts, apps/desktop/src/renderer/src/components/update/updateModel.ts
+code: apps/desktop/src/renderer/src/pages/install/, apps/desktop/src/renderer/src/pages/setup/, apps/desktop/src/renderer/src/pages/models/ModelSources.tsx, apps/desktop/src/renderer/src/components/shell/PreparationChip.tsx, apps/desktop/src/shared/engineChoice.ts, apps/desktop/src/shared/machineFit.ts, apps/desktop/src/shared/enginePackages.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/renderer/src/pages/settings/sections.ts, apps/desktop/src/renderer/src/components/update/updateModel.ts
 ---
 
 # 安装 MossStudio 并生成第一张图
@@ -61,7 +61,7 @@ code: apps/desktop/src/renderer/src/pages/install/, apps/desktop/src/renderer/sr
 | 「开始下载」 | 同时下载引擎和模型。 | 只下载这一次，之后都在本机运行。 |
 
 1. 先看显卡那一行。如果「详情」里有一行灰字建议你更新驱动或安装 ROCm，照做后回到这里重新打开，能换到更快的引擎。
-2. 已经有 MOSS-Image 模型文件的话，点「已有模型文件…」，选中那个文件夹。成功会提示「已在原位置使用 …，不用再下载模型」；如果它不是可以直接使用的 MOSS-Image 模型，会告诉你仍需下载。
+2. 电脑上已经有模型的话，点「使用已有模型」。在打开的窗口里点「自动扫描」，或用「添加来源」选 ComfyUI、Stable Diffusion WebUI、Forge 或自己的模型目录，再点「使用 …」选一个完整模型，或点「自己组合」挑主模型、文本编码器和 VAE。引擎还没装好时先点「先准备引擎」，装好后才能检查这些文件。选好后卡片上会写出选用的模型，「开始下载」只下载还缺的部分；点「改用推荐模型」可以换回来。只有一个 MOSS-Image 模型文件夹的话，在同一个窗口里点「已有模型文件…」，选中那个文件夹。成功会提示「已在原位置使用 …，不用再下载模型」；如果它不是可以直接使用的 MOSS-Image 模型，会告诉你仍需下载。
 3. 点「开始下载」。标题变成「正在准备」，显示总进度、已下载大小、还要多久，下面分列「运行组件」（引擎）和模型各自的进度。
 4. 不用等。点「先去看看」就能进入创作页；标题栏会多出一个「准备中 N%」的小标签，带剩余时间，点它回到这个页面。创作页上的「生成」按钮这时写着「下载完成后就能生成 · N%」。
 5. 下载完成后页面自动进入创作，并提示「模型准备好了，可以生成了」。中途关掉 MossStudio 也没关系，下次打开会自己接着下。
@@ -114,7 +114,7 @@ CUDA 引擎对 NVIDIA 驱动的最低要求：CUDA 13 需要 Windows 580.88 或 
 
 MossStudio 自己的更新很安静：「自动更新」开着时，新版本在后台下载，「设置 › 通知与更新」里写着「X 已下载，下次打开时更新」，下次打开就是新版本，并提示一次「已更新到 X」，点「看看新内容」能看更新说明。一直不关机的话，三天后标题栏才会出现「重启以更新」；想马上换就点「现在重启」。关掉「自动更新」后，有新版本时标题栏会显示「新版本 X」，由你决定何时「下载更新」。
 
-模型本身在「主导航 › 模型」里管理：下载模型、在「其他模型 › 自己组合」里挑选部件或「用电脑上的模型文件…」、导入 LoRA（「从电脑导入」）、换「模型文件夹」。
+模型本身在「主导航 › 模型」里管理：下载模型、在「共享模型目录」里接入 ComfyUI 等软件已有的模型、在「其他模型 › 自己组合」里挑选部件或「用电脑上的模型文件…」、导入 LoRA（「从电脑导入」）、换「模型文件夹」。
 
 ## 7. 用另一台电脑和训练（可选）
 
