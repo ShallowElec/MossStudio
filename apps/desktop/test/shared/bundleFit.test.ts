@@ -9,6 +9,7 @@ import {
   generationGpus,
   isFileBundle,
   isFp16Dit,
+  isLocalOnlyBundle,
   profileForBundle,
 } from '@shared/bundleFit'
 import type { GpuInventoryDevice, ModelBundle } from '@shared/types'
@@ -80,6 +81,29 @@ describe('isFileBundle', () => {
         { id: 'local-dit', provider: 'local', format: 'comfyui' },
       ]),
     ).toBe(true)
+  })
+
+  it('treats a shared diffusers folder as a whole bundle folder and a shared single file as a file', () => {
+    const folder = { components: { dit: 'shared-full', textEncoder: 'shared-full', vae: 'shared-full' } }
+    const file = { components: { dit: 'shared-dit', textEncoder: 'qwen35-encoder', vae: 'flux2-vae-small' } }
+    const models = [
+      { id: 'shared-full', provider: 'local', format: 'diffusers' },
+      { id: 'shared-dit', provider: 'local', format: 'comfyui' },
+      ...catalog.models,
+    ] as const
+    expect(isFileBundle(folder, models)).toBe(false)
+    expect(isFileBundle(file, models)).toBe(true)
+    // A shared part that is no longer listed cannot be shown to be a folder.
+    expect(isFileBundle(folder, catalog.models)).toBe(true)
+  })
+})
+
+describe('isLocalOnlyBundle', () => {
+  it('keeps shared folders and single files on this computer, and lets official folders go elsewhere', () => {
+    const models = [{ id: 'shared-full', provider: 'local', format: 'diffusers' } as const, ...catalog.models]
+    expect(isLocalOnlyBundle({ components: { dit: 'shared-full', textEncoder: 'shared-full', vae: 'shared-full' } }, models)).toBe(true)
+    expect(isLocalOnlyBundle(bundle('moss-sft-int8'), models)).toBe(true)
+    expect(isLocalOnlyBundle(bundle('moss-sft'), models)).toBe(false)
   })
 })
 
@@ -246,6 +270,11 @@ describe('bundleWeightProblem', () => {
   it('reads an entry without tags (a catalog fetched from elsewhere) by its precision alone', () => {
     expect(bundleWeightProblem(combination('bare'), [{ id: 'bare', precision: 'fp16' }])).not.toBeNull()
     expect(bundleWeightProblem(combination('bare'), [{ id: 'bare', precision: 'bf16' }])).toBeNull()
+  })
+
+  it('names a shared part that is no longer in the catalog, and passes one that is', () => {
+    expect(bundleWeightProblem(combination('shared-gone'), catalog.models)).toBe('共享模型文件不可用，请刷新目录或重新选择')
+    expect(bundleWeightProblem(combination('shared-here'), [{ id: 'shared-here', precision: 'int8' }, ...catalog.models])).toBeNull()
   })
 
   it('lets bf16 and quantized main models through, so every catalog model passes', () => {

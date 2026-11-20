@@ -2,6 +2,7 @@ import { Download, FolderOpen, Package, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cliGpuUuids, generationGpus } from '@shared/bundleFit'
+import { isSharedModelId } from '@shared/sharedModels'
 import { Ipc } from '@shared/channels'
 import type { SlotKey } from '@shared/modelCombos'
 import type { AppInfo, Catalog, ModelBundle, ModelSourceFile, ModelSourceStatus } from '@shared/types'
@@ -119,7 +120,7 @@ function ModelsTab({
     () =>
       catalog.bundles
         // Scanned local files and 自己组合 are built and run on this computer.
-        .filter((bundle) => !bundle.id.startsWith('shared-') && (!remote || (bundle.id !== 'local-files' && !bundle.custom)))
+        .filter((bundle) => !isSharedModelId(bundle.id) && (!remote || (bundle.id !== 'local-files' && !bundle.custom)))
         .map((bundle) =>
           bundleView(
             bundle,
@@ -144,7 +145,7 @@ function ModelsTab({
   const deletePlan = (bundle: ModelBundle) =>
     bundleDeletePlan(bundle, catalog.bundles, catalog.models, location.isModelInstalled, location.tasks)
   const deletable = (bundle: ModelBundle): boolean =>
-    !bundle.id.startsWith('shared-') && (Boolean(bundle.custom) || deletePlan(bundle).ids.length > 0)
+    !isSharedModelId(bundle.id) && (Boolean(bundle.custom) || deletePlan(bundle).ids.length > 0)
   const featuredCard = featuredView ? (
     <FeaturedModel
       view={featuredView}
@@ -240,9 +241,10 @@ function ModelsTab({
                   ))}
                 </Group>
               ) : (
-                <p className="px-1 text-ui text-ink-2">
-                  {sources.some((source) => source.pending > 0) ? '共享模型待检查。' : '已接入的目录暂无可用模型。'}
-                </p>
+                <EmptyState
+                  size="section"
+                  title={sources.some((source) => source.pending > 0) ? '模型文件还在等待检查' : '已接入的目录里没有能用的模型'}
+                />
               )}
               {incompatible.length ? (
                 <Advanced

@@ -1,6 +1,8 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, extname, join, relative, resolve } from 'node:path'
 import type { ModelScanResult, ScannedModel } from '@shared/types'
+import { isNetworkPath, linksToNetwork, modelPathKey } from '../lib/localPath'
+import { isInside } from '../lib/paths'
 import { diffusersFolderName, inspectDiffusersFolder, type ImportedModelRole } from './modelImports'
 
 /**
@@ -48,6 +50,9 @@ const skippedDirectories = new Set([
 
 const maxDepth = 6
 const maxFiles = 4000
+/** Bound a scan of a folder far larger than a models tree (a whole drive reached through a link). */
+export const MAX_SCAN_DIRECTORIES = 5000
+export const SCAN_TIME_LIMIT_MS = 30_000
 
 interface RoleRule {
   role: ImportedModelRole
@@ -112,15 +117,40 @@ function isDiffusersFolder(entries: string[]): boolean {
   return lower.includes('model_index.json') || lower.includes('transformer/config.json')
 }
 
-async function walk(
-  root: string,
-  result: ScanResult,
-  directory = root,
-  depth = 0,
-  shared?: { roots: string[]; visited: Set<string> },
-): Promise<void> {
-  if (depth > maxDepth || shared?.visited.has(directory)) return
-  shared?.visited.add(directory)
+export interface ScanOptions {
+  /** A shared-folder scan: follows folder links to local targets and reads the diffusers and controlnet folders. */
+  shared?: {
+    /** Folders not to enter: Moss Studio's own download folders inside a shared tree. */
+    exclude: string[]
+  }
+  maxDirectories?: number
+  timeLimitMs?: number
+}
+
+interface Walk {
+  root: string
+  result: ScanResult
+  shared: ScanOptions['shared'] | null
+  visited: Set<string>
+  directories: number
+  maxDirectories: number
+  deadline: number
+  timeLimitMs: number
+  stopped: boolean
+}
+
+function stop(walk: Walk, path: string, reason: string): void {
+  walk.stopped = true
+  walk.result.skipped.push({ path, reason })
+}
+
+/** `logical` is the folder as reached through links; it gives roles and relative paths, `directory` the real files. */
+async function walkDirectory(walk: Walk, directory: string, logical: string, depth: number): Promise<void> {
+  const { root, result } = walk
+  if (walk.stopped || depth > maxDepth || walk.visited.has(modelPathKey(directory))) return
+  if (++walk.directories > walk.maxDirectories) return stop(walk, directory, `已检查 ${walk.maxDirectories} 个文件夹，已停止扫描`)
+  if (Date.now() > walk.deadline) return stop(walk, directory, `扫描超过 ${Math.round(walk.timeLimitMs / 1000)} 秒，已停止扫描`)
+  walk.visited.add(modelPathKey(directory))
   let entries
   try {
     entries = await readdir(directory, { withFileTypes: true })
@@ -134,7 +164,7 @@ async function walk(
   entries.sort((a, b) => a.name.localeCompare(b.name))
   if (isDiffusersFolder(entries.map((entry) => entry.name))) {
     // The picked folder itself: show its name, not ".".
-    const relativePath = relative(root, directory) || basename(directory)
+    const relativePath = relative(root, logical) || basename(logical)
     const info = await stat(directory).catch(() => null)
     const folder = await inspectDiffusersFolder(directory)
     if (info) {
@@ -153,39 +183,37 @@ async function walk(
     return
   }
   for (const entry of entries) {
+    if (walk.stopped) return
     let absolute = join(directory, entry.name)
-    if (shared && entry.isSymbolicLink()) {
-      const target = await realpath(absolute).catch(() => null)
-      if (
-        !target ||
-        !shared.roots.some((base) => {
-          const path = relative(base, target)
-          return path !== '..' && !path.startsWith('..' + sep) && !isAbsolute(path)
-        })
-      )
-        continue
+    let linked: Awaited<ReturnType<typeof stat>> | null = null
+    if (walk.shared && entry.isSymbolicLink()) {
+      // ComfyUI setups often link checkpoints to another drive; follow it unless it leads to the network.
+      const network = await linksToNetwork(absolute)
+      const target = network ? null : await realpath(absolute).catch(() => null)
+      if (network || (target && isNetworkPath(target)))
+        result.skipped.push({ path: absolute, reason: '已跳过网络位置（文件夹链接指向网络）' })
+      if (!target || isNetworkPath(target)) continue
       absolute = target
+      linked = await stat(target).catch(() => null)
     }
-    const linked = absolute !== join(directory, entry.name) ? await stat(absolute).catch(() => null) : null
     if (entry.isDirectory() || linked?.isDirectory()) {
       const lower = entry.name.toLowerCase()
-      if (entry.name.startsWith('.') || (skippedDirectories.has(lower) && !(shared && ['diffusers', 'controlnet'].includes(lower))))
+      if (entry.name.startsWith('.') || (skippedDirectories.has(lower) && !(walk.shared && ['diffusers', 'controlnet'].includes(lower))))
         continue
-      await walk(root, result, absolute, depth + 1, shared)
+      if (walk.shared?.exclude.some((folder) => isInside(folder, absolute))) continue
+      await walkDirectory(walk, absolute, join(logical, entry.name), depth + 1)
       continue
     }
     if (!entry.isFile() && !linked?.isFile()) continue
     const extension = extname(entry.name).toLowerCase()
     if (!modelExtensions.has(extension)) continue
-    if (result.files >= maxFiles) {
-      result.skipped.push({ path: directory, reason: `文件超过 ${maxFiles} 个，已停止扫描` })
-      return
-    }
+    if (result.files >= maxFiles) return stop(walk, directory, `文件超过 ${maxFiles} 个，已停止扫描`)
     const info = await stat(absolute).catch(() => null)
     if (!info || !info.isFile() || info.size <= 0) continue
     result.files += 1
-    const relativePath = relative(root, absolute)
-    const detected = detectRole(shared ? join(basename(root), relativePath) : relativePath)
+    const relativePath = relative(root, join(logical, entry.name))
+    // A shared root is itself named by role (checkpoints, loras), so its own name counts.
+    const detected = detectRole(walk.shared ? join(basename(root), relativePath) : relativePath)
     result.candidates.push({
       path: absolute,
       relativePath,
@@ -200,7 +228,7 @@ async function walk(
   }
 }
 
-export async function scanModelDirectory(directory: string, sharedRoots?: string[]): Promise<ScanResult> {
+export async function scanModelDirectory(directory: string, options: ScanOptions = {}): Promise<ScanResult> {
   const root = await realpath(resolve(directory))
   const info = await stat(root)
   if (!info.isDirectory()) throw new Error('请选择模型文件夹')
@@ -211,7 +239,19 @@ export async function scanModelDirectory(directory: string, sharedRoots?: string
     candidates: [],
     skipped: [],
   }
-  await walk(root, result, root, 0, sharedRoots ? { roots: sharedRoots, visited: new Set() } : undefined)
+  const timeLimitMs = options.timeLimitMs ?? SCAN_TIME_LIMIT_MS
+  const walk: Walk = {
+    root,
+    result,
+    shared: options.shared ?? null,
+    visited: new Set(),
+    directories: 0,
+    maxDirectories: options.maxDirectories ?? MAX_SCAN_DIRECTORIES,
+    deadline: Date.now() + timeLimitMs,
+    timeLimitMs,
+    stopped: false,
+  }
+  await walkDirectory(walk, root, root, 0)
   result.candidates.sort((a, b) => {
     if (a.role !== b.role) return a.role.localeCompare(b.role)
     return b.size - a.size

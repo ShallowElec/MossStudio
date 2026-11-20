@@ -13,14 +13,16 @@ import type {
   ScannedModel,
   Settings,
 } from '@shared/types'
+import { SHARED_MODEL_PREFIX } from '@shared/sharedModels'
 import { writeFileAtomic } from '../lib/atomicWrite'
+import { isNetworkPath, modelPathKey } from '../lib/localPath'
 import { isInside, paths } from '../lib/paths'
 import { withEngineRequests, type EngineRequest } from '../lib/probeEngine'
 import { localServerPath } from './engineInstalls'
 import { inspectDiffusersFolder } from './modelImports'
 import { legacyModelReady } from './modelReadiness'
 import { scanModelDirectory } from './modelScan'
-import { guessModelSourceKind, modelPathKey, nearbyModelSources, sourceRoots } from './modelSourcePaths'
+import { guessModelSourceKind, isTooBroadModelFolder, nearbyModelSources, sourceRoots } from './modelSourcePaths'
 import { getSettings, updateSettings } from './settings'
 
 const inspectionSchema = z.object({
@@ -75,6 +77,8 @@ interface SharedWeight {
 
 let inventory = new Map<string, SharedWeight>()
 let statuses: ModelSourceStatus[] = []
+/** The Moss Studio download folders `statuses` were scanned against; a status is reused only for the same folders. */
+let statusesWritable = ''
 let ongoing: Promise<void> | null = null
 let scanGeneration = 0
 let cachedEngine: string | null = null
@@ -99,12 +103,12 @@ async function readSharedIndex(): Promise<z.infer<typeof indexSchema> | undefine
     const parsed = indexSchema.safeParse(JSON.parse(await readFile(paths.sharedModelIndex(), 'utf8')))
     if (parsed.success) return parsed.data
   } catch {
-    // 缓存不可读时从共享文件重新检查。
+    // Missing or unreadable cache: the shared files are checked again.
   }
 }
 
 function idFor(path: string): string {
-  return 'shared-' + createHash('sha256').update(modelPathKey(path)).digest('hex').slice(0, 24)
+  return SHARED_MODEL_PREFIX + createHash('sha256').update(modelPathKey(path)).digest('hex').slice(0, 24)
 }
 
 function storageRoots(settings: Settings): string[] {
@@ -114,24 +118,27 @@ function storageRoots(settings: Settings): string[] {
   ]
 }
 
-function overlaps(a: string, b: string): boolean {
-  return modelPathKey(a) === modelPathKey(b) || isInside(a, b) || isInside(b, a)
-}
-
 async function managedRoots(settings: Settings): Promise<string[]> {
   return Promise.all(storageRoots(settings).map((path) => realpath(path).catch(() => path)))
 }
 
-export async function assertSharedStorage(settings: Settings): Promise<void> {
-  const writable = await managedRoots(settings)
-  for (const source of settings.modelSources ?? []) {
-    const { roots } = await sourceRoots(source)
-    if (roots.some((root) => writable.some((target) => overlaps(root, target)))) {
-      throw new Error('共享模型目录与下载位置重叠，请为 Moss Studio 选择单独的下载位置')
-    }
+function writableKey(writable: string[]): string {
+  return JSON.stringify(writable.map(modelPathKey))
+}
+
+/**
+ * Splits a shared root against Moss Studio's download folders: a root inside one is
+ * skipped, and a download folder inside a root is left out of its scan. A per-role
+ * folder may point into a ComfyUI tree, so both keep working without listing a file twice.
+ */
+function separateFromDownloads(root: string, writable: string[]): { readable: boolean; exclude: string[] } {
+  return {
+    readable: !writable.some((target) => isInside(target, root)),
+    exclude: writable.filter((target) => isInside(root, target)),
   }
 }
 
+/** A cached answer for an unchanged file, or null when the engine must be asked and is not there. Engine errors throw. */
 async function inspectWeight(file: ScannedModel, request: EngineRequest | null): Promise<Inspection | string | null> {
   if (file.layout === 'diffusers-folder') {
     const dir = await inspectDiffusersFolder(file.path)
@@ -151,33 +158,32 @@ async function inspectWeight(file: ScannedModel, request: EngineRequest | null):
   const cached = inspected.get(key)
   if (cached?.size === file.size && cached.mtimeMs === file.mtimeMs) return cached.value
   if (!request) return null
-  try {
-    const result = await request('inspect', { path: file.path })
-    const kind = result.kind
-    const base = typeof result.base_model === 'string' && result.base_model ? result.base_model : undefined
-    let value: Inspection | string
-    if (
-      result.loadable === true &&
-      (kind === 'dit' || kind === 'text_encoder' || kind === 'vae' || kind === 'lora' || kind === 'control_adapter')
-    ) {
-      const precision = typeof result.precision === 'string' ? result.precision : 'local'
-      value = {
-        role: kind,
-        precision: precision === 'w4a4' ? 'int4' : precision,
-        base,
-        controlKinds: Array.isArray(result.control_kinds)
-          ? result.control_kinds.filter((item): item is string => typeof item === 'string')
-          : [],
-      }
-    } else {
-      value = '当前引擎无法使用此权重'
+  const result = await request('inspect', { path: file.path })
+  const kind = result.kind
+  const base = typeof result.base_model === 'string' && result.base_model ? result.base_model : undefined
+  let value: Inspection | string
+  if (
+    result.loadable === true &&
+    (kind === 'dit' || kind === 'text_encoder' || kind === 'vae' || kind === 'lora' || kind === 'control_adapter')
+  ) {
+    const precision = typeof result.precision === 'string' ? result.precision : 'local'
+    value = {
+      role: kind,
+      precision: precision === 'w4a4' ? 'int4' : precision,
+      base,
+      controlKinds: Array.isArray(result.control_kinds)
+        ? result.control_kinds.filter((item): item is string => typeof item === 'string')
+        : [],
     }
-    inspected.set(key, { size: file.size, mtimeMs: file.mtimeMs, value })
-    return value
-  } catch {
-    // 引擎或磁盘暂时无法读取时保留待检查状态，下一次刷新可以重试。
-    return null
+  } else {
+    value = '当前引擎无法使用此权重'
   }
+  inspected.set(key, { size: file.size, mtimeMs: file.mtimeMs, value })
+  return value
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 async function sharedEngine(): Promise<{ server: string | null; key: string }> {
@@ -193,50 +199,45 @@ function snapshotKey(sources: ModelSource[], writable: string[]): string {
     .digest('hex')
 }
 
-/** 用上次清单恢复选择器。文件使用前仍检查真实路径、大小和修改时间。 */
-export async function restoreModelSources(settings: Settings): Promise<void> {
+/**
+ * Restores the last inventory so pickers work at once; a file is still checked for
+ * its path, size and mtime before use. Returns true when a background refresh is
+ * due: the sources or download folders changed, or the engine changed and must
+ * check the files again.
+ */
+export async function restoreModelSources(settings: Settings): Promise<boolean> {
   const sources = settings.modelSources ?? []
-  if (!sources.length) return
+  if (!sources.length) return false
   const [index, writable, engine] = await Promise.all([readSharedIndex(), managedRoots(settings), sharedEngine()])
   const snapshot = index?.snapshot
-  if (!index || !snapshot || snapshot.key !== snapshotKey(sources, writable)) {
-    await refreshModelSources(settings)
-    return
-  }
-  const engineChanged = index.engine !== engine.key
-  inventoryEngine = engine.key
-  const compatible = snapshot.weights.filter(({ file }) => !engineChanged || file.layout === 'diffusers-folder')
+  if (!index || !snapshot) return true
+  const same = snapshot.key === snapshotKey(sources, writable)
+  // Until the refresh replaces them, the sources still configured keep their old answers, so nothing disappears meanwhile.
+  const current = new Set(sources.map((source) => source.id + '\0' + modelPathKey(source.path)))
+  statuses = snapshot.statuses.filter((status) => current.has(status.id + '\0' + modelPathKey(status.path)))
+  const kept = new Set(statuses.map((status) => status.id))
   inventory = new Map(
-    compatible.map(({ file, inspection, sourceIds }) => [idFor(file.path), { file, inspection, sourceIds: new Set(sourceIds) }]),
+    snapshot.weights.flatMap(({ file, inspection, sourceIds }) => {
+      const ids = sourceIds.filter((id) => kept.has(id))
+      return ids.length ? [[idFor(file.path), { file, inspection, sourceIds: new Set(ids) }] as const] : []
+    }),
   )
-  statuses = engineChanged
-    ? snapshot.statuses.map((source) => {
-        const available = source.files.filter((file) => inventory.has(idFor(file.path))).length
-        return {
-          ...source,
-          available,
-          pending: source.files.length - available,
-          incompatible: 0,
-          files: source.files.map((file) => ({ ...file, state: inventory.has(idFor(file.path)) ? 'available' : 'pending' })),
-          issues: [...source.issues, '引擎已变更，请点击自动扫描重新检查共享权重'],
-        }
-      })
-    : snapshot.statuses
+  statusesWritable = same ? writableKey(writable) : ''
+  inventoryEngine = index.engine
+  return !same || index.engine !== engine.key
 }
 
 async function scanSources(settings: Settings, generation: number, changed: boolean): Promise<void> {
   const sources = settings.modelSources ?? []
   const [writable, { server, key: engineKey }] = await Promise.all([managedRoots(settings), sharedEngine()])
   const unchanged = new Map<string, ModelSourceStatus>()
-  if (changed && inventoryEngine === engineKey) {
+  if (changed && inventoryEngine === engineKey && statusesWritable === writableKey(writable)) {
     for (const source of sources) {
       const last = statuses.find((status) => status.id === source.id && status.path === source.path && status.kind === source.kind)
-      if (last && !last.roots.some((root) => writable.some((target) => overlaps(root, target)))) unchanged.set(source.id, last)
+      if (last) unchanged.set(source.id, last)
     }
   }
   const roots = await Promise.all(sources.map((source) => (unchanged.has(source.id) ? Promise.resolve(null) : sourceRoots(source))))
-  const readable = roots.map((item) => item?.roots.filter((root) => !writable.some((target) => overlaps(root, target))) ?? [])
-  const allRoots = [...new Set([...readable.flat(), ...[...unchanged.values()].flatMap((source) => source.roots)])]
   const scans = new Map<string, Awaited<ReturnType<typeof scanModelDirectory>>>()
   await loadIndex(engineKey)
   const next = new Map<string, SharedWeight>()
@@ -254,10 +255,10 @@ async function scanSources(settings: Settings, generation: number, changed: bool
       continue
     }
     const resolved = roots[index]!
-    const sourceRoots = readable[index]!
+    const parts = resolved.roots.map((root) => ({ root, ...separateFromDownloads(root, writable) }))
     const status: ModelSourceStatus = {
       ...source,
-      roots: sourceRoots,
+      roots: parts.filter((part) => part.readable).map((part) => part.root),
       available: 0,
       pending: 0,
       incompatible: 0,
@@ -265,13 +266,13 @@ async function scanSources(settings: Settings, generation: number, changed: bool
       issues: [...resolved.issues],
     }
     nextStatuses.push(status)
-    if (sourceRoots.length !== resolved.roots.length) status.issues.push('已跳过与 Moss Studio 下载位置重叠的目录')
+    if (parts.some((part) => !part.readable || part.exclude.length)) status.issues.push('已跳过与 Moss Studio 下载位置重叠的目录')
     const files = new Map<string, ScannedModel>()
-    for (const root of sourceRoots) {
+    for (const { root, exclude } of parts.filter((part) => part.readable)) {
       try {
         let scan = scans.get(root)
         if (!scan) {
-          scan = await scanModelDirectory(root, allRoots)
+          scan = await scanModelDirectory(root, { shared: { exclude } })
           scans.set(root, scan)
         }
         const role = resolved.roles.get(root)
@@ -280,8 +281,9 @@ async function scanSources(settings: Settings, generation: number, changed: bool
           if (role && file.layout !== 'diffusers-folder') files.set(id, { ...file, role })
           else if (!files.has(id)) files.set(id, file)
         }
-        for (const item of scan.skipped)
-          status.issues.push(item.reason.includes('已停止') ? item.reason : '部分文件夹无法读取：' + item.path)
+        for (const item of scan.skipped) {
+          status.issues.push(/已停止|已跳过/.test(item.reason) ? item.reason : '部分文件夹无法读取：' + item.path)
+        }
       } catch {
         status.issues.push('读不到模型目录：' + root)
       }
@@ -291,13 +293,24 @@ async function scanSources(settings: Settings, generation: number, changed: bool
 
   async function inspectGroups(request: EngineRequest | null): Promise<void> {
     const results = new Map<string, Inspection | string | null>()
+    const failures = new Map<string, string>()
     for (const { status, files } of groups) {
       status.available = status.pending = status.incompatible = 0
       status.files = []
+      let failure: string | undefined
       for (const [id, file] of files) {
         if (generation !== scanGeneration) return
-        if (!results.has(id)) results.set(id, await inspectWeight(file, request))
+        if (!results.has(id)) {
+          try {
+            results.set(id, await inspectWeight(file, request))
+          } catch (error) {
+            // Left 待检查 so the next 自动扫描 asks again; the reason shows on the source.
+            results.set(id, null)
+            failures.set(id, errorText(error))
+          }
+        }
         const result = results.get(id)
+        failure ??= failures.get(id)
         const entry: ModelSourceFile = { path: file.path, name: file.name, size: file.size, role: file.role, state: 'pending' }
         if (typeof result === 'string') entry.state = 'incompatible'
         else if (result) {
@@ -311,6 +324,7 @@ async function scanSources(settings: Settings, generation: number, changed: bool
         status[entry.state]++
         status.files.push(entry)
       }
+      if (failure) status.issues.push('引擎没能检查部分文件，下次自动扫描会重试：' + failure)
     }
   }
 
@@ -325,12 +339,27 @@ async function scanSources(settings: Settings, generation: number, changed: bool
       )
     }),
   )
-  if (engineKey && server && needsEngine) await withEngineRequests(server, inspectGroups).catch(() => inspectGroups(null))
-  else await inspectGroups(null)
+  if (engineKey && server && needsEngine) {
+    try {
+      await withEngineRequests(server, inspectGroups)
+    } catch (error) {
+      console.warn('[model-sources] engine inspect failed', error)
+      await inspectGroups(null)
+      for (const { status } of groups) {
+        if (status.pending) status.issues.push('引擎没能检查部分文件，下次自动扫描会重试：' + errorText(error))
+      }
+    }
+  } else {
+    await inspectGroups(null)
+    if (needsEngine) {
+      for (const { status } of groups) if (status.pending) status.issues.push('还没有安装引擎，装好后点击「自动扫描」检查这些文件')
+    }
+  }
   if (generation !== scanGeneration) return
   inventory = next
   inventoryEngine = engineKey
   statuses = nextStatuses
+  statusesWritable = writableKey(writable)
   const currentKeys = new Set(nextStatuses.flatMap((source) => source.files.map((file) => modelPathKey(file.path))))
   for (const key of inspected.keys()) if (!currentKeys.has(key)) inspected.delete(key)
   try {
@@ -348,11 +377,15 @@ async function scanSources(settings: Settings, generation: number, changed: bool
       }),
     )
   } catch (error) {
-    console.warn('[model-sources] 无法保存模型检查索引', error)
+    console.warn('[model-sources] could not save the shared model index', error)
   }
 }
 
-/** 同时打开多个界面时只执行一次扫描，配置变动会废弃正在运行的扫描。 */
+/**
+ * Scans the shared sources once however many windows ask. `changed` means the
+ * sources or the download folders changed: a scan already running is dropped and
+ * the latest settings are scanned instead.
+ */
 export async function refreshModelSources(settings: Settings, changed = false): Promise<void> {
   if (changed) {
     const generation = ++scanGeneration
@@ -390,16 +423,16 @@ async function discoverModelSources(force: boolean): Promise<Awaited<ReturnType<
         const parsed = discoverySchema.safeParse(JSON.parse(await readFile(cacheFile, 'utf8')))
         if (parsed.success) return parsed.data
       } catch {
-        // 首次打开或缓存损坏时才进行自动发现。
+        // First open or a damaged cache: discover once.
       }
     }
     const discovery = await nearbyModelSources(force)
     try {
       await mkdir(paths.cache(), { recursive: true })
-      // 服务在线状态只显示在点击扫描的那次。原始历史记录不会写入缓存。
+      // Running services show only for the scan that found them, so they are not cached.
       await writeFileAtomic(cacheFile, JSON.stringify({ sources: discovery.sources }))
     } catch (error) {
-      console.warn('[model-sources] 无法保存目录发现缓存', error)
+      console.warn('[model-sources] could not save the discovery cache', error)
     }
     return discovery
   })()
@@ -435,9 +468,21 @@ export async function modelSourcesView(settings: Settings, mode: 'cached' | 'con
   }
 }
 
-export async function addModelSource(path: string, kind?: ModelSource['kind'], id?: string): Promise<Settings> {
+/**
+ * Adds a source, or with `id` moves one to a new path. `picked` is set only for a
+ * folder chosen in the folder dialog: only that may be on the network.
+ */
+export async function addModelSource(
+  path: string,
+  kind?: ModelSource['kind'],
+  id?: string,
+  { picked = false }: { picked?: boolean } = {},
+): Promise<Settings> {
+  if (isNetworkPath(path) && !picked) throw new Error('网络位置请用「添加来源」选择文件夹')
   const actual = await realpath(path).catch(() => null)
   if (!actual) throw new Error('找不到此位置，请重新选择')
+  if (isNetworkPath(actual) && !picked) throw new Error('网络位置请用「添加来源」选择文件夹')
+  if (isTooBroadModelFolder(actual)) throw new Error('请选择具体的模型目录，不要选整个磁盘或用户主目录')
   const sourceKind = kind ?? (await guessModelSourceKind(actual))
   const existing = getSettings().modelSources ?? []
   const source = { id: id ?? randomUUID(), kind: sourceKind, path: actual }
@@ -447,8 +492,7 @@ export async function addModelSource(path: string, kind?: ModelSource['kind'], i
     return getSettings()
   }
   const modelSources = id ? existing.map((entry) => (entry.id === id ? source : entry)) : [...existing, source]
-  await assertSharedStorage({ ...getSettings(), modelSources })
-  // 校验期间另一窗口可能更新来源，写入时以最新设置为准。
+  // Another window may have changed the sources while the kind was guessed; the newest settings win.
   const current = getSettings().modelSources ?? []
   if (current !== existing && (current.length || existing.length)) throw new Error('共享目录已更新，请刷新后重试')
   return updateSettings({ modelSources })
@@ -458,31 +502,50 @@ export function removeModelSource(id: string): Settings {
   return updateSettings({ modelSources: (getSettings().modelSources ?? []).filter((source) => source.id !== id) })
 }
 
-export function isSharedWeight(id: string): boolean {
-  return id.startsWith('shared-')
-}
+type SharedWeightCheck = { path: string } | { problem: 'missing' | 'changed' }
 
-export async function resolveSharedWeight(id: string): Promise<string | null> {
+async function checkSharedWeight(id: string): Promise<SharedWeightCheck> {
   const entry = inventory.get(id)
-  if (!entry) return null
+  if (!entry) return { problem: 'missing' }
   const { file } = entry
   try {
-    if (modelPathKey(await realpath(file.path)) !== modelPathKey(file.path)) return null
+    // A path that now resolves elsewhere (a re-pointed link) is a different file than the one checked.
+    if (modelPathKey(await realpath(file.path)) !== modelPathKey(file.path)) return { problem: 'changed' }
     if (file.layout === 'diffusers-folder') {
       const current = await inspectDiffusersFolder(file.path)
-      return current?.size === file.size && current.mtimeMs === file.mtimeMs ? file.path : null
+      if (!current) return { problem: 'missing' }
+      return current.size === file.size && current.mtimeMs === file.mtimeMs ? { path: file.path } : { problem: 'changed' }
     }
     const current = await stat(file.path)
-    return current.isFile() && current.size === file.size && current.mtimeMs === file.mtimeMs ? file.path : null
+    return current.isFile() && current.size === file.size && current.mtimeMs === file.mtimeMs ? { path: file.path } : { problem: 'changed' }
   } catch {
-    return null
+    return { problem: 'missing' }
   }
 }
 
-export function sharedModels(known: readonly ModelEntry[]): ModelEntry[] {
-  const importedPaths = new Set(known.filter((entry) => entry.provider === 'local').map((entry) => modelPathKey(entry.repo)))
+/** The shared file or folder as it was checked, or null when it is gone or changed since. */
+export async function resolveSharedWeight(id: string): Promise<string | null> {
+  const check = await checkSharedWeight(id)
+  return 'path' in check ? check.path : null
+}
+
+/** Like `resolveSharedWeight`, but a job gets a message saying whether the file is gone or changed. */
+export async function requireSharedWeight(id: string, name: string): Promise<string> {
+  const check = await checkSharedWeight(id)
+  if ('path' in check) return check.path
+  throw new Error(
+    check.problem === 'changed'
+      ? `「${name}」的文件改动过，请到「模型」页点「自动扫描」后再试`
+      : `找不到「${name}」的文件，请检查磁盘是否连接，再到「模型」页点「自动扫描」`,
+  )
+}
+
+const SHARED_NOTES = '共享模型目录里的文件，在原位置使用，不复制也不移动。'
+
+/** Shared weights as catalog entries. Kept even when the same file is also registered, so both ids resolve. */
+export function sharedModels(): ModelEntry[] {
   return [...inventory].flatMap(([id, { file, inspection }]) => {
-    if (inspection.role === 'lora' || inspection.role === 'control_adapter' || importedPaths.has(modelPathKey(file.path))) return []
+    if (inspection.role === 'lora' || inspection.role === 'control_adapter') return []
     return [
       {
         id,
@@ -498,7 +561,7 @@ export function sharedModels(known: readonly ModelEntry[]): ModelEntry[] {
         files: [basename(file.path)],
         license: 'local',
         tags: ['shared-directory'],
-        notes: '共享目录 · ' + file.path,
+        notes: SHARED_NOTES,
         sizeBytes: file.size,
         installedBytes: file.size,
         installed: true,
@@ -525,7 +588,7 @@ export function sharedAdapters(): AdapterEntry[] {
             sizeBytes: file.size,
             installedBytes: file.size,
             tags: ['shared-directory'],
-            notes: '共享目录 · ' + file.path,
+            notes: SHARED_NOTES,
             installed: true,
           },
         ]

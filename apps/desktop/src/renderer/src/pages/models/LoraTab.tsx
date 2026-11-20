@@ -1,6 +1,7 @@
 import { FileUp, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import type { AdapterEntry, Catalog, DownloadTask } from '@shared/types'
+import { isSharedModelId } from '@shared/sharedModels'
 import { useApp } from '../../store'
 import { Notice } from '../../components/common/Notice'
 import { Button, ConfirmDialog, EmptyState, Group, LoadingRow, Pill, Row, Section, Spinner, useToast } from '../../components/ui'
@@ -13,7 +14,7 @@ const errorText = (cause: unknown): string => (cause instanceof Error ? cause.me
 
 /** Where a LoRA comes from; its size is a column of its own. */
 function adapterOrigin(adapter: AdapterEntry): string | undefined {
-  if (adapter.tags.includes('shared-directory')) return adapter.notes
+  if (isSharedModelId(adapter.id)) return '共享模型目录'
   return adapter.provider === 'local' ? (adapter.tags.includes('trained') ? '自己训练的' : '从电脑导入') : adapter.notes
 }
 
@@ -100,9 +101,7 @@ export function LoraTab({ catalog, location }: { catalog: Catalog; location: Mod
             {installed.map((adapter) => (
               <Row key={adapter.id} title={adapter.name} description={adapterOrigin(adapter)}>
                 <SizeText bytes={adapterBytes(adapter)} />
-                {adapter.tags.includes('shared-directory') ? null : (
-                  <RemoveButton name={adapter.name} onClick={() => setRemoving(adapter)} />
-                )}
+                {isSharedModelId(adapter.id) ? null : <RemoveButton name={adapter.name} onClick={() => setRemoving(adapter)} />}
               </Row>
             ))}
           </Group>

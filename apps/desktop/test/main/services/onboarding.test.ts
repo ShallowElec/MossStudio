@@ -4,7 +4,7 @@
  * the catalog is the real resources/models.json via catalogFixture.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Catalog, GpuInventoryDevice, LaunchDevice, ModelBundle, ModelEntry, TrainingHost } from '@shared/types'
+import type { Catalog, GpuInventoryDevice, LaunchDevice, ModelBundle, ModelEntry, Settings, TrainingHost } from '@shared/types'
 import { useTempDataRoot } from '@test/helpers/tempDir'
 import { SFT_BUNDLE_IDS, catalogFixture, engineMissingFixture, engineReadyFixture, settingsFixture } from '@test/mocks/backend/fixtures'
 
@@ -29,6 +29,10 @@ interface Options {
   cliGpus?: string[]
   /** What modelMissingBytes reports per model id (default: its catalog size). */
   missing?: Record<string, number>
+  /** Settings over the fixture, e.g. the shared model picked in 使用已有模型. */
+  settings?: Partial<Settings>
+  /** Shared weights whose file is gone or changed since the last scan. */
+  sharedGone?: string[]
 }
 const state: { options: Options } = { options: {} }
 
@@ -59,6 +63,9 @@ vi.mock('@main/services/models', () => ({
   },
   modelMissingBytes: async (_settings: unknown, model: { id: string; sizeBytes: number }) =>
     state.options.missing?.[model.id] ?? model.sizeBytes,
+}))
+vi.mock('@main/services/modelSources', () => ({
+  resolveSharedWeight: async (id: string) => (state.options.sharedGone?.includes(id) ? null : '/shared/' + id),
 }))
 vi.mock('@main/services/modelReadiness', () => ({ legacyModelReady: async () => state.options.legacy ?? false }))
 vi.mock('@main/services/engineReadiness', () => ({
@@ -92,7 +99,7 @@ async function status(options: Options = {}, hostId?: string, platform: NodeJS.P
   Object.defineProperty(process, 'platform', { value: platform, configurable: true })
   try {
     const { getOnboardingStatus } = await import('@main/services/onboarding')
-    return await getOnboardingStatus(settings, hostId)
+    return await getOnboardingStatus({ ...settings, ...options.settings }, hostId)
   } finally {
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
   }
@@ -269,6 +276,65 @@ describe('getOnboardingStatus (local)', () => {
     const result = await status({ engine: true, installed: ['moss-sft-comfy-int8_convrot', ...sft.slice(1)] })
     expect(result.bundleName).toBe('MOSS-Image SFT')
     expect(step(result, 'model').detail).toMatch(/3\/4/)
+  })
+})
+
+describe('getOnboardingStatus (a shared model picked in 使用已有模型)', () => {
+  const sharedFolder: ModelEntry = {
+    id: 'shared-full',
+    name: 'MOSS-Image（ComfyUI）',
+    provider: 'local',
+    repo: '/comfy/models/diffusers/moss',
+    localPath: '/comfy/models/diffusers/moss',
+    revision: 'local',
+    role: 'full',
+    format: 'diffusers',
+    family: 'moss-image',
+    precision: 'bf16',
+    license: 'local',
+    tags: ['shared-directory'],
+    installed: true,
+    installedBytes: 1,
+    sizeBytes: 1,
+  }
+  const sharedBundle: ModelBundle = {
+    id: 'shared-full',
+    name: 'MOSS-Image（ComfyUI）',
+    description: '',
+    components: { dit: 'shared-full', textEncoder: 'shared-full', vae: 'shared-full' },
+    support: 'shared-full',
+    custom: true,
+  }
+  const options = (patch: Options = {}): Options => ({
+    engine: true,
+    extraModels: [sharedFolder],
+    extraBundles: [sharedBundle],
+    settings: { onboardingModelId: 'shared-full' },
+    ...patch,
+  })
+
+  it('prepares the chosen shared model instead of the recommended one, with nothing to download', async () => {
+    const result = await status(options())
+    expect(result.bundleId).toBe('shared-full')
+    expect(result.ready).toBe(true)
+    expect(step(result, 'model')).toMatchObject({ status: 'ok', modelIds: ['shared-full'], sizeBytes: 0 })
+  })
+
+  it('says the chosen model is gone when its shared file disappeared or changed', async () => {
+    const result = await status(options({ sharedGone: ['shared-full'] }))
+    expect(result.ready).toBe(false)
+    expect(step(result, 'model')).toMatchObject({
+      status: 'missing',
+      modelIds: [],
+      sizeBytes: 0,
+      detail: '选用的模型已不可用，请刷新共享目录或重新选择',
+    })
+  })
+
+  it('waits for a choice while the person is still picking, and never counts another model as ready', async () => {
+    const result = await status(options({ installed: sft, settings: { onboardingModelId: null, onboardingReusePending: true } }))
+    expect(result.ready).toBe(false)
+    expect(step(result, 'model')).toMatchObject({ status: 'missing', modelIds: [], detail: '请选择要使用的共享模型' })
   })
 })
 

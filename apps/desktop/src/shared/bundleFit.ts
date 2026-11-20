@@ -1,6 +1,7 @@
 import { isCliEngine, parseEnginePackageId } from './enginePackages'
 import type { ResolvedGpuProfile } from './gpuProfile'
 import { compareRecommendedGpu } from './gpuScheduling'
+import { isSharedModelId } from './sharedModels'
 import type { EngineReadiness, GpuInventoryDevice, ModelBundle, ModelEntry, Settings } from './types'
 
 /**
@@ -25,8 +26,18 @@ export function isFileBundle(
 ): boolean {
   return [bundle.components.dit, bundle.components.textEncoder, bundle.components.vae].some((id) => {
     const model = models.find((entry) => entry.id === id)
-    return id.startsWith('shared-') || model?.provider === 'local' || model?.format === 'comfyui'
+    // A shared diffusers folder is a whole bundle folder, as the CLI engines read it (cliBundleProblem).
+    if (isSharedModelId(id)) return model?.format !== 'diffusers'
+    return model?.provider === 'local' || model?.format === 'comfyui'
   })
+}
+
+/** Runs only on this computer: single files, and anything from a shared model folder, which a remote host cannot see. */
+export function isLocalOnlyBundle(
+  bundle: Pick<ModelBundle, 'components'>,
+  models: readonly Pick<ModelEntry, 'id' | 'provider' | 'format'>[],
+): boolean {
+  return isFileBundle(bundle, models) || Object.values(bundle.components).some(isSharedModelId)
 }
 
 /**
@@ -48,7 +59,7 @@ export function bundleWeightProblem(
   bundle: Pick<ModelBundle, 'components'>,
   models: readonly (Pick<ModelEntry, 'id'> & { precision?: string; tags?: readonly string[] })[],
 ): string | null {
-  if (Object.values(bundle.components).some((id) => id.startsWith('shared-') && !models.some((model) => model.id === id))) {
+  if (Object.values(bundle.components).some((id) => isSharedModelId(id) && !models.some((model) => model.id === id))) {
     return '共享模型文件不可用，请刷新目录或重新选择'
   }
   const dit = models.find((model) => model.id === bundle.components.dit)

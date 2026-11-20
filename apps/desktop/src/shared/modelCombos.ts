@@ -1,4 +1,5 @@
 import { localFilesBundle } from './localBundle'
+import { duplicatesImportedFile } from './sharedModels'
 import type { ModelBundle, ModelCombination, ModelEntry } from './types'
 
 /**
@@ -103,6 +104,7 @@ export function slotChoices(
   })
   for (const model of models) {
     if (model.role !== role || model.provider !== 'local' || !isSingleFile(model) || !isInstalled(model)) continue
+    if (duplicatesImportedFile(model, models)) continue
     choices.push({ id: model.id, label: model.name, ids: [model.id], sizeBytes: model.sizeBytes, installed: true, local: true })
   }
   return choices

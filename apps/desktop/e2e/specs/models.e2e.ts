@@ -23,7 +23,7 @@ describe('models', () => {
     await expect.poll(() => section.getByRole('button', { name: '接入' }).isVisible()).toBe(true)
     expect(await app.calls('models:sources-refresh')).toEqual([])
     await section.getByRole('button', { name: '自动扫描' }).click()
-    await expect.poll(() => section.getByText('运行中：ComfyUI（端口 8188）').isVisible()).toBe(true)
+    await expect.poll(() => section.getByText('ComfyUI 正在运行', { exact: true }).isVisible()).toBe(true)
     await section.getByRole('button', { name: '接入' }).click()
     await section.getByRole('button', { name: '添加来源' }).click()
     const choices = section.getByRole('menu', { name: '添加来源' })
@@ -64,6 +64,31 @@ describe('models', () => {
     expect(await installed.getByText('共享 dit', { exact: true }).isVisible()).toBe(true)
     await expect.poll(() => section.getByRole('button', { name: '接入' }).isVisible()).toBe(true)
     expect(await app.calls('models:delete')).toEqual([])
+  })
+
+  it('says when no model folder is connected, and retries a scan that failed', async () => {
+    const page = await app.open({
+      scenario: 'engineInstalledModelMissing',
+      route: '/models',
+      theme: 'light',
+      settings: { onboardingState: 'dismissed' },
+    })
+    const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '共享模型目录' }) })
+    await expect.poll(() => section.getByText('还没有接入模型目录', { exact: true }).isVisible()).toBe(true)
+    await page.evaluate(() => {
+      window.__mock.state.sharedModelDirectory = { available: true, failRefresh: true }
+    })
+    await section.getByRole('button', { name: '自动扫描' }).click()
+    const failed = section.locator('[data-notice="danger"]')
+    await expect.poll(() => failed.getByText('扫描模型目录时出错，请稍后重试').isVisible()).toBe(true)
+    await page.evaluate(() => {
+      window.__mock.state.sharedModelDirectory!.failRefresh = false
+    })
+    await failed.getByRole('button', { name: '重试' }).click()
+    await expect.poll(() => section.getByText('ComfyUI 正在运行', { exact: true }).isVisible()).toBe(true)
+    expect(await section.locator('[data-notice="danger"]').count()).toBe(0)
+    expect(await app.calls('models:sources-refresh')).toHaveLength(2)
+    await app.screenshot('models-shared-sources-retry-light')
   })
 
   it('downloads the recommended model with one action and shows its progress', async () => {

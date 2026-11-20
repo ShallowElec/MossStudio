@@ -74,7 +74,8 @@ import {
 } from './training'
 
 export interface MockBackendState {
-  sharedModelDirectory?: { available: boolean }
+  /** Shared model folders (ComfyUI and others): whether their files can be read, and whether 自动扫描 fails. */
+  sharedModelDirectory?: { available: boolean; failRefresh?: boolean }
   settings: Settings
   env: EnvReport | null
   /** The update runtime (main/update); handlers keep it in step like main does. */

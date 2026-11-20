@@ -14,6 +14,7 @@ import {
   localFilesOnly,
   modelSections,
   parseModelsQuery,
+  runningServicesText,
   sizeText,
   taskFor,
   taskProgress,
@@ -503,5 +504,39 @@ describe('parseModelsQuery', () => {
     expect(parseModelsQuery('?tab=downloads').tab).toBe('downloads')
     expect(parseModelsQuery('?tab=nope').tab).toBeNull()
     expect(parseModelsQuery('')).toEqual({ bundleId: null, component: null, hostId: null, tab: null })
+  })
+})
+
+describe('runningServicesText', () => {
+  it('names the running apps once each, without ports', () => {
+    expect(
+      runningServicesText([
+        { kind: 'comfyui', port: 8188 },
+        { kind: 'comfyui', port: 8000 },
+        { kind: 'forge', port: 7860 },
+      ]),
+    ).toBe('ComfyUI、Forge 正在运行')
+  })
+
+  it('says when nothing is running', () => {
+    expect(runningServicesText([])).toBe('没有发现正在运行的 ComfyUI、Stable Diffusion WebUI 或 Forge')
+  })
+})
+
+describe('bundleBlocker with shared folders', () => {
+  const folder: ModelBundle = {
+    id: 'shared-full',
+    name: 'MOSS-Image（ComfyUI）',
+    description: '',
+    components: { dit: 'shared-full', textEncoder: 'shared-full', vae: 'shared-full' },
+    support: 'shared-full',
+    custom: true,
+  }
+  const models = [{ ...catalogFixture().models[0]!, id: 'shared-full', provider: 'local', format: 'diffusers', role: 'full' } as ModelEntry]
+
+  it('keeps a shared folder on this computer, but lets a CLI GPU take it here', () => {
+    expect(bundleBlocker(folder, models, { remote: true, gpus: [], cliGpus: new Set() })).toBe('只能在这台电脑上使用，其他电脑请用官方模型')
+    const cli = gpuDeviceFixture({ uuid: 'GPU-CLI' })
+    expect(bundleBlocker(folder, models, { remote: false, gpus: [cli], cliGpus: new Set(['GPU-CLI']) })).toBeNull()
   })
 })

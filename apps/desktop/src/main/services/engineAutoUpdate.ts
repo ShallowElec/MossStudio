@@ -188,6 +188,7 @@ const BUSY_RETRY_MS = 20 * 60_000
 
 let timer: NodeJS.Timeout | null = null
 let running = false
+let afterUpdate: (() => void) | null = null
 
 // Static imports on purpose: dynamic imports here make the bundler split the main
 // process into chunks, which breaks windows.ts paths relative to __dirname.
@@ -217,6 +218,7 @@ async function tick(): Promise<void> {
   try {
     const result = await runEngineAutoUpdate(defaultDeps())
     if (result === 'busy') next = BUSY_RETRY_MS
+    if (result === 'updated') afterUpdate?.()
     if (result === 'updated' || result === 'failed') console.log(`[engine-auto-update] ${result}`)
   } catch (error) {
     // Offline or rate-limited: try again at the next interval.
@@ -227,7 +229,9 @@ async function tick(): Promise<void> {
   }
 }
 
-export function startEngineAutoUpdate(): void {
+/** `onUpdated` runs after an update installs, for what the engine checked before (shared model files). */
+export function startEngineAutoUpdate(onUpdated?: () => void): void {
+  afterUpdate = onUpdated ?? null
   if (timer) return
   schedule(FIRST_CHECK_MS)
 }

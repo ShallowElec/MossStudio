@@ -2,6 +2,7 @@ import { FileUp, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 import { Ipc } from '@shared/channels'
 import type { ControlAdapterEntry } from '@shared/types'
+import { isSharedModelId } from '@shared/sharedModels'
 import { Button, ConfirmDialog, EmptyState, Group, Row, Section, Spinner, Tag, useToast } from '../../components/ui'
 import { call } from '../../lib/api'
 import { useControlAdapters } from '../../lib/useControlAdapters'
@@ -79,7 +80,7 @@ export function ControlAdaptersSection(): React.JSX.Element | null {
               }
             >
               <SizeText bytes={entry.sizeBytes} />
-              {entry.id.startsWith('shared-') ? null : <RemoveButton remove name={entry.name} onClick={() => setRemoving(entry)} />}
+              {isSharedModelId(entry.id) ? null : <RemoveButton remove name={entry.name} onClick={() => setRemoving(entry)} />}
             </Row>
           ))
         ) : (

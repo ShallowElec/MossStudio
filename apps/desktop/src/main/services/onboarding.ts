@@ -1,10 +1,11 @@
 import { join } from 'node:path'
+import { isSharedModelId } from '@shared/sharedModels'
 import type { OnboardingStatus, OnboardingStep, Settings } from '@shared/types'
 import { paths } from '../lib/paths'
 import { cachedGpuInventory, listDevices } from './devices'
 import { getCatalog, modelMissingBytes } from './models'
 import { legacyModelReady } from './modelReadiness'
-import { isSharedWeight, resolveSharedWeight } from './modelSources'
+import { resolveSharedWeight } from './modelSources'
 import { engineReadiness } from './engineReadiness'
 import { describeEngineReadiness } from '@shared/engineReadiness'
 import { getTrainingHost } from './trainingHosts'
@@ -13,7 +14,7 @@ import { scanRemoteModels } from './remoteModels'
 import { localEngineKinds, resolveDeviceEngine } from './engineInstalls'
 import { cliBundleProblem, type CliEngineKind } from '@shared/cliEngine'
 import { isCliEngine } from '@shared/enginePackages'
-import { bestBundleFor, bundleWeightProblem, generationGpus, isFileBundle, isFp16Dit } from '@shared/bundleFit'
+import { bestBundleFor, bundleWeightProblem, generationGpus, isFp16Dit, isLocalOnlyBundle } from '@shared/bundleFit'
 
 export async function getOnboardingStatus(settings: Settings, hostId = 'local'): Promise<OnboardingStatus> {
   const catalog = await getCatalog(settings, true)
@@ -47,7 +48,7 @@ export async function getOnboardingStatus(settings: Settings, hostId = 'local'):
         // A registered FP16-fixed folder is a whole model the engine refuses (isFp16Dit).
         (model) =>
           model.role === 'full' &&
-          !isSharedWeight(model.id) &&
+          !isSharedModelId(model.id) &&
           model.installed &&
           model.format !== 'comfyui' &&
           !isFp16Dit(model) &&
@@ -84,7 +85,7 @@ export async function getOnboardingStatus(settings: Settings, hostId = 'local'):
     : hostId === 'local'
       ? loadable
       : // Another computer runs a model folder; single files load only on this one.
-        loadable.filter((item) => !isFileBundle(item, catalog.models))
+        loadable.filter((item) => !isLocalOnlyBundle(item, catalog.models))
   // With nothing downloaded yet, the model that suits this computer's GPU comes first (as on the 模型 page).
   const gpus = hostId === 'local' ? generationGpus(cachedGpuInventory()?.devices, settings) : []
   const cliGpus = new Set(
@@ -104,7 +105,7 @@ export async function getOnboardingStatus(settings: Settings, hostId = 'local'):
   // (score above), so the checklist names a model the Studio can actually run.
   const modelIds = bundle ? ids(bundle) : []
   const bundleName = bundle?.name
-  const shared = modelIds.filter(isSharedWeight)
+  const shared = modelIds.filter(isSharedModelId)
   const gone = choice && (!bundle || (await Promise.all(shared.map(resolveSharedWeight))).some((path) => !path))
   const modelCount = fullModelReady ? modelIds.length : modelIds.filter((id) => installed.has(id)).length
   const modelReady = !gone && (fullModelReady || (modelIds.length > 0 && modelCount === modelIds.length))

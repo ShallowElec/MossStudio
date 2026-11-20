@@ -1,9 +1,10 @@
 import { CLI_ENGINE_LABEL } from '@shared/cliEngine'
+import { isSharedModelId } from '@shared/sharedModels'
 import type { JobRecord } from '@shared/types'
 import { codedError } from '../lib/codedError'
 import { resolveCanvasAdapters } from './adapterResolution'
 import { listControlAdapters } from './controlAdapters'
-import { isSharedWeight, resolveSharedWeight } from './modelSources'
+import { resolveSharedWeight } from './modelSources'
 import { getEngineFeatures } from './engineFeatures'
 import { galleryRoots } from './gallery'
 import { pickJobInputs, validateJobInputs } from './jobInputs'
@@ -45,7 +46,7 @@ export async function startRequestedEngineJob(raw: Record<string, unknown>): Pro
   if (projectId && PROJECT_ID_PATTERN.test(projectId)) imageRoots.push(projectAssetsDir(projectId))
   const controlAdapters = (
     await Promise.all(
-      listControlAdapters().map(async (entry) => (!isSharedWeight(entry.id) || (await resolveSharedWeight(entry.id)) ? entry : null)),
+      listControlAdapters().map(async (entry) => (!isSharedModelId(entry.id) || (await resolveSharedWeight(entry.id)) ? entry : null)),
     )
   ).filter((entry) => entry !== null)
   const inputs = await validateJobInputs(raw, {

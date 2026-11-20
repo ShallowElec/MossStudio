@@ -1,4 +1,4 @@
-import { mkdir, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, symlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isScannableWeights, scanModelDirectory } from '@main/services/modelScan'
@@ -137,6 +137,47 @@ describe('scanModelDirectory', () => {
       'large.safetensors',
       'small.safetensors',
     ])
+  })
+
+  it('a LoRA folder wins over a model folder around it, and Stable-diffusion is a model folder', async () => {
+    const root = await fixture({
+      'checkpoints/loras/style.safetensors': 4,
+      'Stable-diffusion/model.safetensors': 8,
+    })
+    const roles = Object.fromEntries((await scanModelDirectory(root)).candidates.map((c) => [c.name, c.role]))
+    expect(roles).toEqual({ 'style.safetensors': 'lora', 'model.safetensors': 'dit' })
+  })
+
+  it('a shared scan follows a linked folder outside the tree and names files by the link', async () => {
+    const base = await fixture({ 'elsewhere/weights/big.safetensors': 8, 'tree/vae/v.safetensors': 4 })
+    const outside = join(base, 'elsewhere')
+    const root = join(base, 'tree')
+    await symlink(join(outside, 'weights'), join(root, 'checkpoints'), 'junction')
+    expect((await scanModelDirectory(root)).candidates.map((c) => c.name)).toEqual(['v.safetensors'])
+    const shared = await scanModelDirectory(root, { shared: { exclude: [] } })
+    const linked = shared.candidates.find((c) => c.name === 'big.safetensors')
+    expect(linked).toMatchObject({
+      path: join(outside, 'weights', 'big.safetensors'),
+      relativePath: join('checkpoints', 'big.safetensors'),
+      role: 'dit',
+    })
+  })
+
+  it('a shared scan leaves out the excluded folders and visits a linked folder once', async () => {
+    const root = await fixture({ 'downloads/mine.safetensors': 4, 'vae/v.safetensors': 4 })
+    await symlink(join(root, 'vae'), join(root, 'again'), 'junction')
+    const result = await scanModelDirectory(root, { shared: { exclude: [join(root, 'downloads')] } })
+    expect(result.candidates.map((c) => c.name)).toEqual(['v.safetensors'])
+  })
+
+  it('stops after too many folders or too long, and says so', async () => {
+    const root = await fixture({ 'a/1.safetensors': 1, 'b/2.safetensors': 1, 'c/3.safetensors': 1 })
+    const capped = await scanModelDirectory(root, { maxDirectories: 2 })
+    expect(capped.candidates.map((c) => c.name)).toEqual(['1.safetensors'])
+    expect(capped.skipped).toEqual([{ path: join(root, 'b'), reason: '已检查 2 个文件夹，已停止扫描' }])
+    const late = await scanModelDirectory(root, { timeLimitMs: -1 })
+    expect(late.candidates).toEqual([])
+    expect(late.skipped).toEqual([{ path: root, reason: '扫描超过 0 秒，已停止扫描' }])
   })
 
   it('rejects a file instead of a folder and a missing path', async () => {

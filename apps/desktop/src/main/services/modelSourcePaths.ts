@@ -3,11 +3,14 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import type { ModelSource, ModelSourceKind, ScannedModel } from '@shared/types'
-import { localHistoryInstallations, windowsModelLocations } from './modelSourceDiscovery'
+import { expandPathVariables, isNetworkPath, linksToNetwork, modelPathKey } from '../lib/localPath'
+import { isInside } from '../lib/paths'
+import { windowsModelLocations } from './modelSourceDiscovery'
 import { probeLocalModelServices } from './modelSourceServices'
 
 type SourceLocation = Pick<ModelSource, 'kind' | 'path'>
-type ModelRoot = { path: string; role?: ScannedModel['role'] }
+/** `network` marks a value that named a network place before path functions could normalise it away. */
+type ModelRoot = { path: string; role?: ScannedModel['role']; network?: boolean }
 type DesktopProfile = { path: string; roots: ModelRoot[]; aliases: string[]; configs: string[]; issues: string[] }
 
 const modelRoles: Partial<Record<string, ModelRoot['role']>> = {
@@ -27,10 +30,10 @@ const modelRoles: Partial<Record<string, ModelRoot['role']>> = {
 const configNames = ['extra_model_paths.yaml', 'extra_models_config.yaml']
 const packageName = /comfyui|comfy[-_ ]desktop|forge|webui|stable[-_ ]diffusion|portable|bundle|整合|便携/i
 const backupName = /(?:^|[\\/._ -])(?:backup\d*|backups|bak|old|archive|copy)(?:$|[\\/._ -])|备份|副本/i
-
-export function modelPathKey(path: string): string {
-  return process.platform === 'win32' ? path.toLowerCase() : path
-}
+/** Launch scripts are short; a longer line is not a setting worth parsing on the main thread. */
+const MAX_SCRIPT_LINE = 8192
+/** Ports ComfyUI and SD WebUI / Forge listen on by default; 自动扫描 asks only these, on loopback. */
+const DEFAULT_SERVICE_PORTS = [8188, 7860]
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
@@ -50,24 +53,30 @@ async function isDirectory(path: string): Promise<boolean> {
   return (await stat(path).catch(() => null))?.isDirectory() ?? false
 }
 
-function expandBase(path: string): string {
-  return path
-    .replace(/^~(?=$|[\\/])/, homedir())
-    .replace(
-      /\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z_0-9]*)|%([^%]+)%/g,
-      (match: string, braced?: string, plain?: string, windows?: string) => process.env[braced ?? plain ?? windows ?? ''] ?? match,
-    )
+/** A filesystem root or the home folder itself: scanning it would walk the whole disk or profile. */
+export function isTooBroadModelFolder(path: string): boolean {
+  const full = resolve(path)
+  return full === parse(full).root || modelPathKey(full) === modelPathKey(resolve(homedir()))
+}
+
+/** A directory that a config file named, checked only when it is a local path. */
+async function isLocalDirectory(path: string, network = isNetworkPath(path)): Promise<boolean> {
+  return !network && (await isDirectory(path))
 }
 
 function comfyRoots(file: string, yaml: string): ModelRoot[] {
   const result: ModelRoot[] = []
   for (const section of Object.values(record(parseYaml(yaml, { maxAliasCount: 20 })))) {
     const config = record(section)
-    const base = typeof config.base_path === 'string' ? resolve(dirname(file), expandBase(config.base_path)) : dirname(file)
+    const basePath = typeof config.base_path === 'string' ? expandPathVariables(config.base_path) : null
+    const base = basePath === null ? dirname(file) : resolve(dirname(file), basePath)
     for (const [key, value] of Object.entries(config)) {
       if (!Object.hasOwn(modelRoles, key) || typeof value !== 'string') continue
       for (const line of value.split(/\r?\n/)) {
-        if (line.trim()) result.push({ path: resolve(base, line.trim()), role: modelRoles[key] })
+        const entry = line.trim()
+        if (!entry) continue
+        const network = (basePath !== null && isNetworkPath(basePath)) || isNetworkPath(entry)
+        result.push({ path: resolve(base, entry), role: modelRoles[key], network })
       }
     }
   }
@@ -98,12 +107,14 @@ async function readDesktopProfile(path: string): Promise<DesktopProfile> {
       const settings = record(JSON.parse(await readConfig(file)))
       if (Array.isArray(settings.modelsDirs)) {
         for (const value of settings.modelsDirs) {
-          if (typeof value === 'string' && isAbsolute(value)) profile.roots.push({ path: value })
+          if (typeof value === 'string' && isAbsolute(value)) profile.roots.push({ path: value, network: isNetworkPath(value) })
         }
       }
       if (typeof settings.basePath === 'string' && isAbsolute(settings.basePath)) {
         profile.aliases.push(settings.basePath)
-        if (await isDirectory(join(settings.basePath, 'models'))) profile.roots.push({ path: join(settings.basePath, 'models') })
+        if (await isLocalDirectory(join(settings.basePath, 'models'), isNetworkPath(settings.basePath))) {
+          profile.roots.push({ path: join(settings.basePath, 'models') })
+        }
       }
       if (typeof settings.installDir === 'string' && isAbsolute(settings.installDir)) profile.aliases.push(settings.installDir)
     } catch {
@@ -120,7 +131,7 @@ async function readDesktopProfile(path: string): Promise<DesktopProfile> {
 async function runtimeLocations(path: string): Promise<string[]> {
   const standard = [path, join(path, 'ComfyUI'), join(path, 'resources', 'ComfyUI'), join(path, 'webui')]
   if (!packageName.test(basename(path))) return standard
-  // 部分整合包用带版本号的名称存放源码，只检查包内这一层。
+  // Some bundles keep the sources in a versioned folder; only this one level is checked.
   const extras = (await readdir(path, { withFileTypes: true }).catch(() => []))
     .filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && packageName.test(entry.name) && !backupName.test(entry.name))
     .map((entry) => join(path, entry.name))
@@ -151,15 +162,20 @@ async function installationKind(path: string): Promise<ModelSourceKind | undefin
 
 function webuiArguments(launchScript: string): Map<string, string> {
   const flags = new Map<string, string>()
-  for (const line of launchScript.replace(/[\\^]\r?\n/g, ' ').split(/\r?\n/)) {
-    const assignment = line.match(/^\s*@?(?:(?:set|export)\s+)?"?COMMANDLINE_ARGS\s*=\s*(.*?)\s*$/i)
-    if (!assignment) continue
-    // 去掉包裹整段设置的引号，保留每个路径自己的引号。
-    let args = assignment[1]!
+  for (const raw of launchScript.replace(/[\\^]\r?\n/g, ' ').split(/\r?\n/)) {
+    if (raw.length > MAX_SCRIPT_LINE) continue
+    // trim() and an anchored prefix keep this linear: the old single regex backtracked quadratically on long whitespace.
+    const line = raw.trim()
+    const prefix = /^@?(?:(?:set|export)\s+)?"?COMMANDLINE_ARGS/i.exec(line)
+    if (!prefix) continue
+    const assignment = line.slice(prefix[0].length).trimStart()
+    if (!assignment.startsWith('=')) continue
+    // Drop the quotes around the whole setting and keep each path's own quotes.
+    let args = assignment.slice(1).trim()
     const quote = args[0]
     if ((quote === '"' || quote === "'") && args.endsWith(quote)) args = args.slice(1, -1)
-    else if (line.trimStart().match(/^@?set\s+"/i) && args.endsWith('"')) args = args.slice(0, -1)
-    // 同时消费未知参数，避免把提示词等参数值里面的文字当作路径开关。
+    else if (/^@?set\s+"/i.test(line) && args.endsWith('"')) args = args.slice(0, -1)
+    // Unknown flags consume their value too, so words in a prompt argument are never read as a path flag.
     const tokens = [...args.matchAll(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)].map(([token]) => token.replace(/(['"])(.*?)\1/g, '$2'))
     for (let i = 0; i < tokens.length; i++) {
       const flag = tokens[i]!.match(/^--([\w-]+)(?:=(.*))?$/)
@@ -197,22 +213,23 @@ async function webuiRoots(base: string, kind: 'webui' | 'forge', issues: string[
       issues.push('读不到启动配置：' + file)
     }
   }
-  const pathFor = (flag: string): string | undefined => {
+  const pathFor = (flag: string): ModelRoot | undefined => {
     const value = args.get(flag)
     if (!value) return undefined
-    const path = expandBase(value.replace(/%~dp0/gi, base + sep).replace(/%CD%/gi, base))
-    return /%[^%]+%|\$\{|\$\w/.test(path) ? undefined : resolve(base, path)
+    const path = expandPathVariables(value.replace(/%~dp0/gi, base + sep).replace(/%CD%/gi, base))
+    // A variable left unexpanded is not on the allowlist; the setting is dropped rather than guessed.
+    return /%[^%]+%|\$\{|\$\w/.test(path) ? undefined : { path: resolve(base, path), network: isNetworkPath(path) }
   }
   const data = pathFor('data-dir')
-  if (data && (await isDirectory(join(data, 'models')))) roots.push({ path: join(data, 'models') })
+  if (data && (await isLocalDirectory(join(data.path, 'models'), data.network))) roots.push({ path: join(data.path, 'models') })
   const models = pathFor('models-dir')
-  if (models) roots.push({ path: models })
+  if (models) roots.push(models)
   const reference = kind === 'forge' ? pathFor('forge-ref-a1111-home') : undefined
   for (const { flag, folder, role } of webuiModelOptions) {
     const explicit = pathFor(flag)
-    const referenced = reference && join(reference, 'models', folder)
-    if (explicit) roots.push({ path: explicit, role })
-    else if (referenced && (await isDirectory(referenced))) roots.push({ path: referenced, role })
+    const referenced = reference && join(reference.path, 'models', folder)
+    if (explicit) roots.push({ ...explicit, role })
+    else if (referenced && (await isLocalDirectory(referenced, reference.network))) roots.push({ path: referenced, role })
   }
   return roots
 }
@@ -269,12 +286,16 @@ export async function sourceRoots(
   for (const file of configs) {
     try {
       if (/\.json$/i.test(file)) {
-        // 兼容此前已保存的单独配置文件来源。
+        // A Comfy Desktop config.json saved as a source by an earlier build.
         const config = record(JSON.parse(await readConfig(file)))
         if (Array.isArray(config.modelsDirs)) {
-          for (const path of config.modelsDirs) if (typeof path === 'string' && isAbsolute(path)) roots.push({ path })
+          for (const path of config.modelsDirs) {
+            if (typeof path === 'string' && isAbsolute(path)) roots.push({ path, network: isNetworkPath(path) })
+          }
         }
-        if (typeof config.basePath === 'string' && isAbsolute(config.basePath)) roots.push({ path: join(config.basePath, 'models') })
+        if (typeof config.basePath === 'string' && isAbsolute(config.basePath)) {
+          roots.push({ path: join(config.basePath, 'models'), network: isNetworkPath(config.basePath) })
+        }
       } else roots.push(...comfyRoots(file, await readConfig(file)))
     } catch {
       issues.push('读不到配置文件，或配置格式有误：' + file)
@@ -283,13 +304,23 @@ export async function sourceRoots(
 
   const unique = new Map<string, string>()
   const resolved = new Map<string, string | null>()
-  for (const { path, role } of roots) {
+  // Only the folder the person picked may be on the network; a config file or a link must not send the app there.
+  const picked = (path: string): boolean => isInside(source.path, path)
+  const skippedNetwork = '已跳过网络位置，请把模型放在本机磁盘上，或直接添加那个文件夹'
+  for (const { path, role, network } of roots) {
+    if ((network || isNetworkPath(path) || (await linksToNetwork(path))) && !picked(path)) {
+      issues.push(skippedNetwork)
+      continue
+    }
     if (!resolved.has(path)) {
       const actual = await realpath(path).catch(() => null)
       resolved.set(path, actual && (await isDirectory(actual)) ? actual : null)
     }
     const actual = resolved.get(path)
-    if (actual) {
+    // A local path can be a link to a share; the share is not opened unless the person picked it.
+    if (actual && isNetworkPath(actual) && !picked(actual)) issues.push(skippedNetwork)
+    else if (actual && isTooBroadModelFolder(actual)) issues.push('已跳过磁盘根目录或用户主目录，请选择具体的模型目录')
+    else if (actual) {
       unique.set(modelPathKey(actual), actual)
       if (role) roles.set(actual, role)
     } else issues.push('读不到模型目录：' + path)
@@ -315,7 +346,10 @@ export async function findModelSources(
   profileLocations: string[],
 ): Promise<SourceLocation[]> {
   const isSpecificPath = (path: string): boolean =>
-    isAbsolute(path) && resolve(path) !== parse(path).root && (process.platform !== 'win32' || /^[a-z]:[\\/]/i.test(path))
+    isAbsolute(path) &&
+    !isNetworkPath(path) &&
+    resolve(path) !== parse(path).root &&
+    (process.platform !== 'win32' || /^[a-z]:[\\/]/i.test(path))
   const candidates = new Set(installationHints.filter(isSpecificPath))
   const actualPlaces = await Promise.all(places.filter(isSpecificPath).map((place) => realpath(place).catch(() => null)))
   const uniquePlaces = new Map<string, string>()
@@ -366,7 +400,7 @@ export async function nearbyModelSources(probeServices = false): Promise<{
   services?: Array<{ kind: Exclude<ModelSourceKind, 'custom'>; port: number }>
 }> {
   const home = homedir()
-  const [windows, history] = await Promise.all([windowsModelLocations(), localHistoryInstallations()])
+  const windows = await windowsModelLocations()
   const places = [join(home, 'Desktop'), join(home, 'Documents'), join(home, 'Downloads'), join(home, 'Apps'), ...windows.places]
   if (process.platform === 'win32') {
     const windows = [
@@ -376,8 +410,8 @@ export async function nearbyModelSources(probeServices = false): Promise<{
     ]
     places.push(...windows.filter((path): path is string => Boolean(path)))
   } else places.push(join(home, 'Applications'), '/opt')
-  const hints = [...windows.installations, ...history]
-  const services = probeServices ? await probeLocalModelServices([8188, 7860, ...windows.ports]) : undefined
+  const hints = [...windows.installations]
+  const services = probeServices ? await probeLocalModelServices(DEFAULT_SERVICE_PORTS) : undefined
   if (services) hints.push(...services.flatMap((service) => service.paths))
   const sources = await findModelSources(places, hints, desktopProfileLocations())
   return { sources, services: services?.map(({ kind, port }) => ({ kind, port })) }

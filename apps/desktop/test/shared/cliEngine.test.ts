@@ -55,6 +55,13 @@ describe('cliBundleProblem', () => {
     expect(cliBundleProblem('vulkan', bundle, parts())).toBeNull()
   })
 
+  it('reads a whole folder found in a shared model folder by its own precision', () => {
+    const folder = { name: 'MOSS-Image（ComfyUI）', components: { dit: 'shared-full', textEncoder: 'shared-full', vae: 'shared-full' } }
+    const full = (precision: string): Part[] => [part('shared-full', 'full', { provider: 'local', precision })]
+    expect(cliBundleProblem('vulkan', folder, full('bf16'))).toBeNull()
+    expect(cliBundleProblem('hip', folder, full('int8'))).toBe('「MOSS-Image（ComfyUI）」需要 bf16 权重才能在AMD 原生引擎中使用')
+  })
+
   it('refuses a fp16 DiT or a non-bf16 text encoder', () => {
     expect(cliBundleProblem('vulkan', bundle, parts({ dit: { precision: 'fp16' } }))).toBe(
       '「MOSS-Image SFT」不是 bf16 模型，兼容模式引擎只能用 bf16 的 MOSS-Image，请换一个模型',

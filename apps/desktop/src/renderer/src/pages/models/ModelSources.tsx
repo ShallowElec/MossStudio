@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Ipc } from '@shared/channels'
 import type { ModelSource, ModelSourcesView } from '@shared/types'
 import { Notice } from '../../components/common/Notice'
 import { MenuItem, Popover } from '../../components/common/Popover'
-import { Button, Group, Row, Spinner } from '../../components/ui'
+import { Button, EmptyState, Group, LoadingRow, Row } from '../../components/ui'
 import { call } from '../../lib/api'
+import { modelSourceKindLabels as kindLabels, runningServicesText } from './logic'
 
-const kindLabels: Record<ModelSource['kind'], string> = {
-  comfyui: 'ComfyUI',
-  webui: 'Stable Diffusion WebUI',
-  forge: 'Forge',
-  custom: '自定义目录',
+type SourcesChannel =
+  typeof Ipc.modelSourcesList | typeof Ipc.modelSourcesRefresh | typeof Ipc.modelSourcesAdd | typeof Ipc.modelSourcesRemove
+interface SourcesInput {
+  path?: string
+  kind?: ModelSource['kind']
+  id?: string
 }
 
 export function ModelSources({
@@ -25,12 +27,11 @@ export function ModelSources({
   const [view, setView] = useState<ModelSourcesView | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const last = useRef<{ channel: SourcesChannel; input?: SourcesInput }>({ channel: Ipc.modelSourcesList })
 
   const run = useCallback(
-    async (
-      channel: typeof Ipc.modelSourcesList | typeof Ipc.modelSourcesRefresh | typeof Ipc.modelSourcesAdd | typeof Ipc.modelSourcesRemove,
-      input?: { path?: string; kind?: ModelSource['kind']; id?: string },
-    ): Promise<void> => {
+    async (channel: SourcesChannel, input?: SourcesInput): Promise<void> => {
+      last.current = { channel, input }
       setBusy(true)
       setError(null)
       try {
@@ -86,20 +87,20 @@ export function ModelSources({
           自动扫描
         </Button>
       </div>
-      {busy ? (
-        <p className="flex items-center gap-2 text-ui text-ink-2" role="status">
-          <Spinner />
-          正在检查模型目录…
-        </p>
+      {busy ? <LoadingRow label="正在检查模型目录…" /> : null}
+      {error ? (
+        <Notice
+          tone="danger"
+          action={
+            <Button size="xs" tone="secondary" disabled={busy} onClick={() => void run(last.current.channel, last.current.input)}>
+              重试
+            </Button>
+          }
+        >
+          {error}
+        </Notice>
       ) : null}
-      {error ? <Notice tone="danger">{error}</Notice> : null}
-      {view?.services ? (
-        <p className="text-ui text-ink-2" role="status">
-          {view.services.length
-            ? '运行中：' + view.services.map((service) => kindLabels[service.kind] + '（端口 ' + service.port + '）').join('、')
-            : '没有在本机端口上找到可识别的服务。'}
-        </p>
-      ) : null}
+      {view?.services ? <Notice>{runningServicesText(view.services)}</Notice> : null}
       {view?.sources.length ? (
         <Group>
           {view.sources.map((source) => (
@@ -142,9 +143,7 @@ export function ModelSources({
           ))}
         </Group>
       ) : null}
-      {view && !view.sources.length && !view.suggestions.length ? (
-        <p className="text-ui text-ink-2">选择已有的模型目录，即可使用里面的兼容模型。</p>
-      ) : null}
+      {view && !view.sources.length && !view.suggestions.length ? <EmptyState size="section" title="还没有接入模型目录" /> : null}
     </div>
   )
 }

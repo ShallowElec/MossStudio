@@ -230,13 +230,13 @@ const cases = {
 
   modelSourcesAdd: {
     valid: {},
-    accepts: { 更换目录: { id: 'source-a' }, 已发现的位置: { path: 'D:/ComfyUI', kind: 'comfyui' } },
-    rejects: { 空路径: { path: ' ' }, 不识别的来源: { kind: 'other' } },
+    accepts: { 'moving a source': { id: 'source-a' }, 'a discovered place': { path: 'D:/ComfyUI', kind: 'comfyui' } },
+    rejects: { 'blank path': { path: ' ' }, 'unknown kind of source': { kind: 'other' } },
   },
 
   modelSourcesRemove: {
     valid: { id: 'source-a' },
-    rejects: { 空编号: { id: '' } },
+    rejects: { 'empty id': { id: '' } },
   },
 
   modelsScan: {

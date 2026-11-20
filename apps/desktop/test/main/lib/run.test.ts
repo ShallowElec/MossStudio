@@ -33,6 +33,15 @@ describe('run', () => {
     expect(result.code).toBe(-1)
   })
 
+  it('ends the process when its signal aborts, so an owner can stop it on quit', async () => {
+    const controller = new AbortController()
+    const pending = run(node, script('setTimeout(() => {}, 10000)'), { signal: controller.signal, timeoutMs: 20_000 })
+    setTimeout(() => controller.abort(), 100)
+    const result = await pending
+    expect(result.aborted).toBe(true)
+    expect(result.timedOut).toBe(false)
+  })
+
   it('resolves code -1 with the error when the binary does not exist', async () => {
     const result = await run('/nonexistent/definitely-not-a-binary', [])
     expect(result.code).toBe(-1)

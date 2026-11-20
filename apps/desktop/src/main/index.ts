@@ -9,6 +9,7 @@ import { ensureDirs, paths } from './lib/paths'
 import { getBackendInfo, getWebAccessInfo, startBackend, stopBackend } from './services/backend'
 import { listProviders, removeProvider, saveProvider } from './services/ai'
 import { gbcStatus, stopGbcProcesses } from './services/gbc'
+import { stopModelSourceDiscovery } from './services/modelSourceDiscovery'
 import type { JobRecord } from '@shared/types'
 import { localNotificationsSupported, pushTestNotification } from './services/desktopNotifications'
 import { checkBareMirror } from './services/gitHealth'
@@ -28,7 +29,7 @@ import {
 } from './services/supervisor'
 import { resolveServerPath, runMossInferJob, shutdownMossInfer } from './services/mossInfer'
 import { shutdownCliEngines } from './services/cliEngine'
-import { probeEngine } from './lib/probeEngine'
+import { probeEngine, stopEngineRequests } from './lib/probeEngine'
 import { recoverEngineInstall } from './lib/engineStore'
 import { protocolCompatible } from '@shared/engineProtocol'
 import { closeAllSshTerminals } from './services/sshSessions'
@@ -1973,6 +1974,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   stopTrainingJobs()
   stopGbcProcesses()
+  stopModelSourceDiscovery()
+  stopEngineRequests()
   closeAllSshTerminals()
   stopUpdater()
   stopBackend()

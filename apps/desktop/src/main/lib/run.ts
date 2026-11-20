@@ -5,7 +5,7 @@ export interface RunOptions {
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
   input?: string
-  /** Ends the process (`runStream` only); the result reports it as `aborted`. */
+  /** Ends the process; the result reports it as `aborted`. */
   signal?: AbortSignal
   /** `runStream` only: a lone carriage return also ends a line, so progress bars arrive as they redraw. */
   splitCarriageReturn?: boolean
@@ -41,6 +41,16 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
       timedOut = true
       child?.kill('SIGKILL')
     }, options.timeoutMs ?? 15_000)
+    const abort = (): void => {
+      child?.kill('SIGKILL')
+    }
+    if (options.signal?.aborted) abort()
+    else options.signal?.addEventListener('abort', abort, { once: true })
+    const done = (result: RunResult): void => {
+      clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
+      resolve(options.signal?.aborted ? { ...result, aborted: true } : result)
+    }
 
     child.stdout?.setEncoding('utf8')
     child.stderr?.setEncoding('utf8')
@@ -52,14 +62,8 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
       stderr += chunk
       if (stderr.length > 4_000_000) stderr = stderr.slice(-2_000_000)
     })
-    child.on('error', (error) => {
-      clearTimeout(timer)
-      resolve({ code: -1, stdout, stderr: stderr || String(error), timedOut })
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({ code: code ?? -1, stdout, stderr, timedOut })
-    })
+    child.on('error', (error) => done({ code: -1, stdout, stderr: stderr || String(error), timedOut }))
+    child.on('close', (code) => done({ code: code ?? -1, stdout, stderr, timedOut }))
 
     // SSH can exit before consuming a worker upload/request. Its exit/error
     // handlers report the failure; a broken stdin must not crash the launcher.

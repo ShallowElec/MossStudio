@@ -8,7 +8,7 @@ import type {
   ModelEntry,
   ProjectCanvas,
 } from '@shared/types'
-import { bundleGpusProblem, bundleWeightProblem, isFileBundle } from '@shared/bundleFit'
+import { bundleGpusProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle } from '@shared/bundleFit'
 import { adapterStatuses, normalizeCanvasAdapters } from '@shared/adapters'
 import { CLI_ENGINE_LABEL, cliBundleProblem } from '@shared/cliEngine'
 import { compileCanvasPrompt, type CompiledPrompt } from './prompt'
@@ -155,7 +155,7 @@ export function deriveReadiness(input: ReadinessInput): Readiness {
   const picked = !weights && input.catalog && input.bundle.installed ? input.bundle.bundle : null
   if (picked && input.catalog) {
     const problem = input.remote
-      ? isFileBundle(picked, input.catalog.models)
+      ? isLocalOnlyBundle(picked, input.catalog.models)
         ? '只能在这台电脑上运行，在其他电脑上请换成官方模型'
         : null
       : cli

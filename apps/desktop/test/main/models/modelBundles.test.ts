@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ModelBinding, Settings } from '@shared/types'
+import type { ModelBinding, ModelEntry, Settings } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@main/services/settings'
 import { useTempDataRoot } from '@test/helpers/tempDir'
 import { cacheDirFor, installOnDisk, rawModel, testSettings, writeCatalog } from './modelFixtures'
@@ -11,6 +11,19 @@ vi.mock('@main/lib/content', () => ({ contentDir, catalogOverrideDir: () => cont
 vi.mock('@main/services/supervisor', () => ({ listJobs: async () => [] }))
 vi.mock('@main/services/network', () => ({ getLastNetwork: () => null }))
 vi.mock('@main/services/hfNetwork', () => ({ fetchHf: (url: string) => fetch(url) }))
+/** Weights found in shared model folders, by id, and where each resolves while unchanged. */
+const shared = vi.hoisted(() => ({ models: [] as ModelEntry[], paths: new Map<string, string>() }))
+vi.mock('@main/services/modelSources', () => ({
+  sharedModels: () => shared.models,
+  sharedAdapters: () => [],
+  sharedControlAdapters: () => [],
+  resolveSharedWeight: async (id: string) => shared.paths.get(id) ?? null,
+  requireSharedWeight: async (id: string, name: string) => {
+    const path = shared.paths.get(id)
+    if (!path) throw new Error(`找不到「${name}」的文件`)
+    return path
+  },
+}))
 
 const dataRoot = useTempDataRoot()
 type Bundles = typeof import('@main/services/modelBundles')
@@ -121,6 +134,8 @@ function installAll(): void {
 
 beforeEach(async () => {
   vi.resetModules()
+  shared.models = []
+  shared.paths.clear()
   contentDir.mockReset().mockImplementation(() => releaseDir())
   writeCatalog(releaseDir(), {
     schema_version: 3,
@@ -256,6 +271,42 @@ describe('prepareModelSource', () => {
 
   it('rejects an unknown bundle', async () => {
     await expect(bundles.prepareModelSource({ ...binding, bundleId: 'nope' }, settings)).rejects.toThrow('模型组合不存在')
+  })
+
+  it('hands a shared diffusers folder to the engine where it is, preparing nothing', async () => {
+    const folder = join(dataRoot(), 'comfy', 'models', 'diffusers', 'moss')
+    shared.models = [
+      {
+        id: 'shared-full',
+        name: 'moss',
+        role: 'full',
+        provider: 'local',
+        repo: folder,
+        localPath: folder,
+        revision: 'local',
+        family: 'moss-image',
+        precision: 'bf16',
+        format: 'diffusers',
+        files: ['moss'],
+        license: 'local',
+        tags: ['shared-directory'],
+        sizeBytes: 1,
+        installedBytes: 1,
+        installed: true,
+        installState: 'ready',
+      },
+    ]
+    shared.paths.set('shared-full', folder)
+    const sharedBinding: ModelBinding = { bundleId: 'shared-full', dit: 'shared-full', textEncoder: 'shared-full', vae: 'shared-full' }
+    expect(await bundles.prepareModelSource(sharedBinding, settings)).toEqual({
+      model: folder,
+      bundle: expect.objectContaining({ id: 'shared-full' }),
+      directFolder: true,
+    })
+    expect(existsSync(join(modelsRoot(), 'bundles'))).toBe(false)
+    shared.paths.clear()
+    models.invalidateCatalog()
+    await expect(bundles.prepareModelSource(sharedBinding, settings)).rejects.toThrow('找不到「moss」的文件')
   })
 
   it('materializes a diffusers bundle for downloaded components', async () => {

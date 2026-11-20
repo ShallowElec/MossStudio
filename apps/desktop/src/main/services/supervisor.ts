@@ -33,7 +33,7 @@ import {
   type ResolvedGpuProfile,
   type WeightPrecisions,
 } from '@shared/gpuProfile'
-import { bundleGpuProblem, bundleWeightProblem, isFileBundle, profileForBundle } from '@shared/bundleFit'
+import { bundleGpuProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle, profileForBundle } from '@shared/bundleFit'
 import { probeLocalEngineGpuCompatibility } from './engines'
 import { getTrainingHost } from './trainingHosts'
 import { cancelRemoteEngineJob, runRemoteEngineJob } from './remoteEngine'
@@ -976,7 +976,7 @@ async function startEngineJobNow(input: StartEngineJobInput, queuedJob?: JobReco
     // Another computer runs the model folder at its remote path; single files load only here.
     const catalog = await getCatalog(settings)
     const bundle = catalog.bundles.find((item) => item.id === input.modelBinding!.bundleId)
-    if (bundle && isFileBundle(bundle, catalog.models)) {
+    if (bundle && isLocalOnlyBundle(bundle, catalog.models)) {
       throw codedError('E_MODEL', `「${bundle.name}」只能在这台电脑上运行，在其他电脑上请用官方模型`)
     }
   }

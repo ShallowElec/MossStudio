@@ -1,5 +1,6 @@
-import { bestBundleFor, bundleGpusProblem, bundleWeightProblem, isFileBundle } from '@shared/bundleFit'
-import type { AdapterEntry, DownloadTask, GpuInventoryDevice, ModelBundle, ModelEntry } from '@shared/types'
+import { bestBundleFor, bundleGpusProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle } from '@shared/bundleFit'
+import type { AdapterEntry, DownloadTask, GpuInventoryDevice, ModelBundle, ModelEntry, ModelSource, ModelSourcesView } from '@shared/types'
+import { isSharedModelId } from '@shared/sharedModels'
 import { eta } from '../../lib/format'
 
 /**
@@ -196,9 +197,8 @@ export interface ModelPlace {
 export function bundleBlocker(bundle: ModelBundle, models: readonly ModelEntry[], place: ModelPlace): string | null {
   const weights = bundleWeightProblem(bundle, models)
   if (weights) return weights
-  const files = isFileBundle(bundle, models)
-  if (place.remote) return files ? '只能在这台电脑上使用，其他电脑请用官方模型' : null
-  return bundleGpusProblem(bundle, place.gpus, { cliGpus: place.cliGpus, files })
+  if (place.remote) return isLocalOnlyBundle(bundle, models) ? '只能在这台电脑上使用，其他电脑请用官方模型' : null
+  return bundleGpusProblem(bundle, place.gpus, { cliGpus: place.cliGpus, files: isFileBundle(bundle, models) })
 }
 
 export interface ModelSections {
@@ -223,7 +223,7 @@ export function modelSections(
   place: ModelPlace,
   preferredId?: string | null,
 ): ModelSections {
-  const candidates = views.map((view) => view.bundle).filter((bundle) => !place.remote || !isFileBundle(bundle, models))
+  const candidates = views.map((view) => view.bundle).filter((bundle) => !place.remote || !isLocalOnlyBundle(bundle, models))
   const best = bestBundleFor(candidates, place.remote ? [] : place.gpus, place.cliGpus)
   const featured = views.find((view) => view.bundle.id === preferredId) ?? views.find((view) => view.bundle.id === best?.bundle.id)
   const listed = views.filter((view) => view !== featured && view.status !== 'unavailable')
@@ -279,7 +279,7 @@ export function bundleDeletePlan(
   const localOnly = localFilesOnly(bundle, models)
   const present = bundleComponentIds(bundle)
     .filter(installed)
-    .filter((id) => !id.startsWith('shared-'))
+    .filter((id) => !isSharedModelId(id))
     .filter((id) => !localOnly || models.find((model) => model.id === id)?.provider === 'local')
   const ids = present.filter((id) => !othersInUse.has(id))
   const kept = present.filter((id) => othersInUse.has(id))
@@ -614,4 +614,18 @@ export function parseModelsQuery(search: string): {
     hostId: query.get('hostId') || null,
     tab: tab === 'lora' || tab === 'downloads' || tab === 'models' ? tab : component === 'adapter' ? 'lora' : null,
   }
+}
+
+/** The app a shared model folder belongs to, as people name it. */
+export const modelSourceKindLabels: Record<ModelSource['kind'], string> = {
+  comfyui: 'ComfyUI',
+  webui: 'Stable Diffusion WebUI',
+  forge: 'Forge',
+  custom: '自定义目录',
+}
+
+/** What 自动扫描 found listening on this computer, in words a person knows. */
+export function runningServicesText(services: NonNullable<ModelSourcesView['services']>): string {
+  if (!services.length) return '没有发现正在运行的 ComfyUI、Stable Diffusion WebUI 或 Forge'
+  return [...new Set(services.map((service) => modelSourceKindLabels[service.kind]))].join('、') + ' 正在运行'
 }

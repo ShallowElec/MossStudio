@@ -1,6 +1,7 @@
 import { fetchHf } from './hfNetwork'
 import { getHfToken } from './hfCredentials'
-import { isSharedWeight, resolveSharedWeight, sharedAdapters, sharedModels } from './modelSources'
+import { resolveSharedWeight, sharedAdapters, sharedModels } from './modelSources'
+import { isSharedModelId } from '@shared/sharedModels'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises'
@@ -240,7 +241,7 @@ export async function findAdapterName(settings: Settings, id: string): Promise<s
 
 /** Resolve an installed adapter's weight file (LoRA safetensors) on disk; null when missing. */
 export async function resolveAdapterFile(settings: Settings, id: string): Promise<string | null> {
-  if (isSharedWeight(id)) return resolveSharedWeight(id)
+  if (isSharedModelId(id)) return resolveSharedWeight(id)
   const dir = join(paths.adapters(settings.modelsRoot, settings.modelDirectories), id)
   try {
     const raw = JSON.parse(await readFile(join(dir, 'adapter.json'), 'utf8')) as { files?: string[] }
@@ -567,7 +568,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
       installedBytes: installed ? imported.size : 0,
     })
   }
-  const external = sharedModels(models)
+  const external = sharedModels()
   models.push(...external)
   const adapters: AdapterEntry[] = await Promise.all(
     (raw.adapters ?? []).map(async (adapter) => {
@@ -612,7 +613,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
   const bundles: ModelBundle[] = [
     ...(raw.bundles ?? BUILTIN.bundles ?? []),
     ...(raw.single_file_bundles ?? []),
-    ...catalogCombinations(models.filter((model) => !isSharedWeight(model.id))).map((combination) =>
+    ...catalogCombinations(models.filter((model) => !isSharedModelId(model.id))).map((combination) =>
       combinationBundle(combination, models),
     ),
     ...external
@@ -1073,7 +1074,7 @@ export async function installBundle(id: string, settings: Settings): Promise<Dow
   if (!bundle) throw new Error('模型组合不存在')
   const ids = [...Object.values(bundle.components), bundle.support]
   for (const componentId of ids) {
-    if (isSharedWeight(componentId) && !(await resolveSharedWeight(componentId))) {
+    if (isSharedModelId(componentId) && !(await resolveSharedWeight(componentId))) {
       throw new Error('共享模型文件不可用，请刷新目录或重新选择')
     }
   }
@@ -1217,7 +1218,7 @@ export async function localFolderInstall(
 }
 
 export async function deleteModel(kind: 'model' | 'adapter', id: string, settings: Settings): Promise<void> {
-  if (isSharedWeight(id)) throw new Error('请在「共享模型目录」中移除来源，原文件会保留')
+  if (isSharedModelId(id)) throw new Error('请在「共享模型目录」中移除来源，原文件会保留')
   if (installing.size > 0) throw new Error('有组件正在下载或校验，请先暂停并稍后重试')
   deleting.add(id)
   try {

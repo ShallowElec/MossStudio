@@ -86,15 +86,33 @@ export async function probeEngine(
 
 export type EngineRequest = (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>
 
-/** 批量检查权重时复用一个 sidecar，避免为每个文件重复启动引擎。 */
-export async function withEngineRequests<T>(serverPath: string, task: (request: EngineRequest) => Promise<T>): Promise<T> {
+/** A cold CUDA start (driver and runtime load) can take most of a minute before `hello` answers. */
+export const ENGINE_HELLO_TIMEOUT_MS = 60_000
+/** `inspect` reads a file header; the same bound `jobWeightPrecisions` gives it. */
+export const ENGINE_INSPECT_TIMEOUT_MS = 30_000
+
+/** Sidecars started by `withEngineRequests`; quitting ends them. */
+const requestSidecars = new Set<ChildProcessWithoutNullStreams>()
+
+export function stopEngineRequests(): void {
+  for (const proc of requestSidecars) proc.kill()
+  requestSidecars.clear()
+}
+
+/** Checks many weight files through one sidecar instead of starting the engine once per file. */
+export async function withEngineRequests<T>(
+  serverPath: string,
+  task: (request: EngineRequest) => Promise<T>,
+  { helloMs = ENGINE_HELLO_TIMEOUT_MS, requestMs = ENGINE_INSPECT_TIMEOUT_MS }: { helloMs?: number; requestMs?: number } = {},
+): Promise<T> {
   const proc = spawnEngineServer(serverPath)
+  requestSidecars.add(proc)
   const lines = createInterface({ input: proc.stdout })
   let sequence = 0
   let failed: Error | null = null
   let pending: { id: number; resolve: (value: Record<string, unknown>) => void; reject: (cause: Error) => void } | null = null
   function fail(error: Error): void {
-    failed = error
+    failed ??= error
     pending?.reject(error)
   }
 
@@ -115,14 +133,14 @@ export async function withEngineRequests<T>(serverPath: string, task: (request: 
   proc.stderr.resume()
   proc.on('close', (code) => fail(new Error('moss-server 已退出：' + String(code))))
 
-  const request: EngineRequest = async (method, params) => {
+  const send = async (method: string, params: Record<string, unknown>, timeoutMs: number): Promise<Record<string, unknown>> => {
     if (failed) throw failed
     const id = ++sequence
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       return await new Promise<Record<string, unknown>>((resolve, reject) => {
         pending = { id, resolve, reject }
-        timer = setTimeout(() => fail(new Error('moss-server 请求超时：' + method)), 8000)
+        timer = setTimeout(() => fail(new Error('moss-server 请求超时：' + method)), timeoutMs)
         proc.stdin.write(JSON.stringify({ id, method, params }) + '\n')
       })
     } finally {
@@ -132,13 +150,14 @@ export async function withEngineRequests<T>(serverPath: string, task: (request: 
   }
 
   try {
-    const hello = decodeEngineHello(await request('hello', { client: 'MossStudio', protocol_version: ENGINE_PROTOCOL_VERSION }))
+    const hello = decodeEngineHello(await send('hello', { client: 'MossStudio', protocol_version: ENGINE_PROTOCOL_VERSION }, helloMs))
     if (hello.capabilities.inspect === false) throw new Error('请更新 MossInfer 后检查模型文件')
-    return await task(request)
+    return await task((method, params) => send(method, params, requestMs))
   } finally {
     lines.close()
     proc.stdin.end()
     proc.kill()
+    requestSidecars.delete(proc)
   }
 }
 

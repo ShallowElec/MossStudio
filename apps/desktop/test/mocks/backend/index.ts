@@ -21,6 +21,7 @@
 import { bestBundleFor, cliGpuUuids, generationGpus, isFileBundle } from '@shared/bundleFit'
 import { Events, Ipc, type EventChannel } from '@shared/channels'
 import { combinationBundle } from '@shared/modelCombos'
+import { isSharedModelId } from '@shared/sharedModels'
 import { MANGA_SCHEMA_VERSION, seriesSummary, type MangaSeries, type MangaSeriesSave } from '@shared/manga/model'
 import type { AiChatInput, AiConversationInfo, AiMessage } from '@shared/ai'
 import type { WebAccessInfo } from '@shared/backend'
@@ -409,8 +410,8 @@ function defaultHandlers(): Map<string, Handler> {
         : [],
   })
   const syncSources = ({ state, emit }: { state: MockBackendState; emit: (event: EventChannel, data: unknown) => void }) => {
-    const models = state.catalog.models.filter((model) => !model.id.startsWith('shared-'))
-    const adapters = state.catalog.adapters.filter((adapter) => !adapter.id.startsWith('shared-'))
+    const models = state.catalog.models.filter((model) => !isSharedModelId(model.id))
+    const adapters = state.catalog.adapters.filter((adapter) => !isSharedModelId(adapter.id))
     if (state.settings.modelSources?.length && state.sharedModelDirectory?.available) {
       for (const role of ['dit', 'text_encoder', 'vae'] as const) {
         models.push({
@@ -441,7 +442,7 @@ function defaultHandlers(): Map<string, Handler> {
         installedBytes: 10,
         license: 'local',
         tags: ['shared-directory'],
-        notes: '共享目录',
+        notes: '共享模型目录里的文件，在原位置使用，不复制也不移动。',
         installed: true,
       })
     }
@@ -450,7 +451,11 @@ function defaultHandlers(): Map<string, Handler> {
     return sourcesView(state)
   }
   h.set(Ipc.modelSourcesList, (_, { state }) => sourcesView(state))
-  h.set(Ipc.modelSourcesRefresh, (_, ctx) => ({ ...syncSources(ctx), services: [{ kind: 'comfyui', port: 8188 }] }))
+  h.set(Ipc.modelSourcesRefresh, (_, ctx) => {
+    // Like main when the folders cannot be read at all during a scan.
+    if (ctx.state.sharedModelDirectory?.failRefresh) throw new MockIpcError('E_MODEL_SOURCES', '扫描模型目录时出错，请稍后重试')
+    return { ...syncSources(ctx), services: [{ kind: 'comfyui', port: 8188 }] }
+  })
   h.set(Ipc.modelSourcesAdd, (payload, ctx) => {
     const { path, kind, id } = p<{ path?: string; kind?: NonNullable<Settings['modelSources']>[number]['kind']; id?: string }>(payload)
     const current = ctx.state.settings.modelSources ?? []
