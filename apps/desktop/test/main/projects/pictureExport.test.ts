@@ -108,6 +108,16 @@ describe('savePictureAs', () => {
     expect(readFileSync(target, 'utf8')).toBe('picture')
   })
 
+  it('adds the extension when the dialog kept a name without one, and never replaces that file', async () => {
+    const file = put(join(outputs(), 'a.png'), 'picture')
+    vi.spyOn(electron.dialog, 'showSaveDialog').mockResolvedValue({ canceled: false, filePath: join(elsewhere(), 'mine') })
+    expect(await service.savePictureAs(window().sender, file)).toEqual({ path: join(elsewhere(), 'mine.png') })
+    expect(readFileSync(join(elsewhere(), 'mine.png'), 'utf8')).toBe('picture')
+    writeFileSync(join(elsewhere(), 'mine.png'), 'kept')
+    await expect(service.savePictureAs(window().sender, file)).rejects.toMatchObject({ code: 'EEXIST' })
+    expect(readFileSync(join(elsewhere(), 'mine.png'), 'utf8')).toBe('kept')
+  })
+
   it('writes nothing when the dialog is cancelled', async () => {
     const file = put(join(outputs(), 'a.png'), 'picture')
     vi.spyOn(electron.dialog, 'showSaveDialog').mockResolvedValue({ canceled: true, filePath: '' })
@@ -163,6 +173,17 @@ describe('exportPictures', () => {
     expect(readdirSync(folder).sort()).toEqual(['a-2.json', 'a-2.png', 'a.json', 'b.png', 'b.png.json'])
     expect(readFileSync(join(folder, 'a.json'), 'utf8')).toBe('someone else’s')
     expect(JSON.parse(readFileSync(join(folder, 'a-2.json'), 'utf8'))).toMatchObject({ job_id: 'job-1' })
+  })
+
+  it.runIf(process.platform !== 'win32')('never follows a sidecar that is a link to somewhere else', async () => {
+    const a = put(join(outputs(), 'a.png'), 'a')
+    const secret = put(join(elsewhere(), 'secret', 'keys.json'), '{"prompt":"secret"}')
+    symlinkSync(secret, `${a}.json`)
+    const folder = join(elsewhere(), 'out')
+    mkdirSync(folder)
+    vi.spyOn(electron.dialog, 'showOpenDialog').mockResolvedValue({ canceled: false, filePaths: [folder] })
+    await service.exportPictures(window().sender, [a], true, () => undefined)
+    expect(readdirSync(folder)).toEqual(['a.png'])
   })
 
   it('leaves the sidecars out by default', async () => {

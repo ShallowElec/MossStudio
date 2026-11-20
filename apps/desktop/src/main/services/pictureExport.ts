@@ -1,6 +1,6 @@
 import { ClipboardItem, app, clipboard, nativeImage } from 'electron'
 import { constants, existsSync, readFileSync } from 'node:fs'
-import { copyFile, realpath, stat } from 'node:fs/promises'
+import { copyFile, lstat, realpath, stat, unlink } from 'node:fs/promises'
 import { basename, extname, join, resolve } from 'node:path'
 import type { GalleryExportProgress, GalleryExportResult, GallerySaveResult } from '@shared/types'
 import { codedError } from '../lib/codedError'
@@ -23,20 +23,24 @@ const DRAG_ICON_EDGE = 96
  * error. The check runs on the resolved path and callers read that path, so a
  * link cannot hand out a file from elsewhere.
  */
-export async function galleryPicture(file: string): Promise<string> {
+export async function galleryPicture(file: string, roots?: readonly string[]): Promise<string> {
   let real: string
   try {
     real = await realpath(file)
   } catch {
     throw codedError('E_NOT_FOUND', '找不到这张图片，可能已被移动或删除')
   }
-  const roots = await Promise.all((await galleryRoots()).map((root) => realpath(root).catch(() => resolve(root))))
-  const listed = roots.some((root) => isInside(root, real) && real !== root)
+  const listed = (roots ?? (await realGalleryRoots())).some((root) => isInside(root, real) && real !== root)
   if (!listed || !GALLERY_IMAGE_EXT.has(extname(real).toLowerCase())) {
     throw codedError('E_NOT_GALLERY', '这张图片不在作品目录中')
   }
   if (!(await stat(real)).isFile()) throw codedError('E_NOT_GALLERY', '这张图片不在作品目录中')
   return real
+}
+
+/** The gallery roots, symlinks resolved; an export reads them once for all its pictures. */
+async function realGalleryRoots(): Promise<string[]> {
+  return Promise.all((await galleryRoots()).map((root) => realpath(root).catch(() => resolve(root))))
 }
 
 export async function copyPictureToClipboard(file: string): Promise<true> {
@@ -57,9 +61,15 @@ export async function savePictureAs(sender: Electron.WebContents, file: string):
     filters: [{ name: '图片', extensions: [ext] }],
   })
   if (result.canceled || !result.filePath) return null
-  const target = resolve(result.filePath)
-  // The save dialog already asked before replacing a file that is there.
-  if (target !== real) await copyFile(real, target)
+  const typed = resolve(result.filePath)
+  if (extname(typed)) {
+    // The save dialog already asked before replacing a file that is there.
+    if (typed !== real) await copyFile(real, typed)
+    return { path: typed }
+  }
+  // Some Linux dialogs keep the name as typed; the dialog never asked about the name with the extension, so never replace it.
+  const target = `${typed}.${ext}`
+  await copyFile(real, target, constants.COPYFILE_EXCL)
   return { path: target }
 }
 
@@ -91,10 +101,14 @@ export async function copyWithoutReplacing(source: string, dir: string, sidecars
       await copyFile(source, target, constants.COPYFILE_EXCL)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue
+      // A half-written copy (a full disk, say) is not left behind.
+      await unlink(target).catch(() => undefined)
       throw error
     }
     for (const [sidecar, path] of companions) {
       try {
+        // A link in place of a sidecar could point anywhere; only a plain file is copied.
+        if (!(await lstat(sidecar)).isFile()) continue
         await copyFile(sidecar, path, constants.COPYFILE_EXCL)
       } catch {
         // the picture is what was asked for; a missing sidecar only drops its parameters
@@ -135,10 +149,11 @@ export async function exportPictures(
   const total = files.length
   let exported = 0
   let failed = 0
+  const roots = await realGalleryRoots()
   onProgress({ done: 0, total })
   for (const file of files) {
     try {
-      const real = await galleryPicture(file)
+      const real = await galleryPicture(file, roots)
       // The sidecars that belong to this picture: the same ones deleting it takes along.
       const sidecars = withParams ? sidecarsToTrash(real, existsSync, readJson) : []
       await copyWithoutReplacing(real, folder, sidecars)
@@ -162,7 +177,8 @@ function dragIcon(file: string): Electron.NativeImage {
 
 /** Hands the pictures to the OS drag that the pointer is already making, so another app can take them. */
 export async function startPictureDrag(sender: Electron.WebContents, files: readonly string[]): Promise<true> {
-  const real = await Promise.all(files.map(galleryPicture))
+  const roots = await realGalleryRoots()
+  const real = await Promise.all(files.map((file) => galleryPicture(file, roots)))
   sender.startDrag({ file: real[0]!, files: real, icon: dragIcon(real[0]!) })
   return true
 }

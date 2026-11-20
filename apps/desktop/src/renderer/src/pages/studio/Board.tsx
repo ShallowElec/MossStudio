@@ -393,8 +393,8 @@ export function Board(props: BoardProps): React.JSX.Element {
     latest.current.onPinRun(run.id, { x: at.x - cardWidth(run) / 2, y: at.y - CARD_HEADER / 2 })
   })
   const pictures = usePictureActions()
-  // The actions do not change between renders (they hang on the toast context only).
   const dragOutRef = useRef((path: string) => pictures.dragOut([path]))
+  dragOutRef.current = (path: string) => pictures.dragOut([path])
   const runDrag = useRunDrag({ viewport, view: viewRef, onShow: showRef, onDrop: dropRef, onDragOut: dragOutRef })
   const wireSelection = useWireSelection(wires, (wire) => latest.current.onRemoveLink(wire.targetId, wire.role!, wire.at))
   const selectedWireId = wireSelection.selectedWireId

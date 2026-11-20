@@ -207,6 +207,29 @@ describe('library', () => {
     await expect.poll(() => page.getByText('已导出 2 张').isVisible()).toBe(true)
   })
 
+  it('keeps the bar and its progress while an export copies, even when the picks are let go', async () => {
+    const page = await openLibrary()
+    await page.evaluate(() => {
+      ;(window as unknown as { heldExport: unknown }).heldExport = window.__mock.hold('gallery:export')
+    })
+    await tiles(page).nth(0).click()
+    await tiles(page)
+      .nth(1)
+      .click({ modifiers: ['Control'] })
+    await bar(page).getByRole('button', { name: '导出到文件夹…' }).click()
+    await page.evaluate(() => window.__mock.emit(window.__mock.Events.galleryExport, { done: 1, total: 2 }))
+    await expect.poll(() => bar(page).getByRole('progressbar', { name: '导出进度' }).isVisible()).toBe(true)
+    await page.keyboard.press('Escape')
+    await expect.poll(() => pickedPaths(page)).toEqual([])
+    // Still copying: the bar stays, and a second export cannot start.
+    expect(await bar(page).isVisible()).toBe(true)
+    expect(await bar(page).getByRole('button', { name: '导出到文件夹…' }).isDisabled()).toBe(true)
+    await page.evaluate(() => (window as unknown as { heldExport: { release: () => Promise<void> } }).heldExport.release())
+    await expect.poll(() => page.getByText('已导出 2 张').isVisible()).toBe(true)
+    await expect.poll(() => bar(page).count()).toBe(0)
+    expect(await app.calls('gallery:export')).toHaveLength(1)
+  })
+
   it('deletes the picked pictures after one confirmation', async () => {
     const page = await openLibrary()
     await tiles(page).nth(0).click()

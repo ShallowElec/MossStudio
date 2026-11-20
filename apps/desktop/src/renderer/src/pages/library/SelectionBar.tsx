@@ -22,11 +22,14 @@ export function SelectionBar({
   paths,
   onClear,
   onDeleted,
+  onExporting,
 }: {
   /** The picked pictures, in listing order. */
   paths: readonly string[]
   onClear: () => void
   onDeleted: (paths: string[]) => void
+  /** The pictures being exported, then null: the page keeps the bar while they copy, even if the picks change. */
+  onExporting: (paths: readonly string[] | null) => void
 }): React.JSX.Element {
   const toast = useToast()
   const [withParams, setWithParams] = useState(false)
@@ -46,6 +49,7 @@ export function SelectionBar({
 
   const exportPictures = async (): Promise<void> => {
     setExporting(true)
+    onExporting(paths)
     // Progress starts once a folder is picked; until then the dialog is up.
     const off = onEvent<GalleryExportProgress>(Events.galleryExport, setProgress)
     try {
@@ -57,6 +61,7 @@ export function SelectionBar({
       toast.push(`没能导出：${message(cause)}`, 'error')
     } finally {
       off()
+      onExporting(null)
       setExporting(false)
       setProgress(null)
       setSlow(false)

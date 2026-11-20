@@ -68,6 +68,8 @@ export function LibraryPage(): React.JSX.Element {
   const [box, setBox] = useState<Rect | null>(null)
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; bounds: { width: number; height: number }; path: string } | null>(null)
   const pictures = usePictureActions()
+  /** While an export copies, its bar stays (with its progress) and no second export starts. */
+  const [exporting, setExporting] = useState<readonly string[] | null>(null)
   const sentinel = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
@@ -432,9 +434,14 @@ export function LibraryPage(): React.JSX.Element {
           ) : null}
         </div>
 
-        {picked.length > 1 ? (
+        {picked.length > 1 || exporting ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-6">
-            <SelectionBar paths={picked} onClear={() => setPicked([])} onDeleted={onDeletedMany} />
+            <SelectionBar
+              paths={picked.length > 1 ? picked : (exporting ?? [])}
+              onClear={() => setPicked([])}
+              onDeleted={onDeletedMany}
+              onExporting={setExporting}
+            />
           </div>
         ) : null}
       </div>
