@@ -78,7 +78,7 @@ Recurring actions:
 ## 5. Status
 
 - `Tag` is not a state: it names what something is (INT8, 单文件). State is a `Pill`.
-- `Pill` tones: `neutral` (default, no state), `accent` (selected / in use), `ok` (ready), `warn` (needs attention, partly done), `danger` (failed, blocked). Use these names, not the aliases `blue` / `amber` / `red`.
+- `Pill` tones: `neutral` (default, no state), `accent` (selected / in use), `accent-strong` (the same, solid, for a count on a primary button such as 生成's 排队 N), `ok` (ready), `warn` (needs attention, partly done), `danger` (failed, blocked). Use these names, not the aliases `blue` / `amber` / `red`.
 - Same state, same form: a list shows a state either as a `Pill` or as a `StatusDot` with text, the same way on every row.
 - In progress is `accent` (a `ProgressBar` or an accent Pill), for downloads, installs, generation and training alike.
 

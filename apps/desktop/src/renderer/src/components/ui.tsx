@@ -262,11 +262,13 @@ export function StatusDot({ status, className }: { status: CheckStatus; classNam
   return <span aria-hidden="true" className={cn('inline-block size-2 shrink-0 rounded-full', statusColor[status], className)} />
 }
 
-type PillTone = 'neutral' | 'accent' | 'ok' | 'warn' | 'danger'
+type PillTone = 'neutral' | 'accent' | 'accent-strong' | 'ok' | 'warn' | 'danger'
 
 const pillTone: Record<PillTone, string> = {
   neutral: 'bg-well text-ink-2',
   accent: 'bg-accent-soft text-ink',
+  // Solid: reads on a primary button's ink, where the soft tone disappears.
+  'accent-strong': 'bg-accent text-on-accent',
   ok: 'bg-ok-soft text-ok',
   warn: 'bg-warn-soft text-warn',
   danger: 'bg-danger-soft text-danger',

@@ -73,9 +73,10 @@ export interface StripItem {
 }
 
 /**
- * The strip's items, oldest first. A run without pictures (still going,
- * failed or stopped) shows until a later run has pictures: older ones would
- * only be noise, but a run that failed between queued ones stays in sight.
+ * The strip's items, oldest first. A run without pictures shows while it is
+ * still going (another GPU may finish a later run first), and a failed or
+ * stopped one until a later run has pictures: older ones would only be
+ * noise, but a run that failed between queued ones stays in sight.
  */
 export function stripOf(runs: readonly ProjectCanvas[]): StripItem[] {
   const items: StripItem[] = []
@@ -86,7 +87,8 @@ export function stripOf(runs: readonly ProjectCanvas[]): StripItem[] {
   runs.forEach((run, index) => {
     const outputs = run.outputs ?? []
     if (!outputs.length) {
-      if (index > lastPictured) items.push({ runId: run.id, output: 0, number: items.length + 1 })
+      if (index > lastPictured || ACTIVE_JOB_STATES.has(run.jobState ?? ''))
+        items.push({ runId: run.id, output: 0, number: items.length + 1 })
       return
     }
     outputs.forEach((output, at) => items.push({ runId: run.id, output: at, path: output.path, number: items.length + 1 }))
@@ -106,14 +108,22 @@ export function shownIndex(layout: Pick<ProjectCanvas, 'shownOutput'>, strip: re
   return newest ? strip.findIndex((item) => item.runId === newest.runId) : -1
 }
 
+/** A run that has not started drawing: queued in the engine, or taken at a click and not sent yet. */
+function waiting(run: ProjectCanvas): boolean {
+  return run.jobState === 'queued' || (run.jobState === 'starting' && !run.jobId)
+}
+
 /**
- * Runs of a 画面 waiting behind the one it is drawing, in the order they
- * were asked for: every run still going after the first. The card's state
- * as `applyJobs` last copied it from the job decides, so every caller sees
- * the same queue.
+ * Runs of a 画面 waiting their turn, in the order they were asked for. While
+ * none of its runs is drawing, the first waiting one stands for the 画面 (its
+ * face says 排队中) and the rest wait behind it; on several GPUs a later run
+ * can draw while an earlier one still waits. The card's state as `applyJobs`
+ * last copied it from the job decides, so every caller sees the same queue.
  */
 export function queuedRunsOf(runs: readonly ProjectCanvas[]): ProjectCanvas[] {
-  return runs.filter((run) => ACTIVE_JOB_STATES.has(run.jobState ?? '')).slice(1)
+  const queued = runs.filter(waiting)
+  const drawing = runs.some((run) => ACTIVE_JOB_STATES.has(run.jobState ?? '') && !waiting(run))
+  return drawing ? queued : queued.slice(1)
 }
 
 export interface Filmstrip {

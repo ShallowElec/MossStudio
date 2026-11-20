@@ -294,14 +294,17 @@ export function createImageCanvas(
 /**
  * The canvas a run writes into: a new result canvas, so earlier pictures are
  * never overwritten. A 画面's runs stack in its filmstrip (see runs.ts) and
- * its face follows the new one; a run of a result card gets a card of its own
- * under it. (Older projects may have a 画面 whose first run rendered on the
- * 画面 itself; that picture stays the first in its filmstrip.)
+ * its face follows the new one, unless `keepShown`: a run queued behind
+ * others keeps the picture picked in the strip, so the wires from the 画面
+ * do not jump. A run of a result card gets a card of its own under it.
+ * (Older projects may have a 画面 whose first run rendered on the 画面
+ * itself; that picture stays the first in its filmstrip.)
  */
 export function taskCanvasFor(
   source: ProjectCanvas,
   canvases: readonly ProjectCanvas[],
   id: string = crypto.randomUUID(),
+  keepShown = false,
 ): { canvases: ProjectCanvas[]; taskId: string } {
   // A 高清修复 run's card is the size of the finished picture; the first-pass
   // size is kept so running it again repeats the same job.
@@ -336,7 +339,7 @@ export function taskCanvasFor(
   if (resized) task.baseSize = base
   else delete task.baseSize
   const next = canvases.map((item) => {
-    if (item.id !== source.id || !item.shownOutput) return item
+    if (keepShown || item.id !== source.id || !item.shownOutput) return item
     const { shownOutput: _picked, ...rest } = item
     return rest
   })

@@ -31,6 +31,7 @@ import { useShell } from '../../lib/shell'
 import { newCanvasMenu } from './connect'
 import { boardTakesDrag, isImageFile, sortBoardDrop } from './imageNodes'
 import { cardJobView, type CardJobView } from './jobStatus'
+import { inputStillDrawing } from './jobInputs'
 import { LinkMenu } from './LinkMenu'
 import { linkSourceImage, type LinkRole } from './links'
 import { BRUSH_DEFAULT, maskAvailability, startPictureSize } from './mask'
@@ -110,6 +111,8 @@ export interface BoardProps {
   /** 再来 4 张: queue this many runs with new seeds (already within the queue's room). */
   onMoreRuns: (canvasId: string, count: number) => void
   onCancel: (jobId: string) => void
+  /** Call off a run taken at a click that has not been sent yet: its card goes. */
+  onCallOff: (runId: string) => void
   onShowActivity: (jobId?: string) => void
   onCopy: (canvas: ProjectCanvas) => void
   onDelete: (canvas: ProjectCanvas) => void
@@ -809,12 +812,16 @@ export function Board(props: BoardProps): React.JSX.Element {
     rerunEligibility(canvas, {
       blocked: props.blockedIds.has(canvas.id),
       full: (film?.queued.length ?? 0) >= MAX_QUEUED_RUNS,
+      inputDrawing: canvas.kind === 'layout' ? inputStillDrawing(canvas, props.canvases) : null,
       update: props.update,
     })
 
-  /** Call off runs waiting in a 画面's queue (those that reached the engine). */
+  /** Call off runs waiting in a 画面's queue: in the engine, or still waiting to be sent. */
   const cancelRuns = (runs: readonly ProjectCanvas[]): void => {
-    for (const run of runs) if (run.jobId) props.onCancel(run.jobId)
+    for (const run of runs) {
+      if (run.jobId) props.onCancel(run.jobId)
+      else props.onCallOff(run.id)
+    }
   }
 
   /** A 画面's runs from its menu: four more, the shown one again with the new settings, the queue called off. */
@@ -989,7 +996,7 @@ export function Board(props: BoardProps): React.JSX.Element {
       setContextMenu({
         at,
         label: '排队中的一张',
-        entries: [{ label: '取消这一张', disabled: !queued.jobId, onSelect: () => cancelRuns([queued]) }],
+        entries: [{ label: '取消这一张', onSelect: () => cancelRuns([queued]) }],
       })
       return
     }
@@ -1222,7 +1229,7 @@ export function Board(props: BoardProps): React.JSX.Element {
                   onShow: on.stripShow,
                   onOpen: on.stripOpen,
                   onPointerDown: on.stripPointerDown,
-                  queued: film.queued.map((run) => ({ runId: run.id, cancellable: Boolean(run.jobId) })),
+                  queued: film.queued.map((run) => run.id),
                   onCancelQueued: on.cancelQueued,
                 }
               : null

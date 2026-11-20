@@ -191,6 +191,11 @@ describe('studio/readiness rerunEligibility', () => {
     const ok = canvas({ prompt: 'x' })
     expect(rerunEligibility(ok, { blocked: true })).toEqual({ ok: false, reason: '这个画面或它的来源正在生成' })
     expect(rerunEligibility(ok, { blocked: false, full: true })).toEqual({ ok: false, reason: '排队已满' })
+    // A wired 起始图 still being drawn: the card says so before the click.
+    expect(rerunEligibility(ok, { blocked: false, inputDrawing: '「画面 2」还在生成，完成后再试' })).toEqual({
+      ok: false,
+      reason: '「画面 2」还在生成，完成后再试',
+    })
     expect(rerunEligibility(canvas(), { blocked: false })).toMatchObject({ ok: false, reason: '先写一句描述' })
   })
 })

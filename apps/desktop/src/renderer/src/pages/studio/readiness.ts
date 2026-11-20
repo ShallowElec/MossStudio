@@ -260,12 +260,14 @@ export interface RerunCheck {
  */
 export function rerunEligibility(
   canvas: Pick<ProjectCanvas, 'id' | 'prompt' | 'summary' | 'layers' | 'width' | 'height'>,
-  state: { blocked: boolean; full?: boolean; update?: ReadinessInput['update'] },
+  state: { blocked: boolean; full?: boolean; inputDrawing?: string | null; update?: ReadinessInput['update'] },
 ): RerunCheck {
   // Main would refuse it anyway (E_UPDATE_REQUIRED); say so on the button instead.
   const updateReason = updateRequiredReason(state.update)
   if (updateReason) return { ok: false, reason: updateReason }
   if (state.blocked) return { ok: false, reason: '这个画面或它的来源正在生成' }
+  // A wired picture still being drawn (`inputStillDrawing`): the run would be refused for it.
+  if (state.inputDrawing) return { ok: false, reason: state.inputDrawing }
   if (state.full) return { ok: false, reason: '排队已满' }
   const compiled = compileCanvasPrompt(canvas)
   if (!compiled.ok) return { ok: false, reason: compiled.errors[0] }

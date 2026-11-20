@@ -553,8 +553,7 @@ function CanvasParams({
                   {blocked ? '生成中…' : full ? '排队已满' : going ? '再来一张' : '生成'}
                   {!blocked && !full ? <Kbd>{SHORTCUT}</Kbd> : null}
                   {queued && !blocked ? (
-                    // Solid, so it reads on the button's own ink.
-                    <Pill tone="accent" className="tabular bg-accent text-on-accent">
+                    <Pill tone="accent-strong" className="tabular">
                       <span data-generate-queue>排队 {queued}</span>
                     </Pill>
                   ) : null}

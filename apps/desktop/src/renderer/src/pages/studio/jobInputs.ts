@@ -1,7 +1,7 @@
 import type { ControlAdapterEntry, EngineFeatures, JobControlImage, JobParams, ProjectCanvas } from '@shared/types'
 import { CLI_ENGINE_LABEL, cliSamplingAccepted } from '@shared/cliEngine'
 import { ACTIVE_JOB_STATES } from './jobStatus'
-import { controlKindLabel, linkSourceCanvas, canvasPicture, MAX_REFERENCES } from './links'
+import { controlKindLabel, linkSourceCanvas, linksOf, canvasPicture, MAX_REFERENCES } from './links'
 import type { Blocker } from './readiness'
 import { cleanSampling, enumLabel, generationSize, outputSize } from './sampling'
 
@@ -43,6 +43,19 @@ function sourcePicture(canvases: readonly ProjectCanvas[], link: { canvasId: str
   if (path) return { path }
   if (ACTIVE_JOB_STATES.has(source.jobState ?? '')) return { reason: `${what}「${source.title}」还在生成，完成后再试` }
   return { reason: `${what}「${source.title}」还没生成` }
+}
+
+/**
+ * Why a canvas cannot run yet because a picture wired into it is still being
+ * drawn (the `input-source` blocker, said before the click), or null.
+ */
+export function inputStillDrawing(canvas: Pick<ProjectCanvas, 'inputs'>, canvases: readonly ProjectCanvas[]): string | null {
+  for (const entry of linksOf(canvas)) {
+    const source = linkSourceCanvas(entry.link, canvases)
+    if (source && !canvasPicture(source, entry.link.output) && ACTIVE_JOB_STATES.has(source.jobState ?? ''))
+      return `「${source.title}」还在生成，完成后再试`
+  }
+  return null
 }
 
 export function resolveJobInputs(

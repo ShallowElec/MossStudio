@@ -545,6 +545,26 @@ describe('engine jobs: runs of one canvas', () => {
     await expect(supervisor.startEngineJob(runOf('other', 'run-x'))).resolves.toMatchObject({ state: 'queued' })
   })
 
+  it('refuses a second job for a canvas whose job is still going: only new result canvases of a source queue', async () => {
+    await supervisor.startEngineJob(runOf('scene', 'run-1'))
+    await expect(supervisor.startEngineJob(runOf('scene', 'run-1'))).rejects.toThrow('此 Canvas 已有任务')
+    // A 漫画 panel draws into itself, with no lineage: a retry while its job is going is refused.
+    const panel = request('panel', { projectId: 'manga-1', canvasId: 'panel-1' })
+    await supervisor.startEngineJob(panel)
+    await expect(supervisor.startEngineJob(panel)).rejects.toThrow('此 Canvas 已有任务')
+  })
+
+  it('counts requests still being scheduled toward the limit, so a burst cannot pass it', async () => {
+    const burst = await Promise.allSettled(
+      Array.from({ length: MAX_QUEUED_RUNS + 3 }, (_, index) => supervisor.startEngineJob(runOf('scene', `run-${index}`))),
+    )
+    expect(burst.filter((item) => item.status === 'fulfilled')).toHaveLength(MAX_QUEUED_RUNS + 1)
+    expect(burst.filter((item) => item.status === 'rejected').map((item) => (item as PromiseRejectedResult).reason.code)).toEqual([
+      'E_QUEUE_FULL',
+      'E_QUEUE_FULL',
+    ])
+  })
+
   it(`waits at most ${MAX_QUEUED_RUNS} runs behind the one being drawn`, async () => {
     for (let index = 0; index <= MAX_QUEUED_RUNS; index += 1) await supervisor.startEngineJob(runOf('scene', `run-${index}`))
     await expect(supervisor.startEngineJob(runOf('scene', 'one-too-many'))).rejects.toMatchObject({ code: 'E_QUEUE_FULL' })

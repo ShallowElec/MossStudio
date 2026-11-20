@@ -536,7 +536,7 @@ interface QueuedEngineJob {
 
 const engineQueues = new Map<string, QueuedEngineJob[]>()
 const activeEngineSlots = new Set<string>()
-const canvasReservations = new Map<string, { sourceId: string; path: Set<string> }>()
+const canvasReservations = new Map<string, { canvasId: string; sourceId: string; path: Set<string> }>()
 const pendingAutoGpuAssignments = new Map<string, number>()
 
 /**
@@ -841,32 +841,40 @@ export async function startEngineJob(input: StartEngineJobInput): Promise<JobRec
     const lineage = [...new Set([input.canvasId, ...(input.canvasLineage ?? [])])]
     const sourceId = input.canvasLineage?.[0] ?? input.canvasId
     const branch = { sourceId, path: new Set(lineage) }
+    const active = (job: JobRecord): boolean => job.state === 'queued' || job.state === 'starting' || job.state === 'running'
+    // Runs of one source queue, each into a canvas of its own; a second job for the same canvas
+    // (a 漫画 panel retried while its job is still going) is refused.
     const activeCanvasJob = [...jobs.values()].find(
       (job) =>
         job.projectId === input.projectId &&
         job.canvasId !== undefined &&
-        canvasBranchesConflict(branch, {
-          sourceId: job.canvasLineage?.[0] ?? job.canvasId,
-          path: new Set([job.canvasId, ...(job.canvasLineage ?? [])]),
-        }) &&
-        (job.state === 'queued' || job.state === 'starting' || job.state === 'running'),
+        active(job) &&
+        (job.canvasId === input.canvasId ||
+          canvasBranchesConflict(branch, {
+            sourceId: job.canvasLineage?.[0] ?? job.canvasId,
+            path: new Set([job.canvasId, ...(job.canvasLineage ?? [])]),
+          })),
     )
-    const hasConflictingReservation = [...canvasReservations.values()].some((reservation) => canvasBranchesConflict(branch, reservation))
+    const hasConflictingReservation = [...canvasReservations.values()].some(
+      (reservation) => reservation.canvasId === input.canvasId || canvasBranchesConflict(branch, reservation),
+    )
     if (activeCanvasJob || hasConflictingReservation) {
       const state = activeCanvasJob?.state
       throw new Error(`此 Canvas 已有任务${state === 'queued' ? '排队' : '正在运行'}，请等待完成或先取消该任务。`)
     }
     // More runs of the same canvas wait their turn, one drawing and at most MAX_QUEUED_RUNS behind it.
-    const going = [...jobs.values()].filter(
-      (job) =>
-        job.projectId === input.projectId &&
-        job.canvasId !== undefined &&
-        (job.canvasLineage?.[0] ?? job.canvasId) === sourceId &&
-        (job.state === 'queued' || job.state === 'starting' || job.state === 'running'),
-    ).length
+    // Requests of the same source still being scheduled count too, so two at once cannot both pass.
+    const going =
+      [...jobs.values()].filter(
+        (job) =>
+          job.projectId === input.projectId &&
+          job.canvasId !== undefined &&
+          (job.canvasLineage?.[0] ?? job.canvasId) === sourceId &&
+          active(job),
+      ).length + [...canvasReservations.values()].filter((reservation) => reservation.sourceId === sourceId).length
     if (going > MAX_QUEUED_RUNS) throw codedError('E_QUEUE_FULL', `这个画面已经排了 ${MAX_QUEUED_RUNS} 张，等前面的画完再加`)
     const reservationId = randomUUID()
-    canvasReservations.set(reservationId, branch)
+    canvasReservations.set(reservationId, { ...branch, canvasId: input.canvasId })
     try {
       return await scheduleEngineJob(input)
     } finally {

@@ -58,7 +58,7 @@ function Thumb({
 }
 
 /** A run still waiting its turn: a quiet tile that breathes; its menu calls it off. */
-function QueuedThumb({ tile, number, onCancel }: { tile: QueuedTile; number: number; onCancel: () => void }): React.JSX.Element {
+function QueuedThumb({ runId, number, onCancel }: { runId: string; number: number; onCancel: () => void }): React.JSX.Element {
   return (
     <Popover
       align="start"
@@ -67,7 +67,7 @@ function QueuedThumb({ tile, number, onCancel }: { tile: QueuedTile; number: num
       trigger={(menu) => (
         <button
           type="button"
-          data-strip-queued={tile.runId}
+          data-strip-queued={runId}
           aria-label={`第 ${number} 张，排队中`}
           aria-expanded={menu['aria-expanded']}
           aria-haspopup={menu['aria-haspopup']}
@@ -82,7 +82,6 @@ function QueuedThumb({ tile, number, onCancel }: { tile: QueuedTile; number: num
     >
       {(close) => (
         <MenuItem
-          disabled={!tile.cancellable}
           onSelect={() => {
             close()
             onCancel()
@@ -93,13 +92,6 @@ function QueuedThumb({ tile, number, onCancel }: { tile: QueuedTile; number: num
       )}
     </Popover>
   )
-}
-
-/** A run of the strip that waits behind the one being drawn. */
-export interface QueuedTile {
-  runId: string
-  /** It has reached the engine (has a job), so it can be called off. */
-  cancellable: boolean
 }
 
 /**
@@ -120,7 +112,8 @@ export function Filmstrip({
   onCancelQueued,
 }: {
   items: readonly StripItem[]
-  queued?: readonly QueuedTile[]
+  /** Ids of the runs waiting their turn. */
+  queued?: readonly string[]
   shown: number
   views: ReadonlyMap<string, CardJobView>
   /** How many thumbnails fit beside the buttons. */
@@ -135,14 +128,14 @@ export function Filmstrip({
   const total = items.length + queued.length
   const hidden = Math.max(0, total - max)
   const marked = items.length > 1
-  const placeholder = (tile: QueuedTile, at: number, close?: () => void): React.JSX.Element => (
+  const placeholder = (runId: string, at: number, close?: () => void): React.JSX.Element => (
     <QueuedThumb
-      key={tile.runId}
-      tile={tile}
+      key={runId}
+      runId={runId}
       number={items.length + at + 1}
       onCancel={() => {
         close?.()
-        onCancelQueued?.(tile.runId)
+        onCancelQueued?.(runId)
       }}
     />
   )
@@ -192,7 +185,7 @@ export function Filmstrip({
                   }}
                 />
               ))}
-              {queued.map((tile, at) => placeholder(tile, at, close))}
+              {queued.map((runId, at) => placeholder(runId, at, close))}
             </div>
           )}
         </Popover>
@@ -212,7 +205,7 @@ export function Filmstrip({
           />
         )
       })}
-      {queued.map((tile, at) => (items.length + at >= hidden ? placeholder(tile, at) : null))}
+      {queued.map((runId, at) => (items.length + at >= hidden ? placeholder(runId, at) : null))}
     </div>
   )
 }

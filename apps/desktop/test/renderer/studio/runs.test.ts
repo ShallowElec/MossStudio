@@ -127,6 +127,30 @@ describe('studio/runs queue', () => {
     expect(strip.queued.map((item) => item.id)).toEqual(['last'])
   })
 
+  it('on several GPUs, a run that draws is never a placeholder, even while an earlier one still waits', () => {
+    // run1 waits on GPU0 behind another 画面's job while run2 draws on GPU1.
+    const list = [layout(), run('a'), going('run1', 'queued'), going('run2', 'running'), going('run3', 'queued')]
+    const strip = filmstripOf(list[0]!, list)
+    expect(strip.queued.map((item) => item.id)).toEqual(['run1', 'run3'])
+    expect(strip.items.map((item) => item.runId)).toEqual(['a', 'run2'])
+    expect(shownRun(list[0]!, list)?.run.id).toBe('run2')
+  })
+
+  it('keeps a run that is still drawing in the strip when a later one finishes first', () => {
+    // run2 finished on GPU1 while run1 still draws on GPU0: run1 keeps its tile, progress and 取消.
+    const list = [layout(), run('a'), going('run1', 'running'), run('run2')]
+    const strip = filmstripOf(list[0]!, list)
+    expect(strip.items.map((item) => item.runId)).toEqual(['a', 'run1', 'run2'])
+    expect(strip.queued).toEqual([])
+  })
+
+  it('counts a run taken at a click and not sent yet as waiting', () => {
+    const unsent = run('unsent', { jobState: 'starting', outputs: [] })
+    expect(queuedRunsOf([going('drawing', 'running'), unsent]).map((item) => item.id)).toEqual(['unsent'])
+    // Alone, it stands for the 画面 until it is sent.
+    expect(queuedRunsOf([unsent])).toEqual([])
+  })
+
   it('keeps a run that failed between queued ones in sight until a later run has pictures', () => {
     const list = [layout(), run('a'), run('broke', { jobState: 'failed', outputs: [] }), going('drawing', 'running')]
     expect(filmstripOf(list[0]!, list).items.map((item) => item.runId)).toEqual(['a', 'broke', 'drawing'])

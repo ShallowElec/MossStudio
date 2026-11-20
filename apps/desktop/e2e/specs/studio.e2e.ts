@@ -312,6 +312,36 @@ describe('studio', () => {
     expect(await card.getByRole('button', { name: '再来一张 画面 1' }).getAttribute('title')).toBe('排队已满')
   })
 
+  it('counts runs not sent yet in 排队 N, and 取消排队 calls them off before they go out', async () => {
+    const page = await app.open({ scenario: 'ready', route: '/studio', theme: 'light' })
+    await openStudio(page)
+    await describeCanvas(page, '海边的灯塔')
+    await page.locator('[data-studio-generate]').click()
+    await submitted(page, 1)
+    await page.evaluate((jobId) => window.__mock.finishJob(jobId), await lastJobId(page))
+    // The backend is slow to take the next run: the other three wait in the Studio, not the engine.
+    await page.evaluate((channel) => {
+      ;(window as unknown as { heldRun: { release: () => Promise<void> } }).heldRun = window.__mock.hold(channel)
+    }, ENGINE_JOBS)
+    const card = page.locator('article[data-canvas-card]')
+    await card.getByRole('button', { name: '画面 1 更多操作' }).click()
+    await page.getByRole('menuitem', { name: '再来 4 张' }).click()
+    await expect.poll(() => card.locator('[data-card-queue]').textContent()).toBe('排队 3')
+    expect(await page.locator('[data-generate-queue]').textContent()).toBe('排队 3')
+    // They have placeholders like any waiting run (the oldest may sit behind +N on a narrow card).
+    expect(await card.locator('[data-strip-queued]').count()).toBeGreaterThan(0)
+
+    await card.getByRole('button', { name: '画面 1 更多操作' }).click()
+    await page.getByRole('menuitem', { name: '取消排队的 3 张' }).click()
+    await expect.poll(() => card.locator('[data-strip-queued]').count()).toBe(0)
+    expect(await card.locator('[data-card-queue]').count()).toBe(0)
+    await page.evaluate(() => (window as unknown as { heldRun: { release: () => Promise<void> } }).heldRun.release())
+    await settle(page, 300)
+    // Only the run already on its way went out; the three called off never did.
+    expect(await page.evaluate((channel) => window.__mock.callsTo(channel).length, ENGINE_JOBS)).toBe(2)
+    expect(await app.calls('jobs:cancel')).toEqual([])
+  })
+
   it('sends a queued run with the settings of its click; a change goes to the runs asked for after it', async () => {
     const page = await app.open({ scenario: 'ready', route: '/studio' })
     await openStudio(page)

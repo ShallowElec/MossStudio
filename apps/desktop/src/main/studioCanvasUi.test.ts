@@ -142,7 +142,10 @@ export async function runStudioCanvasUiTests(): Promise<void> {
     })
     await waitFor('Boolean(document.querySelector(\'article[aria-label^="画面 1"]\'))')
     const generateDisabled = (): Promise<unknown> => evaluate("document.querySelector('[data-studio-generate]')?.disabled")
-    assert.equal(await generateDisabled(), true, 'generation action should be disabled while the Canvas job is active')
+    const generateText = (): Promise<unknown> => evaluate("document.querySelector('[data-studio-generate]')?.textContent")
+    // The 画面's own run is going: 生成 stays on and queues another (再来一张).
+    await waitFor("document.querySelector('[data-studio-generate]')?.textContent?.includes('再来一张') === true")
+    assert.equal(await generateDisabled(), false, 'generation action should stay enabled while the Canvas own job is active')
 
     const job = (state: JobRecord['state'], jobId = activeJobId, canvasId = sourceCanvas!.id): JobRecord => ({
       id: jobId,
@@ -173,14 +176,16 @@ export async function runStudioCanvasUiTests(): Promise<void> {
     }
 
     sendJob('failed')
-    await waitFor("document.querySelector('[data-studio-generate]')?.disabled === false")
-    assert.equal(await generateDisabled(), false, 'generation action should be restored after failure')
+    await waitFor("document.querySelector('[data-studio-generate]')?.textContent?.includes('再来一张') === false")
+    assert.equal(await generateDisabled(), false, 'generation action should read 生成 again after failure')
 
     sendJob('running')
-    await waitFor("document.querySelector('[data-studio-generate]')?.disabled === true")
+    await waitFor("document.querySelector('[data-studio-generate]')?.textContent?.includes('再来一张') === true")
+    assert.equal(await generateDisabled(), false, 'generation action should queue another run while the job runs')
     sendJob('canceled')
-    await waitFor("document.querySelector('[data-studio-generate]')?.disabled === false")
-    assert.equal(await generateDisabled(), false, 'generation action should be restored after cancellation')
+    await waitFor("document.querySelector('[data-studio-generate]')?.textContent?.includes('再来一张') === false")
+    assert.equal(await generateDisabled(), false, 'generation action should be enabled after cancellation')
+    assert.ok(String(await generateText()).includes('生成'), 'generation action should read 生成 once nothing runs')
 
     const rerunJobId = 'e2e-canvas-rerun'
     const rerunCanvasId = 'e2e-canvas-rerun-result'
@@ -227,13 +232,14 @@ export async function runStudioCanvasUiTests(): Promise<void> {
       win.webContents.once('did-finish-load', () => resolve())
       void win.webContents.reload()
     })
+    // A run started from a result in its lineage still blocks the source: its own runs only queue.
     await waitFor("document.querySelector('[data-studio-generate]')?.disabled === true")
     assert.equal(
       await evaluate(
-        "[...document.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === '重新生成 画面 1')?.disabled",
+        "[...document.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === '再来一张 画面 1')?.disabled",
       ),
       true,
-      'source Canvas rerun action should be disabled while a nested result job is active',
+      'source Canvas 再来一张 should be disabled while a nested result job is active',
     )
     sendJob('canceled', rerunJobId, rerunCanvasId)
     await waitFor("document.querySelector('[data-studio-generate]')?.disabled === false")
@@ -248,12 +254,12 @@ export async function runStudioCanvasUiTests(): Promise<void> {
         canvases: project?.canvases.length,
         selectedCanvasId: project?.selectedCanvasId,
         generationControl: {
-          disabledWhileActive: true,
-          restoredAfterFailure: true,
-          restoredAfterCancel: true,
-          sourceDisabledDuringRerun: true,
-          sourceRerunButtonDisabledForNestedJob: true,
-          sourceRestoredAfterRerunCancel: true,
+          queuesWhileOwnJobActive: true,
+          enabledAfterFailure: true,
+          enabledAfterCancel: true,
+          sourceDisabledDuringNestedRun: true,
+          sourceMoreRunsButtonDisabledForNestedJob: true,
+          sourceRestoredAfterNestedCancel: true,
         },
       }),
     )

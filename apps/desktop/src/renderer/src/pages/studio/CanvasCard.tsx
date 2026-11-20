@@ -15,7 +15,7 @@ import { MaskLayer, usePictureSize, type MaskBrush, type MaskCommand } from './M
 import type { Size } from './mask'
 import type { RerunCheck } from './readiness'
 import { canvasDescription } from './prompt'
-import { Filmstrip, type QueuedTile } from './Filmstrip'
+import { Filmstrip } from './Filmstrip'
 import { RegionEditor, RegionLayer, useRegionDraw, type BoardTool } from './RegionLayer'
 import { newRegion, smallerCanvas } from './canvases'
 import type { StripItem } from './runs'
@@ -34,7 +34,8 @@ export interface CardStrip {
   items: readonly StripItem[]
   shown: number
   views: ReadonlyMap<string, CardJobView>
-  queued: readonly QueuedTile[]
+  /** Ids of the runs waiting their turn. */
+  queued: readonly string[]
   /** Call off one waiting run (取消这一张). */
   onCancelQueued: (runId: string) => void
   onShow: (index: number) => void
@@ -313,8 +314,14 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
   // The header speaks only while something is happening or went wrong. A 画面's
   // footer holds its filmstrip, so its header says how far the run is.
   const loud = view.active || view.state === 'failed' || view.state === 'lost'
-  const statusLabel = isImage || isStyle || !loud ? '' : strip && view.active ? view.detail || view.label : view.label
   const queuedCount = strip?.queued.length ?? 0
+  // One queue word in the header: while its own run waits too, 排队 N says it (the face says which place).
+  const statusLabel =
+    isImage || isStyle || !loud || (queuedCount && view.state === 'queued')
+      ? ''
+      : strip && view.active
+        ? view.detail || view.label
+        : view.label
   // Buttons and the filmstrip show on hover, focus or selection; a model that cannot be used always shows.
   const modelProblem = canvas.kind === 'layout' && !strip && !view.active && props.model && !props.model.ready
   const quietFooter = !selected && !modelProblem

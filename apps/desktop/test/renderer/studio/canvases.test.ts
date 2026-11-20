@@ -84,6 +84,12 @@ describe('studio/canvases taskCanvasFor', () => {
     expect(result.canvases[1]).toMatchObject({ id: 'task', kind: 'result', sourceCanvasId: 'c1', jobState: 'starting', outputs: [] })
   })
 
+  it('keeps the picture picked in the strip for a run queued behind others, so the wires stay', () => {
+    const source = canvas({ prompt: 'x', shownOutput: { canvasId: 'picked', output: 1 } })
+    const result = taskCanvasFor(source, [source], 'task', true)
+    expect(result.canvases[0]!.shownOutput).toEqual({ canvasId: 'picked', output: 1 })
+  })
+
   it('keeps earlier pictures, and the face follows the new run', () => {
     const source = canvas({
       prompt: 'x',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectCanvas } from '@shared/types'
 import { cliEngineFeatures } from '@shared/cliEngine'
-import { resolveJobInputs, type JobInputContext } from '@renderer/pages/studio/jobInputs'
+import { inputStillDrawing, resolveJobInputs, type JobInputContext } from '@renderer/pages/studio/jobInputs'
 import { controlAdapterFixture, engineFeaturesFixture } from '@test/mocks/backend'
 import { canvas } from './fixtures'
 
@@ -242,5 +242,16 @@ describe('studio/jobInputs on a CLI engine (兼容模式 / AMD 原生)', () => {
     const resolved = resolveJobInputs(target({ sampling: { shift: 4, stepCache: 'off' } }), context({ features: cliEngineFeatures('hip') }))
     expect(resolved.blockers).toEqual([])
     expect(resolved.params.sampling).toEqual({ shift: 4, stepCache: 'off' })
+  })
+})
+
+describe('studio/jobInputs inputStillDrawing', () => {
+  it('names a wired picture that is still being drawn, and nothing once it has one', () => {
+    const drawing = canvas({ id: 'src', kind: 'result', title: '画面 2 · 结果', jobState: 'running', outputs: [] })
+    const target = canvas({ id: 't', inputs: { init: { link: { canvasId: 'src' }, strength: 0.6 } } })
+    expect(inputStillDrawing(target, [drawing, target])).toBe('「画面 2 · 结果」还在生成，完成后再试')
+    const done = { ...drawing, jobState: 'succeeded' as const, outputs: [{ path: '/o.png', width: 1, height: 1, seed: 1 }] }
+    expect(inputStillDrawing(target, [done, target])).toBeNull()
+    expect(inputStillDrawing(canvas({ id: 'plain' }), [drawing])).toBeNull()
   })
 })

@@ -998,6 +998,7 @@ export function StudioPage(): React.JSX.Element {
           onCancel={(jobId) => {
             void cancelJob(jobId).catch((error: unknown) => toast.push(error instanceof Error ? error.message : String(error), 'error'))
           }}
+          onCallOff={(runId) => project.setCanvases((previous) => dropRun(previous, runId))}
           onShowActivity={(jobId) => openActivity('jobs', jobId ?? null)}
           onCopy={(canvas) => {
             const created = project.addCanvas(canvas)
