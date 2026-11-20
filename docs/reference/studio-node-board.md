@@ -80,7 +80,7 @@ Wires (`studio/wires.ts`, drawn by `studio/WireLayer.tsx`) are of two kinds: `in
 
 | Input | Stored in | Settings | Sent as |
 | --- | --- | --- | --- |
-| 起始图 | `inputs.init` | 重绘幅度 0 to 1 (default `DEFAULT_INIT_STRENGTH` 0.6); 起始图缩放方式 crop / fit / stretch under 高级 | `JobParams.initImage` |
+| 起始图 | `inputs.init` | 重绘幅度 0 to 1 (default `DEFAULT_INIT_STRENGTH` 0.6); 起始图缩放方式 crop / fit / stretch under 高级. A 画面 that has never run takes the shape of its first 起始图 at about the same pixel count (`studio/nodes.ts` `withStartPictureShape`), so the picture is not cropped | `JobParams.initImage` |
 | 遮罩 | `inputs.mask.path` | Painted on the 画面 with the 遮罩 tool (M): 画笔, 橡皮, 大小, 反转, 清除, 完成. White means repaint. Saved as a PNG in the project's assets. | `JobParams.mask`; needs a 起始图 |
 | 控制图 | `inputs.control` | 控制适配器 (installed from 模型), its LoRA 强度, and per image 强度 0 to 10 (default 1) with 开始 and 结束 0 to 1 | `JobParams.control` |
 | 参考图 | `inputs.references` | 参考图最长边 16 to 2048 | `JobParams.references` |
@@ -113,7 +113,7 @@ While 拆成区域 reads, the new 画面 shows the picture faintly with 正在�
 
 ## 7. Recipes
 
-A recipe lays out nodes already wired; nothing about them is special afterwards (`studio/recipes.ts`, started in `studio/StudioPage.tsx` `startRecipe`). They are offered in the empty board's menu and, while a new project has one blank 画面, in a row under it (`StartRow` in `studio/BoardControls.tsx`). That same blank 画面 shows three descriptions to try on its face (`FIRST_IDEAS` in `studio/Board.tsx`); a click writes one as its description.
+A recipe lays out nodes already wired; nothing about them is special afterwards (`studio/recipes.ts`, started in `studio/StudioPage.tsx` `startRecipe`). They are offered in the empty board's menu and, while a new project has one blank 画面 (`starterCanvas`), in a row under it (`StartRow` in `studio/BoardControls.tsx`). A picture recipe asks for the file first, so a cancelled pick leaves the board as it was; that blank 画面 takes the picture rather than a second 画面 beside it. That same blank 画面 shows three descriptions to try on its face (`FIRST_IDEAS` in `studio/Board.tsx`); a click writes one as its description.
 
 | `RecipeId` | Label | Lays out | Not offered when |
 | --- | --- | --- | --- |

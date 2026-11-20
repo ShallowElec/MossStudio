@@ -47,7 +47,7 @@ import { BoardMenu, type BoardMenuEntry } from './BoardMenu'
 import type { PortActions } from './SlotMenu'
 import { inputSlots, socketY } from './ports'
 import { WireChips, WireLayer } from './WireLayer'
-import { recipes, type Recipe } from './recipes'
+import { recipes, starterCanvas, type Recipe } from './recipes'
 import { upscaleProblem } from './nodes'
 import { plannedRegions } from './canvases'
 import {
@@ -59,7 +59,6 @@ import {
   givesPicture,
   isActiveRun,
   pictureLink,
-  runsOf,
   unpinRun,
   type StripItem,
 } from './runs'
@@ -965,11 +964,8 @@ export function Board(props: BoardProps): React.JSX.Element {
   const selectedDrawn = selected ? (cards.find((canvas) => canvas.id === selected.id) ?? selected) : null
   const pickedBounds = multi && !boxPick && !connect.draft ? boundsOf(cards.filter((canvas) => selection.includes(canvas.id))) : null
   // An empty project: one blank 画面, with the ways to start from a picture under it.
-  const only = cards.length === 1 ? cards[0]! : null
-  const startFor =
-    only && only.kind === 'layout' && !only.inputs && !only.jobState && !only.outputs?.length && !runsOf(only, props.canvases).length
-      ? only
-      : null
+  const starter = starterCanvas(props.canvases)
+  const startFor = starter ? (cards.find((canvas) => canvas.id === starter.id) ?? null) : null
   const dragged = runDrag.drag
   // While a wire is out, cards that can take it show their sockets; their linked inputs' thumbnails and labels step aside.
   const offers = connect.draft?.offers

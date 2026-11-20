@@ -3,7 +3,7 @@ import type { ControlAdapterEntry, EngineFeatures, ProjectCanvas } from '@shared
 import { cardRect, overlaps } from '@renderer/pages/studio/boardLayout'
 import { canvasFromPicture, defaultSettings, migrateCanvas, removeCanvasFrom, removedWith } from '@renderer/pages/studio/canvases'
 import { newCanvasMenu } from '@renderer/pages/studio/connect'
-import { recipes } from '@renderer/pages/studio/recipes'
+import { recipes, starterCanvas } from '@renderer/pages/studio/recipes'
 import {
   boardCanvases,
   canDropRun,
@@ -309,5 +309,16 @@ describe('studio/recipes', () => {
     expect(newCanvasMenu(features({ imageInput: false, references: false }))).toEqual([
       { type: 'note', label: '现在的引擎不能把图片接进新画面' },
     ])
+  })
+
+  it('a new project’s only, blank 画面 is the one a picture recipe fills', () => {
+    const blank = canvas({ id: 'blank', prompt: '海边的灯塔' })
+    expect(starterCanvas([blank])).toBe(blank)
+    // Anything else on the board, a picture in it, or a run of it: recipes make a 画面 of their own.
+    expect(starterCanvas([blank, canvas({ id: 'other' })])).toBeNull()
+    expect(starterCanvas([{ ...blank, inputs: { init: { link: { canvasId: 'p' }, strength: 0.6 } } }])).toBeNull()
+    expect(starterCanvas([blank, canvas({ id: 'run', kind: 'result', sourceCanvasId: 'blank', jobState: 'running' })])).toBeNull()
+    expect(starterCanvas([canvas({ id: 's', kind: 'style' })])).toBeNull()
+    expect(starterCanvas([])).toBeNull()
   })
 })

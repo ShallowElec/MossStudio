@@ -1,6 +1,7 @@
-import type { ControlAdapterEntry, EngineFeatures } from '@shared/types'
+import type { ControlAdapterEntry, EngineFeatures, ProjectCanvas } from '@shared/types'
 import type { LinkRole } from './links'
 import { engineUnavailableReason, type Blocker } from './readiness'
+import { boardCanvases, runsOf } from './runs'
 
 /**
  * Recipes: common ways to start, each laying out nodes already wired
@@ -57,4 +58,16 @@ export function recipes(
     if (recipe.role === 'control' && !adapters.some((adapter) => adapter.controlKinds.length)) return []
     return [{ ...recipe }]
   })
+}
+
+/**
+ * A new project's only card, a blank 画面: the recipe row sits under it, and
+ * a picture recipe fills it rather than adding a second 画面 beside it.
+ */
+export function starterCanvas(canvases: readonly ProjectCanvas[]): ProjectCanvas | null {
+  const shown = boardCanvases(canvases)
+  const only = shown.length === 1 ? shown[0]! : null
+  return only && only.kind === 'layout' && !only.inputs && !only.jobState && !only.outputs?.length && !runsOf(only, canvases).length
+    ? only
+    : null
 }

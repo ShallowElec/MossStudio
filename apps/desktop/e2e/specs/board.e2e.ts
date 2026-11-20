@@ -1029,7 +1029,7 @@ describe('readable nodes', () => {
 
   it('adds an input from the ＋: from a file or a picture on the board', async () => {
     const page = await openBoard(app)
-    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa.png']))
+    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa-1600x1200.png']))
     await addInput(page, 'canvas-1', '起始图', '从文件…')
     await expect.poll(async () => (await savedInputs(page))?.init?.link.canvasId ?? '', { timeout: 10_000 }).toMatch(/.+/)
     const picture = (await savedInputs(page))!.init!.link.canvasId
@@ -1257,7 +1257,7 @@ describe('filmstrip, 用作起始图 and recipes', () => {
     expect(await page.getByRole('menuitem', { name: /按构图生成/ }).count()).toBe(0)
     await app.screenshot('board-recipes-light')
 
-    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa.png']))
+    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickImages, () => ['/home/me/pictures/sofa-1600x1200.png']))
     await page.getByRole('menuitem', { name: '局部重绘' }).click()
     await expect.poll(async () => (await cardIds(page)).length, { timeout: 10_000 }).toBe(5)
     // The new 画面 (selected) and the picture card that feeds it.
@@ -1265,6 +1265,17 @@ describe('filmstrip, 用作起始图 and recipes', () => {
     expect(created).not.toBe('canvas-1')
     await expect.poll(async () => (await saved(page, created!))?.inputs?.init?.link.canvasId ?? '', { timeout: 10_000 }).toMatch(/.+/)
     await expect.poll(() => page.getByRole('toolbar', { name: '遮罩工具' }).isVisible()).toBe(true)
+    // The new 画面 takes the photo's 4:3 shape and is brought into view whole, to paint on.
+    expect(await saved(page, created!)).toMatchObject({ width: 1152, height: 864 })
+    const board = (await page.locator('[data-board]').boundingBox())!
+    await expect
+      .poll(async () => {
+        const box = (await page.locator(`article[data-canvas-card="${created}"]`).boundingBox())!
+        return (
+          box.x >= board.x && box.y >= board.y && box.x + box.width <= board.x + board.width && box.y + box.height <= board.y + board.height
+        )
+      })
+      .toBe(true)
   })
 
   it('offers 按构图生成 once a 控制适配器 is installed', async () => {

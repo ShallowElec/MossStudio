@@ -847,7 +847,13 @@ function defaultHandlers(): Map<string, Handler> {
     const { projectId, path, bytes, name: given } = p<{ projectId: string; path?: string; bytes?: Uint8Array; name?: string }>(payload)
     if (!path && !bytes) throw new MockIpcError('BAD_REQUEST', '需要图片路径或图片内容（二选一）')
     const name = path ? (path.split(/[\\/]/).pop() ?? 'image.png') : (given ?? 'pasted.png')
-    return { path: `/fixture/projects/${projectId}/assets/${name}`, width: 1024, height: 1024 }
+    // A file named like photo-1024x768.png has that pixel size; any other is square.
+    const size = /(\d+)x(\d+)\.\w+$/.exec(name)
+    return {
+      path: `/fixture/projects/${projectId}/assets/${name}`,
+      width: size ? Number(size[1]) : 1024,
+      height: size ? Number(size[2]) : 1024,
+    }
   })
   h.set(Ipc.studioSaveMask, (payload) => {
     const { projectId, canvasId } = p<{ projectId: string; canvasId: string }>(payload)

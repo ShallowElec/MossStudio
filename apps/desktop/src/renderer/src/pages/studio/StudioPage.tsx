@@ -49,7 +49,7 @@ import { useEngineFeatures } from './useEngineFeatures'
 import { useControlAdapters } from '../../lib/useControlAdapters'
 import { GalleryPicker } from './GalleryPicker'
 import { removeLink, roleLabel, setControlAdapter, setLink, type CanvasLinkEntry, type LinkRole, type PickTarget } from './links'
-import type { Recipe } from './recipes'
+import { starterCanvas, type Recipe } from './recipes'
 import { BOARD_GAP, cardWidth } from './boardLayout'
 import {
   createStyleCanvas,
@@ -61,6 +61,7 @@ import {
   tryLoraOnBoard,
   upscaleFromPicture,
   upscaleProblem,
+  withStartPictureShape,
   withUpscaleSize,
 } from './nodes'
 import { dropRun, givesPicture, isActiveRun, keepCardsShown, pictureLink, pinRun, runsOf, unpinRun, withRunSettings } from './runs'
@@ -384,8 +385,8 @@ export function StudioPage(): React.JSX.Element {
       const linked = setLink(target, role, resolved, kind)
       if (linked === target) return previous
       const next = pinRun(previous, resolved.canvasId)
-      // A 放大 takes its size from its 原图.
-      return next.map((canvas) => (canvas.id === targetId ? withUpscaleSize(linked, next) : canvas))
+      // A 放大 takes its size from its 原图, a 画面 that never ran its shape from its first 起始图.
+      return next.map((canvas) => (canvas.id === targetId ? withStartPictureShape(withUpscaleSize(linked, next), next, target) : canvas))
     })
   }
 
@@ -395,7 +396,8 @@ export function StudioPage(): React.JSX.Element {
     // A picture card has no generation settings; the new 画面 takes the latest canvas's.
     const made = canvasFromPicture(list, sourceId, { role, at, fallback: latestSettings() })
     if (!made) return
-    project.setCanvases(made.canvases)
+    const shaped = withStartPictureShape(made.created, made.canvases)
+    project.setCanvases(made.canvases.map((canvas) => (canvas.id === shaped.id ? shaped : canvas)))
     project.select(made.created.id)
     requestAnimationFrame(() => board.current?.reveal(made.created.id))
   }
@@ -531,18 +533,25 @@ export function StudioPage(): React.JSX.Element {
       return
     }
     if (!recipe.role) return
-    const created = addCanvasAt(at)
-    if (recipe.role === 'control') {
-      const adapter = controlAdapters.find((item) => item.controlKinds.length)
-      if (!adapter) return
-      project.updateCanvas(created.id, (canvas) => setControlAdapter(canvas, adapter.id))
-      await inputImport.addFromFile(created.id, 'control', adapter.controlKinds[0])
-    } else {
-      await inputImport.addFromFile(created.id, recipe.role)
-    }
+    const adapter = recipe.role === 'control' ? controlAdapters.find((item) => item.controlKinds.length) : undefined
+    if (recipe.role === 'control' && !adapter) return
+    // The picture is chosen first, so a cancelled pick leaves the board as it was; a new project's blank 画面 takes it.
+    const filled = await inputImport.addFromFile(
+      () => {
+        const starter = starterCanvas(project.canvasesRef.current)
+        const target = starter ?? addCanvasAt(at)
+        if (starter) project.select(starter.id)
+        if (adapter) project.updateCanvas(target.id, (canvas) => setControlAdapter(canvas, adapter.id))
+        return target.id
+      },
+      recipe.role,
+      adapter?.controlKinds[0],
+    )
+    if (!filled) return
+    // It may have grown to the picture's shape and gained a picture card beside it.
+    requestAnimationFrame(() => board.current?.reveal(filled))
     // 局部重绘 goes straight to painting the part to redo.
-    const made = project.canvasesRef.current.find((canvas) => canvas.id === created.id)
-    if (recipe.id === 'inpaint' && made?.inputs?.init) setTool('mask')
+    if (recipe.id === 'inpaint') setTool('mask')
   }
 
   const inputsWiring: InputsWiring = {

@@ -11,9 +11,11 @@ import {
   generationCanvas,
   nodeBlockers,
   seriesFromStyle,
+  shapedSize,
   styleUsers,
   upscaleFromPicture,
   upscaleSize,
+  withStartPictureShape,
   withUpscaleScale,
 } from '@renderer/pages/studio/nodes'
 import { inputSlots, slotDrop, styleDrop } from '@renderer/pages/studio/ports'
@@ -189,6 +191,45 @@ describe('studio/nodes 放大', () => {
     expect(
       canvasFromPicture([...made.canvases, run], 'run', { role: 'init', fallback: defaultSettings() })!.created.upscale,
     ).toBeUndefined()
+  })
+})
+
+describe('studio/nodes 起始图 shape', () => {
+  const photo = (width: number, height: number): ProjectCanvas =>
+    canvas({ id: 'p', kind: 'image', imagePath: '/p.png', imageSize: { width, height }, x: -600 })
+  const fed = (patch: Partial<ProjectCanvas> = {}): ProjectCanvas => setLink(canvas({ id: 'c', ...patch }), 'init', { canvasId: 'p' })
+
+  it('takes the picture’s shape at about the same pixel count, on the 16-pixel grid', () => {
+    const square = { width: 1024, height: 1024 }
+    expect(shapedSize({ width: 1024, height: 768 }, square)).toEqual({ width: 1152, height: 864 })
+    expect(shapedSize({ width: 768, height: 1024 }, square)).toEqual({ width: 864, height: 1152 })
+    expect(shapedSize({ width: 1920, height: 1080 }, square)).toEqual({ width: 1280, height: 720 })
+    expect(shapedSize({ width: 3000, height: 3000 }, square)).toEqual(square)
+    // A long strip keeps its long edge within 2048.
+    const strip = shapedSize({ width: 4000, height: 1000 }, square)
+    expect(strip.width).toBe(2048)
+    expect(strip.height % 16).toBe(0)
+    expect(Math.abs(strip.width / strip.height - 4)).toBeLessThan(0.05)
+  })
+
+  it('a 画面 that never ran takes the shape of its first 起始图', () => {
+    const before = canvas({ id: 'c', layers: [layer({ bbox: [0, 0, 1024, 1024] })] })
+    const shaped = withStartPictureShape(fed({ layers: before.layers }), [photo(1024, 768)], before)
+    expect(shaped).toMatchObject({ width: 1152, height: 864 })
+    // Its regions stay inside the new size.
+    expect(shaped.layers[0]!.bbox).toEqual([0, 0, 1024, 864])
+    // A new 画面 (no `before`) is shaped too.
+    expect(withStartPictureShape(fed(), [photo(1024, 768)])).toMatchObject({ width: 1152, height: 864 })
+  })
+
+  it('leaves a 画面 alone once it has run, when it already had a 起始图, or when the size is unknown', () => {
+    const plain = fed()
+    const run = canvas({ id: 'r', kind: 'result', sourceCanvasId: 'c', outputs: [{ path: '/r.png', width: 1024, height: 1024, seed: 1 }] })
+    expect(withStartPictureShape(plain, [photo(1024, 768), plain, run], canvas({ id: 'c' }))).toBe(plain)
+    expect(withStartPictureShape(plain, [photo(1024, 768)], plain)).toBe(plain)
+    expect(withStartPictureShape(plain, [{ ...photo(1024, 768), imageSize: undefined }])).toBe(plain)
+    const upscale = fed({ upscale: { scale: 2 } })
+    expect(withStartPictureShape(upscale, [photo(1024, 768)])).toBe(upscale)
   })
 })
 
