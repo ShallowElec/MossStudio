@@ -31,11 +31,12 @@ export function expandPathVariables(path: string): string {
 
 /**
  * A path that opening would send over the network: UNC shares (also WebDAV `\\host@SSL\…`),
- * `\\?\` and `\\.\` device paths, and URLs. Opening one on Windows authenticates with the
+ * `\\?\` and `\\.\` device paths, NT `\??\` paths (which `realpath` hands to Windows unchanged),
+ * and URLs. Opening one on Windows authenticates with the
  * person's NTLM hash, so only a folder the person picked may be one.
  */
 export function isNetworkPath(path: string): boolean {
-  return /^[\\/]{2}/.test(path) || /^[a-z][a-z0-9+.-]*:\/\//i.test(path)
+  return /^(?:[\\/]{2}|\\\?\?\\)/.test(path) || /^[a-z][a-z0-9+.-]*:\/\//i.test(path)
 }
 
 /** Whether a link points at a network place, read without opening the target, so the share is never contacted. */

@@ -317,7 +317,8 @@ export async function sourceRoots(
       resolved.set(path, actual && (await isDirectory(actual)) ? actual : null)
     }
     const actual = resolved.get(path)
-    // A local path can be a link to a share; the share is not opened unless the person picked it.
+    // A folder above the last part can still be a link to a share. linksToNetwork reads only the last part,
+    // so such a share is contacted by realpath, but it is never scanned or loaded unless the person picked it.
     if (actual && isNetworkPath(actual) && !picked(actual)) issues.push(skippedNetwork)
     else if (actual && isTooBroadModelFolder(actual)) issues.push('已跳过磁盘根目录或用户主目录，请选择具体的模型目录')
     else if (actual) {

@@ -447,9 +447,10 @@ b:
     await mkdir(loras)
     await writeFile(
       join(webui, 'webui-user.sh'),
-      'export COMMANDLINE_ARGS=' +
+      // A value, a long run of spaces, then more text: the shape that made the old lazy-capture regex quadratic.
+      'export COMMANDLINE_ARGS=x' +
         ' '.repeat(1_000_000) +
-        'x\n' +
+        'y\n' +
         'export' +
         ' '.repeat(4000) +
         'COMMANDLINE_ARGS=' +

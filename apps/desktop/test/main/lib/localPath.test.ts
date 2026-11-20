@@ -32,6 +32,7 @@ describe('isNetworkPath', () => {
       '\\\\server\\share\\models',
       '\\\\attacker@SSL\\share',
       '\\\\?\\UNC\\server\\share',
+      '\\??\\UNC\\server\\share',
       '\\\\.\\pipe\\x',
       '//server/share',
       'https://host/models',
