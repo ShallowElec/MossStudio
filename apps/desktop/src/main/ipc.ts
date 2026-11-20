@@ -11,6 +11,7 @@ import type { IpcResult, Settings } from '@shared/types'
 import { emit } from './lib/events'
 import { ensureDirs, paths } from './lib/paths'
 import { openDirectoryInFileManager, revealInFileManager } from './lib/fileManager'
+import { showOpenDialogFor } from './lib/dialogs'
 import { scanEnvironment } from './services/env'
 import { getPythonInstallState, installManagedPython } from './services/managedPython'
 import {
@@ -1010,8 +1011,8 @@ export function registerIpc(): void {
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
 
-  handle(Ipc.pickImages, schemas.pickImages, async ({ title }) => {
-    const result = await dialog.showOpenDialog({
+  handle(Ipc.pickImages, schemas.pickImages, async ({ title }, event) => {
+    const result = await showOpenDialogFor(event.sender, {
       title,
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }],

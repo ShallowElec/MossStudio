@@ -212,14 +212,46 @@ describe('studio/nodes 起始图 shape', () => {
     expect(Math.abs(strip.width / strip.height - 4)).toBeLessThan(0.05)
   })
 
+  it('sizes a portrait picture as its landscape twin turned on end', () => {
+    const square = { width: 1024, height: 1024 }
+    expect(shapedSize({ width: 4000, height: 500 }, square)).toEqual({ width: 2048, height: 256 })
+    expect(shapedSize({ width: 500, height: 4000 }, square)).toEqual({ width: 256, height: 2048 })
+    for (const [w, h] of [
+      [1920, 1080],
+      [1200, 777],
+      [1700, 777],
+      [3000, 777],
+      [2800, 1080],
+    ] as const) {
+      const wide = shapedSize({ width: w, height: h }, square)
+      expect(shapedSize({ width: h, height: w }, square)).toEqual({ width: wide.height, height: wide.width })
+    }
+    // And for a 画面 that is not square, turned with it.
+    const wide = shapedSize({ width: 2900, height: 1000 }, { width: 1280, height: 720 })
+    expect(shapedSize({ width: 1000, height: 2900 }, { width: 720, height: 1280 })).toEqual({ width: wide.height, height: wide.width })
+  })
+
   it('a 画面 that never ran takes the shape of its first 起始图', () => {
     const before = canvas({ id: 'c', layers: [layer({ bbox: [0, 0, 1024, 1024] })] })
     const shaped = withStartPictureShape(fed({ layers: before.layers }), [photo(1024, 768)], before)
     expect(shaped).toMatchObject({ width: 1152, height: 864 })
-    // Its regions stay inside the new size.
-    expect(shaped.layers[0]!.bbox).toEqual([0, 0, 1024, 864])
+    // A region covering the whole 画面 still covers it.
+    expect(shaped.layers[0]!.bbox).toEqual([0, 0, 1152, 864])
     // A new 画面 (no `before`) is shaped too.
     expect(withStartPictureShape(fed(), [photo(1024, 768)])).toMatchObject({ width: 1152, height: 864 })
+  })
+
+  it('scales regions with the 画面, so one in the lower half stays there', () => {
+    const lower = layer({ bbox: [0, 700, 1024, 1024] })
+    const before = canvas({ id: 'c', layers: [lower, layer({ id: 'r2', bbox: [256, 256, 512, 512] })] })
+    const strip = withStartPictureShape(fed({ layers: before.layers }), [photo(4000, 500)], before)
+    expect(strip).toMatchObject({ width: 2048, height: 256 })
+    expect(strip.layers.map((item) => item.bbox)).toEqual([
+      [0, 175, 2048, 256],
+      [512, 64, 1024, 128],
+    ])
+    const tall = withStartPictureShape(fed({ layers: before.layers }), [photo(1024, 768)], before)
+    expect(tall.layers[0]!.bbox).toEqual([0, 591, 1152, 864])
   })
 
   it('leaves a 画面 alone once it has run, when it already had a 起始图, or when the size is unknown', () => {

@@ -3,7 +3,7 @@ import { Ipc } from '@shared/channels'
 import type { ProjectCanvas } from '@shared/types'
 import { call } from '../../lib/api'
 import { createImageCanvas } from './canvases'
-import { MAX_REFERENCES, setLink, type LinkRole } from './links'
+import { MAX_REFERENCES, roleLabel, setLink, type LinkRole } from './links'
 import { withStartPictureShape, withUpscaleSize } from './nodes'
 import type { StudioProject } from './useStudioProject'
 
@@ -24,7 +24,7 @@ function message(error: unknown): string {
  * its folder).
  */
 export function useInputImport(options: {
-  project: Pick<StudioProject, 'projectId' | 'saveNow' | 'canvasesRef' | 'setCanvases'>
+  project: Pick<StudioProject, 'projectId' | 'sessionKey' | 'saveNow' | 'canvasesRef' | 'setCanvases'>
   notify: (text: string, tone?: 'error' | 'info' | 'success') => void
 }): {
   /** Import files as picture cards placed beside `near`; returns the new cards. */
@@ -34,7 +34,7 @@ export function useInputImport(options: {
   /**
    * Pick files, then link them into the role of the canvas `target` names, or
    * makes once a file is chosen; resolves to that canvas's id, or null when
-   * nothing was added.
+   * nothing was added (cancelled, or another project opened meanwhile).
    */
   addFromFile: (target: string | (() => string), role: LinkRole, kind?: string) => Promise<string | null>
 } {
@@ -71,7 +71,12 @@ export function useInputImport(options: {
       if (!target) return false
       const room = role === 'reference' ? Math.max(0, MAX_REFERENCES - (target.inputs?.references?.links.length ?? 0)) : 1
       if (!paths.length || room === 0) return false
-      if (paths.length > room) notify(`参考图最多 ${MAX_REFERENCES} 张，只放入了前 ${room} 张`, 'info')
+      if (paths.length > room) {
+        notify(
+          role === 'reference' ? `参考图最多 ${MAX_REFERENCES} 张，只放入了前 ${room} 张` : `${roleLabel(role)}只能放一张，放入了第一张`,
+          'info',
+        )
+      }
       const created = await importPaths(paths.slice(0, room), target)
       if (!created.length) return false
       project.setCanvases((previous) => {
@@ -92,6 +97,7 @@ export function useInputImport(options: {
     async (target: string | (() => string), role: LinkRole, kind?: string): Promise<string | null> => {
       const { project, notify } = live.current
       if (typeof target === 'string' && !project.canvasesRef.current.some((canvas) => canvas.id === target)) return null
+      const session = project.sessionKey
       let paths: string[]
       try {
         paths = await call<string[]>(Ipc.pickImages, {
@@ -101,8 +107,9 @@ export function useInputImport(options: {
         notify(message(error), 'error')
         return null
       }
-      // A cancelled pick changes nothing: the canvas is made only now.
-      if (!paths?.length) return null
+      // A cancelled pick changes nothing: the canvas is made only now. Nor does a pick that comes back
+      // after another project was opened: the canvas and the place it was for belong to the old one.
+      if (!paths?.length || live.current.project.sessionKey !== session) return null
       const targetId = typeof target === 'string' ? target : target()
       return (await addPaths(targetId, role, kind, paths)) ? targetId : null
     },

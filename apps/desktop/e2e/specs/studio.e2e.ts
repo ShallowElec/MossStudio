@@ -301,6 +301,16 @@ describe('studio', () => {
           { timeout: 10_000 },
         )
         .toEqual({ width: 1152, height: 864, init: true })
+      // Both the 画面 and the picture card beside it are in view.
+      const board = (await page.locator('[data-board]').boundingBox())!
+      const inView = async (selector: string): Promise<boolean> => {
+        const box = (await page.locator(selector).boundingBox())!
+        return (
+          box.x >= board.x && box.y >= board.y && box.x + box.width <= board.x + board.width && box.y + box.height <= board.y + board.height
+        )
+      }
+      await expect.poll(() => inView('article[data-canvas-kind="image"]')).toBe(true)
+      expect(await inView('article[data-canvas-kind="layout"]')).toBe(true)
       await settle(page, 300)
       await app.screenshot(`studio-recipe-start-${theme}`)
     }

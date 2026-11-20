@@ -61,13 +61,20 @@ export function recipes(
 }
 
 /**
- * A new project's only card, a blank 画面: the recipe row sits under it, and
- * a picture recipe fills it rather than adding a second 画面 beside it.
+ * A new project's only card, a blank 画面 (no inputs, regions or runs; a
+ * description may be typed): the recipe row sits under it, and a picture
+ * recipe fills it rather than adding a second 画面 beside it.
  */
 export function starterCanvas(canvases: readonly ProjectCanvas[]): ProjectCanvas | null {
   const shown = boardCanvases(canvases)
   const only = shown.length === 1 ? shown[0]! : null
-  return only && only.kind === 'layout' && !only.inputs && !only.jobState && !only.outputs?.length && !runsOf(only, canvases).length
-    ? only
-    : null
+  const blank =
+    only?.kind === 'layout' &&
+    !only.upscale &&
+    !only.inputs &&
+    !only.layers.length &&
+    !only.jobState &&
+    !only.outputs?.length &&
+    !runsOf(only, canvases).length
+  return blank ? only : null
 }

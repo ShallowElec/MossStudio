@@ -317,4 +317,30 @@ describe('作品 › 用作起始图', () => {
     const [job] = await submitted(page, 1)
     expect(job!.initImage).toMatchObject({ path: expect.stringContaining('/assets/moss_0000.png'), strength: 0.6 })
   })
+  it('a picture whose size 作品 does not know gives the new 画面 its shape', async () => {
+    const page = await app.open({ scenario: 'ready', route: '/studio', theme: 'light', defer: true })
+    await page.evaluate(() => {
+      const { galleryItemFixture } = window.__mock.fixtures
+      const item = galleryItemFixture(0, { prompt: '海边的灯塔', path: '/fixture/outputs/scan-1024x768.png', name: 'scan-1024x768.png' })
+      delete (item as { width?: number }).width
+      delete (item as { height?: number }).height
+      window.__mock.state.gallery = [item]
+    })
+    await app.start()
+    await page.locator('[data-project-switcher]').waitFor()
+    await page.getByRole('button', { name: '作品' }).click()
+    await page.locator('[data-library-item]').first().click()
+    await page.getByRole('complementary', { name: '作品详情' }).getByRole('button', { name: '用作起始图' }).click()
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#/studio')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const made = window.__mock.state.projects[0]?.canvases.find((canvas) => canvas.kind === 'layout' && canvas.inputs?.init)
+            return made ? { width: made.width, height: made.height } : null
+          }),
+        { timeout: 10_000 },
+      )
+      .toEqual({ width: 1152, height: 864 })
+  })
 })

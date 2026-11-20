@@ -316,6 +316,11 @@ describe('studio/recipes', () => {
     expect(starterCanvas([blank])).toBe(blank)
     // Anything else on the board, a picture in it, or a run of it: recipes make a 画面 of their own.
     expect(starterCanvas([blank, canvas({ id: 'other' })])).toBeNull()
+    expect(
+      starterCanvas([
+        { ...blank, layers: [{ id: 'r', kind: 'object', caption: '猫', bbox: [0, 0, 64, 64], visible: true, locked: false, opacity: 1 }] },
+      ]),
+    ).toBeNull()
     expect(starterCanvas([{ ...blank, inputs: { init: { link: { canvasId: 'p' }, strength: 0.6 } } }])).toBeNull()
     expect(starterCanvas([blank, canvas({ id: 'run', kind: 'result', sourceCanvasId: 'blank', jobState: 'running' })])).toBeNull()
     expect(starterCanvas([canvas({ id: 's', kind: 'style' })])).toBeNull()

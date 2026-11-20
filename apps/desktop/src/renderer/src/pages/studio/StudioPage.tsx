@@ -48,7 +48,7 @@ import { useBoardAssets } from './useBoardAssets'
 import { useEngineFeatures } from './useEngineFeatures'
 import { useControlAdapters } from '../../lib/useControlAdapters'
 import { GalleryPicker } from './GalleryPicker'
-import { removeLink, roleLabel, setControlAdapter, setLink, type CanvasLinkEntry, type LinkRole, type PickTarget } from './links'
+import { linksOf, removeLink, roleLabel, setControlAdapter, setLink, type CanvasLinkEntry, type LinkRole, type PickTarget } from './links'
 import { starterCanvas, type Recipe } from './recipes'
 import { BOARD_GAP, cardWidth } from './boardLayout'
 import {
@@ -340,7 +340,13 @@ export function StudioPage(): React.JSX.Element {
     // 用作起始图: the picture comes onto the board beside the new canvas and feeds it.
     if (request.useAs === 'start') {
       void inputImport.importPaths([request.sourcePath], canvas).then(([image]) => {
-        if (image) updateCanvas(canvas.id, (item) => setLink(item, 'init', { canvasId: image.id }))
+        if (!image) return
+        // Like any first 起始图: the 画面 takes the picture's shape when it differs from the size the request carried.
+        setCanvases((previous) =>
+          previous.map((item) =>
+            item.id === canvas.id ? withStartPictureShape(setLink(item, 'init', { canvasId: image.id }), previous, item) : item,
+          ),
+        )
       })
     }
     const choice = resolveBundle(catalog, canvas.modelBundleId, preferredBundleId)
@@ -348,7 +354,7 @@ export function StudioPage(): React.JSX.Element {
       toast.push(`这张图用的模型「${request.modelName ?? request.modelBundleId}」还没有下载，生成前请先下载或换一个模型`, 'info')
     }
     if (missingAdapters.length) toast.push(`模型库里没有这些 LoRA：${missingAdapters.join('、')}`, 'info')
-  }, [loaded, reuseRequest, canvasesRef, selectedRef, setCanvases, select, catalog, preferredBundleId, toast, inputImport, updateCanvas])
+  }, [loaded, reuseRequest, canvasesRef, selectedRef, setCanvases, select, catalog, preferredBundleId, toast, inputImport])
 
   // 训练 › 在创作中试用: a 风格 with the trained LoRA and a 画面 wired to it.
   useEffect(() => {
@@ -471,6 +477,7 @@ export function StudioPage(): React.JSX.Element {
 
   /** Pick one picture file and bring it onto the board as a picture card. */
   const pickPicture = async (): Promise<ProjectCanvas | null> => {
+    const session = project.sessionKey
     let paths: string[]
     try {
       paths = await call<string[]>(Ipc.pickImages, { title: '选择要放大的图' })
@@ -478,7 +485,8 @@ export function StudioPage(): React.JSX.Element {
       toast.push(error instanceof Error ? error.message : String(error), 'error')
       return null
     }
-    if (!paths?.length) return null
+    // A pick that comes back after another project was opened was not for that one.
+    if (!paths?.length || live.current.project.sessionKey !== session) return null
     const [image] = await inputImport.importPaths(paths.slice(0, 1))
     return image ?? null
   }
@@ -497,6 +505,7 @@ export function StudioPage(): React.JSX.Element {
   }
 
   const importPicturesAt = async (at: { x: number; y: number }): Promise<void> => {
+    const session = project.sessionKey
     let paths: string[]
     try {
       paths = await call<string[]>(Ipc.pickImages, { title: '选择图片' })
@@ -504,7 +513,8 @@ export function StudioPage(): React.JSX.Element {
       toast.push(error instanceof Error ? error.message : String(error), 'error')
       return
     }
-    if (paths?.length) await importAt(paths, at)
+    // `at` is a point on the board the menu was opened on, not on another project's.
+    if (paths?.length && live.current.project.sessionKey === session) await importAt(paths, at)
   }
 
   /** A new 画面, at a board point when given. */
@@ -548,8 +558,10 @@ export function StudioPage(): React.JSX.Element {
       adapter?.controlKinds[0],
     )
     if (!filled) return
-    // It may have grown to the picture's shape and gained a picture card beside it.
-    requestAnimationFrame(() => board.current?.reveal(filled))
+    // It may have grown to the picture's shape, and the picture card beside it should be seen too.
+    const made = project.canvasesRef.current.find((canvas) => canvas.id === filled)
+    const shown = [filled, ...(made ? linksOf(made).map((entry) => entry.link.canvasId) : [])]
+    requestAnimationFrame(() => board.current?.reveal(shown))
     // 局部重绘 goes straight to painting the part to redo.
     if (recipe.id === 'inpaint') setTool('mask')
   }

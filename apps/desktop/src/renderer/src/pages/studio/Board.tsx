@@ -71,7 +71,8 @@ const FIT_PADDING = { top: 116, side: 48 }
 
 export interface BoardHandle {
   fit: () => void
-  reveal: (canvasId: string) => void
+  /** Brings the cards into view (centred, or zoomed out when they do not fit); the view stays put when they are on screen. */
+  reveal: (canvasIds: string | readonly string[]) => void
   /** Moves a card just placed at the pointer back inside the view where it sticks out; the view stays put. */
   keepInView: (canvasId: string) => void
 }
@@ -402,20 +403,26 @@ export function Board(props: BoardProps): React.JSX.Element {
   }, [changeView])
 
   const reveal = useCallback(
-    (canvasId: string) => {
+    (canvasIds: string | readonly string[]) => {
       const list = latest.current.canvases
-      const found = list.find((item) => item.id === canvasId)
-      // A run in a filmstrip shows on its 画面.
-      const canvas = found && foldedRunIds(list).has(found.id) ? list.find((item) => item.id === found.sourceCanvasId) : found
+      const folded = foldedRunIds(list)
+      const shown = (typeof canvasIds === 'string' ? [canvasIds] : canvasIds).flatMap((id) => {
+        const found = list.find((item) => item.id === id)
+        // A run in a filmstrip shows on its 画面.
+        const canvas = found && folded.has(found.id) ? list.find((item) => item.id === found.sourceCanvasId) : found
+        return canvas ? [canvas] : []
+      })
       const size = viewportSize()
-      if (!canvas || !size.width) return
-      const rect = cardRect(canvas)
+      const rect = boundsOf(shown)
+      if (!rect || !size.width) return
       const current = viewRef.current
       const left = rect.x * current.zoom + current.pan.x
       const top = rect.y * current.zoom + current.pan.y
       const visible =
         left >= 0 && top >= FIT_PADDING.top - 24 && left + rect.w * current.zoom <= size.width && top + rect.h * current.zoom <= size.height
-      if (!visible) changeView(centerOn(size, rect, current.zoom))
+      if (visible) return
+      const fits = rect.w * current.zoom <= size.width && rect.h * current.zoom <= size.height - FIT_PADDING.top
+      changeView(fits ? centerOn(size, rect, current.zoom) : fitView(size, rect, FIT_PADDING))
     },
     [changeView],
   )
