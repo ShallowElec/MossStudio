@@ -342,7 +342,7 @@ describe('first run', () => {
     await app.start()
     await page.getByRole('button', { name: '使用已有模型', exact: true }).click()
     await page.getByRole('dialog', { name: '导入模型' }).getByRole('button', { name: '选择文件…' }).click()
-    const waiting = page.getByRole('dialog', { name: '正在识别 1 个文件…' })
+    const waiting = page.getByRole('dialog', { name: '1 个文件等引擎来识别' })
     await expect.poll(() => waiting.getByText('装好引擎后才能认出这些文件').isVisible()).toBe(true)
     await app.screenshot('setup-import-waiting-engine-light')
     await waiting.getByRole('button', { name: '装引擎' }).click()
