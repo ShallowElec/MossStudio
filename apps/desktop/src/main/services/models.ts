@@ -8,12 +8,15 @@ import { copyFile, mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink, wr
 import { basename, dirname, join } from 'node:path'
 import type { AdapterEntry, Catalog, DownloadTask, ModelEntry, ModelBundle, ModelSpaceDisk, Settings } from '@shared/types'
 import { MODEL_DOWNLOAD_HEADROOM_BYTES, missingDownloadBytes } from '@shared/machineFit'
-import { combinationBundle } from '@shared/modelCombos'
+import { combinationBundle, ENGINE_CHECKED } from '@shared/modelCombos'
 import { catalogCombinations } from './modelCombinations'
 import { Events } from '@shared/channels'
 import { emit } from '../lib/events'
 import { paths } from '../lib/paths'
 import { assertFreeSpace, freeSpace, nearestExisting } from '../lib/disk'
+import { codedError } from '../lib/codedError'
+import { writeFileAtomic } from '../lib/atomicWrite'
+import { missingPlace, modelPathKey } from '../lib/localPath'
 import { getLastNetwork } from './network'
 import { app } from 'electron'
 import { catalogProblems, entriesForApp } from '@shared/modelCatalog'
@@ -21,7 +24,6 @@ import { catalogOverrideDir } from '../lib/content'
 import { listJobs } from './supervisor'
 import packagedCatalog from '../../../resources/models.json'
 import {
-  importModelFolder as importModelDirectory,
   inspectDiffusersFolder,
   readImportedModels,
   type DiffusersFolderInfo,
@@ -92,8 +94,13 @@ interface LocalAdapterRecord {
   files: string[]
   sizeBytes: number
   createdAt: string
-  /** Where the record came from; drives the catalog tags and the default name. */
-  origin?: 'trained' | 'imported'
+  /**
+   * Where the record came from; drives the catalog tags and the default name. `linked`: the
+   * person's own file, used where it is (`file`); `imported`: a copy older versions made.
+   */
+  origin?: 'trained' | 'imported' | 'linked'
+  /** The weights file of a `linked` LoRA, where the person keeps it. */
+  file?: string
 }
 
 interface LocalAdapterIndex {
@@ -191,39 +198,63 @@ export async function registerTrainedAdapter(
 }
 
 function localAdapterTags(origin: LocalAdapterRecord['origin']): string[] {
-  return origin === 'imported' ? ['local-import'] : ['trained']
+  return origin === 'linked' ? ['local-file'] : origin === 'imported' ? ['local-import'] : ['trained']
 }
 
 function localAdapterNotes(origin: LocalAdapterRecord['origin']): string {
+  if (origin === 'linked') return '在原位置使用，不复制也不移动。'
   return origin === 'imported' ? '从本地 .safetensors 文件导入' : '由 Kohaku Trainer 产物登记'
 }
 
 /**
- * Copy a user-picked LoRA into the adapters directory and register it.
- *
- * The file is copied rather than referenced: the engine opens the path itself and
- * users routinely move or delete downloads, which would break a project that had
- * remembered the original location.
+ * A LoRA the engine recognised, used where it is (no copy), like the person's own
+ * model files. The id comes from the path, so importing the same file again
+ * updates its row instead of adding another.
  */
-export async function importAdapterFile(settings: Settings, input: { sourcePath: string; name?: string }): Promise<AdapterEntry> {
-  if (!/\.safetensors$/i.test(input.sourcePath)) throw new Error('只支持 .safetensors 格式的 LoRA / LyCORIS 文件')
-  const stem = basename(input.sourcePath).replace(/\.[^.]+$/, '')
-  const base =
-    stem
-      .replace(/[^A-Za-z0-9._-]/g, '-')
-      .replace(/^[^A-Za-z0-9]+/, '')
-      .slice(0, 80) || 'lora'
-  const root = paths.adapters(settings.modelsRoot, settings.modelDirectories)
-  await assertFreeSpace(root, (await stat(input.sourcePath)).size, `LoRA ${basename(input.sourcePath)}`)
-  let id = base
-  for (let suffix = 2; existsSync(join(root, id)) && suffix < 1000; suffix += 1) id = `${base}-${suffix}`
-  return registerTrainedAdapter(settings, {
+export async function linkAdapterFile(settings: Settings, input: { path: string; base?: string }): Promise<AdapterEntry> {
+  const info = await stat(input.path)
+  const id = `lora-${createHash('sha1').update(modelPathKey(input.path)).digest('hex').slice(0, 16)}`
+  const existing = await readLocalAdapters(settings)
+  const previous = existing.find((item) => item.id === id)
+  const record: LocalAdapterRecord = {
     id,
-    name: input.name?.trim() || stem,
-    sourcePath: input.sourcePath,
+    name: previous?.name ?? basename(input.path).replace(/\.[^.]+$/, ''),
+    path: dirname(input.path),
+    file: input.path,
     kind: 'lora',
-    origin: 'imported',
-  })
+    base: input.base,
+    license: 'local',
+    files: [basename(input.path)],
+    sizeBytes: info.size,
+    createdAt: previous?.createdAt ?? new Date().toISOString(),
+    origin: 'linked',
+  }
+  await mkdir(paths.adapters(settings.modelsRoot, settings.modelDirectories), { recursive: true })
+  await writeFileAtomic(
+    localAdapterFile(settings),
+    JSON.stringify({ schema_version: 1, adapters: [...existing.filter((item) => item.id !== id), record] }, null, 2),
+  )
+  invalidateCatalog()
+  return localAdapterEntry(record, true)
+}
+
+function localAdapterEntry(record: LocalAdapterRecord, installed: boolean): AdapterEntry {
+  return {
+    id: record.id,
+    name: record.name,
+    provider: 'local',
+    repo: record.file ?? record.path,
+    revision: 'local',
+    kind: record.kind,
+    base: record.base,
+    license: record.license,
+    files: record.files,
+    sizeBytes: record.sizeBytes,
+    tags: localAdapterTags(record.origin),
+    notes: localAdapterNotes(record.origin),
+    installed,
+    installedBytes: installed ? record.sizeBytes : 0,
+  }
 }
 
 /**
@@ -242,6 +273,8 @@ export async function findAdapterName(settings: Settings, id: string): Promise<s
 /** Resolve an installed adapter's weight file (LoRA safetensors) on disk; null when missing. */
 export async function resolveAdapterFile(settings: Settings, id: string): Promise<string | null> {
   if (isSharedModelId(id)) return resolveSharedWeight(id)
+  const linked = (await readLocalAdapters(settings)).find((record) => record.id === id && record.origin === 'linked')
+  if (linked?.file) return (await fileSize(linked.file)) > 0 ? linked.file : null
   const dir = join(paths.adapters(settings.modelsRoot, settings.modelDirectories), id)
   try {
     const raw = JSON.parse(await readFile(join(dir, 'adapter.json'), 'utf8')) as { files?: string[] }
@@ -455,6 +488,8 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
     raw = { ...raw, models: [...raw.models, runtimeConfig] }
   }
   const folders = await localDiffusersFolders(settings)
+  const imported = await readImportedModels(importedModelsIndex(settings))
+  const standIns = new Map(imported.filter((item) => item.catalogId).map((item) => [item.catalogId!, item]))
   const models: ModelEntry[] = await Promise.all(
     raw.models.map(async (model) => {
       const entry: ModelEntry = {
@@ -482,6 +517,23 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
       }
       const location = await findInstall(settings, entry)
       const record = location?.record
+      // The person's own copy of this single file (same name and size), used where it is.
+      const own = record ? undefined : standIns.get(entry.id)
+      if (own) {
+        const here = await ownFileHere(own)
+        entry.localPath = own.path
+        entry.tags = [...entry.tags, 'local-file']
+        entry.notes = `使用电脑上的文件 ${own.path}，不复制、不移动。`
+        if (here) {
+          entry.installed = true
+          entry.installedBytes = own.size
+          entry.installState = 'ready'
+        } else {
+          entry.installState = 'error'
+          entry.missingFile = await missingPlace(own.path)
+        }
+        return entry
+      }
       entry.installed = Boolean(record)
       entry.installedBytes = record?.entries.reduce((n, f) => n + f.size, 0) ?? 0
       // A registered diffusers folder of the same model counts as this component, used where it is.
@@ -522,22 +574,20 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
       return entry
     }),
   )
-  for (const imported of await readImportedModels(importedModelsIndex(settings))) {
+  // A catalog part's own copy is that part (above), not a row of its own.
+  const importedRecords = imported.filter((item) => !item.catalogId || !raw.models.some((model) => model.id === item.catalogId))
+  for (const imported of importedRecords) {
     let installed = false
-    let precision = 'local'
+    let precision = imported.precision ?? 'local'
     if (imported.layout === 'diffusers-folder') {
       // A folder: still complete and the same size as when it was registered.
       const folder = folders.find((item) => item.path === imported.path)?.info ?? null
       installed = folder?.size === imported.size
       precision = folder?.dtype ?? 'local'
     } else {
-      try {
-        const info = await stat(imported.path)
-        installed = info.isFile() && info.size === imported.size && info.mtimeMs === imported.mtimeMs
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
+      installed = await ownFileHere(imported)
     }
+    const missingFile = installed ? undefined : await missingPlace(imported.path)
     models.push({
       id: imported.id,
       name: imported.name,
@@ -555,6 +605,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
         'local-import',
         imported.layout === 'diffusers-folder' ? 'diffusers-folder' : 'comfyui',
         imported.sha256 ? `sha256:${imported.sha256}` : 'unhashed',
+        ...(imported.inspected ? [ENGINE_CHECKED] : []),
       ],
       notes:
         imported.layout === 'diffusers-folder'
@@ -563,6 +614,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
             ? `外部文件引用；移除记录不会删除原文件。SHA256 ${imported.sha256}`
             : '扫描登记的外部文件；不复制、不移动，移除记录也不会删除原文件。使用前不校验哈希。',
       localPath: imported.path,
+      ...(missingFile ? { missingFile } : {}),
       installState: installed ? 'ready' : 'error',
       installed,
       installedBytes: installed ? imported.size : 0,
@@ -595,16 +647,8 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
     }),
   )
   for (const local of await readLocalAdapters(settings)) {
-    adapters.push({
-      ...local,
-      provider: 'local',
-      repo: local.path,
-      revision: 'local',
-      tags: localAdapterTags(local.origin),
-      notes: localAdapterNotes(local.origin),
-      installed: true,
-      installedBytes: local.sizeBytes,
-    })
+    // A linked LoRA is there while its file is; a moved one stays listed so it can be removed.
+    adapters.push(localAdapterEntry(local, !local.file || (await fileSize(local.file)) > 0))
   }
   adapters.push(...sharedAdapters())
   catalogRoot = key
@@ -635,6 +679,17 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
     source,
   }
   return catalogCache
+}
+
+/** An own file is used while it still has the size and time it was added with. */
+async function ownFileHere(record: { path: string; size: number; mtimeMs: number }): Promise<boolean> {
+  try {
+    const info = await stat(record.path)
+    return info.isFile() && info.size === record.size && info.mtimeMs === record.mtimeMs
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ENOTDIR') throw error
+    return false
+  }
 }
 
 export function invalidateCatalog(): void {
@@ -996,38 +1051,6 @@ export async function startDownload(kind: 'model' | 'adapter', id: string, setti
   return beginDownload(kind, entry, settings)
 }
 
-/**
- * 添加整个模型文件夹: a diffusers folder (or several inside the one
- * picked) is registered in place as one model each, nothing copied or hashed.
- * A folder of loose weight files keeps the old per-file import.
- */
-export async function importModelFolder(
-  directory: string,
-  settings: Settings,
-): Promise<{ added: number; duplicates: number; folders?: string[] }> {
-  const scan = await scanModelDirectory(directory)
-  const folders = scan.candidates.filter((candidate) => candidate.layout === 'diffusers-folder')
-  if (folders.length) {
-    const result = await registerImportedScan(
-      importedModelsIndex(settings),
-      folders.map((candidate) => ({
-        path: candidate.path,
-        role: 'full',
-        layout: 'diffusers-folder',
-        name: candidate.name,
-        relativePath: candidate.relativePath,
-      })),
-    )
-    invalidateCatalog()
-    if (result.added + result.updated === 0)
-      throw new Error('这个文件夹不是完整的模型文件夹（需要 model_index.json、transformer、text_encoder 和 vae）')
-    return { added: result.added, duplicates: result.updated, folders: folders.map((candidate) => candidate.name) }
-  }
-  const result = await importModelDirectory(directory, importedModelsIndex(settings))
-  invalidateCatalog()
-  return result
-}
-
 /** Read-only discovery: never writes into the folder the user picked. */
 export async function scanModels(directory: string): Promise<ScanResult> {
   return scanModelDirectory(directory)
@@ -1078,12 +1101,16 @@ export async function installBundle(id: string, settings: Settings): Promise<Dow
       throw new Error('共享模型文件不可用，请刷新目录或重新选择')
     }
   }
-  const result: DownloadTask[] = []
-  for (const componentId of ids) {
+  const parts = ids.map((componentId) => {
     const model = catalog.models.find((m) => m.id === componentId)
     if (!model) throw new Error(`组合缺少组件：${componentId}`)
-    if (!model.installed) result.push(await beginDownload('model', model, settings))
-  }
+    return model
+  })
+  // The person's own file that moved is found again, never replaced by a download of something else.
+  const lost = parts.find((model) => !model.installed && (model.provider === 'local' || model.tags.includes('local-file')))
+  if (lost) throw codedError('E_MODEL_FILE_MISSING', `找不到「${lost.name}」的文件，请在「模型」页点「重新找到…」`)
+  const result: DownloadTask[] = []
+  for (const model of parts) if (!model.installed) result.push(await beginDownload('model', model, settings))
   return result
 }
 export async function downloadCustomModel(repo: string, settings: Settings): Promise<DownloadTask> {
@@ -1235,7 +1262,8 @@ export async function deleteModel(kind: 'model' | 'adapter', id: string, setting
       return
     }
     const model = entry as ModelEntry
-    if (model.provider === 'local') {
+    // The person's own file only leaves the list; a catalog part it stood in for can be downloaded again.
+    if (model.provider === 'local' || model.tags.includes('local-file')) {
       await removeImportedModel(importedModelsIndex(settings), id)
       invalidateCatalog()
       return

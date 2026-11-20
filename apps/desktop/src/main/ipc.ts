@@ -18,8 +18,6 @@ import {
   cleanupEmptyModelDirs,
   getCatalog,
   deleteModel,
-  importAdapterFile,
-  importModelFolder,
   invalidateCatalog,
   listDownloads,
   pauseDownload,
@@ -30,6 +28,7 @@ import {
   modelSpace,
 } from './services/models'
 import { deleteCombination, listCombinations, saveCombination } from './services/modelCombinations'
+import { forgetBundle, modelImportState, relocateBundle, resumeModelImport, startModelImport } from './services/modelImport'
 import { deleteSeries, getSeries, listSeries, saveSeries, writeChapterPages } from './services/manga'
 import { galleryDetail, listGallery, recordJobOutputs, revealInFolder, trashGalleryItem } from './services/gallery'
 import { activeJobInputPaths, cancelJob, getJob, getJobLogs, inputJob, listJobs, onJobCompleted } from './services/supervisor'
@@ -91,7 +90,7 @@ import { isInside } from './lib/paths'
 import { codedError, errorCode } from './lib/codedError'
 import { getEngineFeatures } from './services/engineFeatures'
 import { importImageBytes, importImageFile, pruneProjectMasks, saveMask } from './services/studioAssets'
-import { addControlAdapter, listControlAdapters, removeControlAdapter } from './services/controlAdapters'
+import { listControlAdapters, removeControlAdapter } from './services/controlAdapters'
 import { applyThemeSource, applyUiScale, controlWindow, openWindow } from './windows'
 import { getGpuInventory, listDevices, refreshGpuInventory } from './services/devices'
 import { getOnboardingStatus } from './services/onboarding'
@@ -223,7 +222,10 @@ export function registerIpc(): void {
         .catch((error: unknown) => console.warn('[model-sources]', error))
     : undefined
   // Keeps the engine on the newest release while settings.engineAutoUpdate is on. A new engine checks the shared files again.
-  startEngineAutoUpdate(() => refreshSharedModelsInBackground())
+  startEngineAutoUpdate(() => {
+    refreshSharedModelsInBackground()
+    resumeModelImport()
+  })
   // Learn which GPUs this computer has (AMD / Intel via the small Vulkan probe) without blocking start-up.
   void startupEnginePlan().catch((error: unknown) => console.warn('[engine-plan]', error instanceof Error ? error.message : error))
 
@@ -614,7 +616,10 @@ export function registerIpc(): void {
     const state = await installEnginePlan({ channel, releaseTag, cudaWheels, packages: packagesFromIds(packages), all })
     // Choosing an older release by hand pins it, so auto-update does not undo the rollback.
     if (state.phase === 'done' && channel === 'stable') await recordManualEngineInstall(releaseTag)
-    if (state.phase === 'done') refreshSharedModelsInBackground()
+    if (state.phase === 'done') {
+      refreshSharedModelsInBackground()
+      resumeModelImport()
+    }
     return state
   })
 
@@ -647,8 +652,6 @@ export function registerIpc(): void {
   )
 
   handle(Ipc.controlAdaptersList, null, () => listControlAdapters())
-
-  handle(Ipc.controlAdaptersAdd, schemas.controlAdapterAdd, (input) => addControlAdapter(input))
 
   handle(Ipc.controlAdaptersRemove, schemas.controlAdapterRemove, (input) => removeControlAdapter(input))
 
@@ -800,16 +803,48 @@ export function registerIpc(): void {
     return result
   })
 
-  handle(Ipc.modelsImportFolder, null, async () => {
-    const result = await dialog.showOpenDialog({
-      title: '选择模型文件夹',
-      properties: ['openDirectory'],
-    })
-    if (result.canceled || !result.filePaths[0]) return { canceled: true, added: 0, duplicates: 0 }
-    const imported = await importModelFolder(result.filePaths[0], getSettings())
-    emit(Events.modelsChanged, { reason: 'import', ...imported })
-    return { canceled: false, ...imported }
+  // 导入模型: the folder of another app's install becomes a shared source, scanned right away.
+  const importHooks = {
+    onSourceAdded: async (settings: Settings) => {
+      emit(Events.settingsChanged, settings)
+      await refreshSharedModels(settings, true)
+    },
+  }
+  handle(Ipc.modelsImport, schemas.modelsImport, async ({ paths: dropped }) => {
+    await startupModelSources
+    return startModelImport(dropped, { hooks: importHooks })
   })
+  handle(Ipc.modelsImportPick, schemas.modelsImportPick, async ({ kind }, event) => {
+    await startupModelSources
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions =
+      kind === 'files'
+        ? {
+            title: '选择模型文件',
+            properties: ['openFile', 'multiSelections'],
+            filters: [{ name: '模型文件', extensions: ['safetensors', 'sft', 'gguf', 'ckpt', 'pt', 'pth', 'bin'] }],
+          }
+        : { title: '选择模型文件夹', properties: ['openDirectory'] }
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths.length) return null
+    // Chosen in the dialog: only such a place may be on the network.
+    return startModelImport(result.filePaths, { picked: true, hooks: importHooks })
+  })
+  handle(Ipc.modelsImportState, null, () => modelImportState())
+  handle(Ipc.modelsRelocate, schemas.modelsRelocate, ({ bundleId }, event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    return relocateBundle(bundleId, async (title, near) => {
+      const options: Electron.OpenDialogOptions = {
+        title,
+        ...(near ? { defaultPath: near } : {}),
+        properties: ['openFile'],
+        filters: [{ name: '模型文件', extensions: ['safetensors', 'sft', 'gguf'] }],
+      }
+      const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+      return result.canceled ? null : (result.filePaths[0] ?? null)
+    })
+  })
+  handle(Ipc.modelsForget, schemas.modelsForget, ({ bundleId }) => forgetBundle(bundleId))
 
   // Read-only discovery for a folder the user already has (e.g. a ComfyUI models
   // tree). Never writes into it; registration is a separate explicit call.
@@ -831,43 +866,6 @@ export function registerIpc(): void {
     const result = await registerScannedModels(getSettings(), items)
     emit(Events.modelsChanged, { reason: 'register', ...result })
     return result
-  })
-
-  // 用电脑上的模型文件…: one folder pick. A complete model folder is added as a
-  // model where it is; otherwise the 主模型, 文本编码器 and VAE files found are
-  // registered (read only, nothing copied) and handed to 自己组合 to fill its slots.
-  handle(Ipc.modelsUseFolder, null, async () => {
-    const picked = await dialog.showOpenDialog({ title: '选择模型文件夹', properties: ['openDirectory'] })
-    if (picked.canceled || !picked.filePaths[0]) return { canceled: true, added: 0, duplicates: 0, slots: null }
-    const root = picked.filePaths[0]
-    const settings = getSettings()
-    const scan = await scanModels(root)
-    if (scan.candidates.some((candidate) => candidate.layout === 'diffusers-folder')) {
-      const imported = await importModelFolder(root, settings)
-      emit(Events.modelsChanged, { reason: 'import', ...imported })
-      return { canceled: false, ...imported, slots: null }
-    }
-    const found = (role: 'dit' | 'text_encoder' | 'vae') =>
-      scan.candidates.filter((candidate) => candidate.role === role && candidate.confidence !== 'low')
-    const groups = [found('dit'), found('text_encoder'), found('vae')]
-    const items = groups.flat().map((candidate) => ({
-      path: candidate.path,
-      role: candidate.role as 'dit' | 'text_encoder' | 'vae',
-      name: candidate.name,
-      relativePath: candidate.relativePath,
-      ...(candidate.layout === 'unknown' ? {} : { layout: candidate.layout }),
-    }))
-    if (!items.length) return { canceled: false, added: 0, duplicates: 0, slots: null }
-    const registered = await registerScannedModels(settings, items)
-    emit(Events.modelsChanged, { reason: 'register', ...registered })
-    const idOf = (path: string | undefined): string | null =>
-      path ? (registered.ids[items.findIndex((item) => item.path === path)] ?? null) : null
-    return {
-      canceled: false,
-      added: registered.added,
-      duplicates: registered.updated,
-      slots: { dit: idOf(groups[0]![0]?.path), textEncoder: idOf(groups[1]![0]?.path), vae: idOf(groups[2]![0]?.path) },
-    }
   })
 
   handle(Ipc.modelsSaveCombination, schemas.modelsSaveCombination, async (input) => {
@@ -900,23 +898,6 @@ export function registerIpc(): void {
     const removed = await cleanupEmptyModelDirs(getSettings())
     emit(Events.modelsChanged, { reason: 'cleanup', removed: removed.length })
     return { removed }
-  })
-
-  handle(Ipc.modelsImportAdapter, null, async () => {
-    const result = await dialog.showOpenDialog({
-      title: '导入 LoRA 文件',
-      buttonLabel: '导入',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'LoRA / LyCORIS', extensions: ['safetensors'] }],
-    })
-    if (result.canceled || !result.filePaths.length) return { canceled: true, adapters: [] }
-    const settings = getSettings()
-    const adapters = []
-    for (const sourcePath of result.filePaths) {
-      adapters.push(await importAdapterFile(settings, { sourcePath }))
-    }
-    invalidateCatalog()
-    return { canceled: false, adapters }
   })
 
   handle(Ipc.modelsInstalled, null, async () => {

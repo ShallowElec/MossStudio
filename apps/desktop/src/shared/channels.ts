@@ -179,15 +179,21 @@ export const Ipc = {
   modelSourcesRefresh: 'models:sources-refresh',
   modelSourcesAdd: 'models:sources-add',
   modelSourcesRemove: 'models:sources-remove',
-  modelsImportFolder: 'models:import-folder',
-  modelsImportAdapter: 'models:import-adapter',
+  /** 导入模型: files and folders dropped on the window, `{ paths }` → ModelImportState. Each goes through the engine's `inspect`. */
+  modelsImport: 'models:import',
+  /** 导入模型 › 选择文件… / 选择文件夹…: the dialog, then the same import; null when canceled. */
+  modelsImportPick: 'models:import-pick',
+  /** The import running or last finished, so a window opened later can show it. */
+  modelsImportState: 'models:import-state',
+  /** 重新找到…: point a model's own files that moved at where they are now. `{ bundleId }` → number found. */
+  modelsRelocate: 'models:relocate',
+  /** 移除 a model whose own files are gone: its registrations, and the combination when it is one. */
+  modelsForget: 'models:forget',
   modelsScan: 'models:scan',
   modelsRegisterScan: 'models:register-scan',
   modelsCleanupEmpty: 'models:cleanup-empty',
   /** Free space for what these models still miss, per disk: `{ modelIds }` → ModelSpaceDisk[]. First run only. */
   modelsSpace: 'models:space',
-  /** 用电脑上的模型文件…: a complete model folder is added as is; loose files are registered for 自己组合. */
-  modelsUseFolder: 'models:use-folder',
   modelsSaveCombination: 'models:save-combination',
   modelsDeleteCombination: 'models:delete-combination',
   modelsRemoteInventory: 'models:remote-inventory',
@@ -246,8 +252,6 @@ export const Ipc = {
   /** Write a painted mask PNG into a project's assets: `{ projectId, canvasId, png: Uint8Array }` → `{ path }`. */
   studioSaveMask: 'studio:save-mask',
   controlAdaptersList: 'control-adapters:list',
-  /** Register a control adapter file (checked with the engine's `inspect`): `{ path }` → ControlAdapterEntry. */
-  controlAdaptersAdd: 'control-adapters:add',
   controlAdaptersRemove: 'control-adapters:remove',
   // Setup window (/install) and uninstall (/uninstall, Settings › 关于 › 卸载). Types: shared/setup.ts.
   /** → SetupState. Setup mode only. */
@@ -289,6 +293,8 @@ export const Events = {
   instancesChanged: 'event:instances-changed',
   hostsChanged: 'event:hosts-changed',
   modelsChanged: 'event:models-changed',
+  /** An import's progress (ModelImportState), after every file the engine answers for. */
+  modelImport: 'event:model-import',
   settingsChanged: 'event:settings-changed',
   gpuInventory: 'event:gpu-inventory',
   gpuTelemetry: 'event:gpu-telemetry',

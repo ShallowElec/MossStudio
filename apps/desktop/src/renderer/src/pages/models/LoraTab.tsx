@@ -1,8 +1,7 @@
-import { FileUp, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import type { AdapterEntry, Catalog, DownloadTask } from '@shared/types'
 import { isSharedModelId } from '@shared/sharedModels'
-import { useApp } from '../../store'
 import { Notice } from '../../components/common/Notice'
 import { Button, ConfirmDialog, EmptyState, Group, LoadingRow, Pill, Row, Section, Spinner, useToast } from '../../components/ui'
 import { DownloadProgress } from './DownloadProgress'
@@ -15,16 +14,19 @@ const errorText = (cause: unknown): string => (cause instanceof Error ? cause.me
 /** Where a LoRA comes from; its size is a column of its own. */
 function adapterOrigin(adapter: AdapterEntry): string | undefined {
   if (isSharedModelId(adapter.id)) return '共享模型目录'
+  if (adapter.tags.includes('local-file')) return '在原位置使用'
   return adapter.provider === 'local' ? (adapter.tags.includes('trained') ? '自己训练的' : '从电脑导入') : adapter.notes
 }
 
 const adapterBytes = (adapter: AdapterEntry): number =>
   adapter.installed ? adapter.installedBytes || adapter.sizeBytes : adapter.sizeBytes
 
-/** LoRA: installed ones (import local files, delete) and ones available to download. */
+/** The person's own LoRA file, used where it is: only its row is removed, never the file. */
+const isLinked = (adapter: AdapterEntry): boolean => adapter.tags.includes('local-file')
+
+/** LoRA: installed ones (delete, or remove one used where it is) and ones available to download. Files come in through 导入模型. */
 export function LoraTab({ catalog, location }: { catalog: Catalog; location: ModelLocation }): React.JSX.Element {
   const toast = useToast()
-  const importAdapters = useApp((state) => state.importAdapters)
   const [busy, setBusy] = useState<string | null>(null)
   const [removing, setRemoving] = useState<AdapterEntry | null>(null)
   if (!location.ready) {
@@ -45,20 +47,9 @@ export function LoraTab({ catalog, location }: { catalog: Catalog; location: Mod
     )
   }
   const adapters = catalog.adapters.filter((adapter) => location.kind === 'local' || adapter.provider !== 'local')
-  const installed = adapters.filter((adapter) => location.isAdapterInstalled(adapter))
+  // A LoRA used where it is stays listed when its file moved, so it can be removed.
+  const installed = adapters.filter((adapter) => location.isAdapterInstalled(adapter) || isLinked(adapter))
   const available = adapters.filter((adapter) => !location.isAdapterInstalled(adapter) && adapter.provider !== 'local')
-
-  async function runImport(): Promise<void> {
-    setBusy('import')
-    try {
-      const added = await importAdapters()
-      if (added.length) toast.push(`已导入 ${added.length} 个 LoRA`, 'success')
-    } catch (cause) {
-      toast.push(`没能导入：${errorText(cause)}`, 'error')
-    } finally {
-      setBusy(null)
-    }
-  }
 
   async function act(adapter: AdapterEntry, action: 'download' | 'resume' | 'pause', task: DownloadTask | undefined): Promise<void> {
     setBusy(adapter.id)
@@ -77,31 +68,24 @@ export function LoraTab({ catalog, location }: { catalog: Catalog; location: Mod
     setRemoving(null)
     try {
       await location.remove('adapter', adapter.id)
-      toast.push(`已删除 ${adapter.name}`, 'success')
+      toast.push(`${isLinked(adapter) ? '已移除' : '已删除'} ${adapter.name}`, 'success')
     } catch (cause) {
-      toast.push(`没能删除：${errorText(cause)}`, 'error')
+      toast.push(`${isLinked(adapter) ? '没能移除' : '没能删除'}：${errorText(cause)}`, 'error')
     }
   }
 
   return (
     <div className="flex flex-col gap-8">
-      <Section
-        title="已安装"
-        description="在创作里可以给画面叠加这些 LoRA。"
-        actions={
-          location.kind === 'local' ? (
-            <Button tone="secondary" disabled={busy !== null} onClick={() => void runImport()}>
-              {busy === 'import' ? <Spinner /> : <FileUp className="size-4" strokeWidth={1.6} />}导入 LoRA 文件
-            </Button>
-          ) : null
-        }
-      >
+      <Section title="已安装" description="在创作里可以给画面叠加这些 LoRA。">
         {installed.length ? (
           <Group>
             {installed.map((adapter) => (
               <Row key={adapter.id} title={adapter.name} description={adapterOrigin(adapter)}>
                 <SizeText bytes={adapterBytes(adapter)} />
-                {isSharedModelId(adapter.id) ? null : <RemoveButton name={adapter.name} onClick={() => setRemoving(adapter)} />}
+                {adapter.installed ? null : <Pill tone="warn">找不到文件</Pill>}
+                {isSharedModelId(adapter.id) ? null : (
+                  <RemoveButton remove={isLinked(adapter)} name={adapter.name} onClick={() => setRemoving(adapter)} />
+                )}
               </Row>
             ))}
           </Group>
@@ -111,7 +95,7 @@ export function LoraTab({ catalog, location }: { catalog: Catalog; location: Mod
               size="section"
               icon={<Sparkles className="size-6" strokeWidth={1.6} />}
               title="还没有 LoRA"
-              description={location.kind === 'local' ? '导入电脑上的 .safetensors 文件，或从下面下载。' : '从下面下载到这台主机。'}
+              description={location.kind === 'local' ? '用「导入模型」加入电脑上的 LoRA，或从下面下载。' : '从下面下载到这台主机。'}
             />
           </Group>
         )}
@@ -160,13 +144,15 @@ export function LoraTab({ catalog, location }: { catalog: Catalog; location: Mod
 
       <ConfirmDialog
         open={Boolean(removing)}
-        title={removing ? `删除「${removing.name}」？` : ''}
+        title={removing ? `${isLinked(removing) ? '移除' : '删除'}「${removing.name}」？` : ''}
         description={
-          removing?.provider === 'local' && removing.tags.includes('local-import')
-            ? '会删除模型库里的这份副本，你最初导入的原文件不受影响。'
-            : `会删除这个 LoRA 的文件，释放约 ${sizeText(removing?.installedBytes || removing?.sizeBytes)}。用到它的画面会不再叠加它。`
+          removing && isLinked(removing)
+            ? '只从列表里移除，文件本身不会删除。用到它的画面会不再叠加它。'
+            : removing?.provider === 'local' && removing.tags.includes('local-import')
+              ? '会删除模型库里的这份副本，你最初导入的原文件不受影响。'
+              : `会删除这个 LoRA 的文件，释放约 ${sizeText(removing?.installedBytes || removing?.sizeBytes)}。用到它的画面会不再叠加它。`
         }
-        confirmLabel="删除"
+        confirmLabel={removing && isLinked(removing) ? '移除' : '删除'}
         onClose={() => setRemoving(null)}
         onConfirm={() => removing && void remove(removing)}
       />

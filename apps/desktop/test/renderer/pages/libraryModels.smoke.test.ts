@@ -131,11 +131,13 @@ describe('Library page', () => {
 })
 
 describe('Models page', () => {
-  it('shows the recommended model as a whole with one action, and the other models', async () => {
+  it('shows the recommended model as a whole with one action, and 我的模型 with 自己组合 at hand', async () => {
     const { container } = await render('models', '/models', 'engineInstalledModelMissing')
     expect(container.textContent).toContain('MOSS-Image SFT')
     expect(container.textContent).toContain('推荐模型')
-    expect(container.textContent).toContain('其他模型')
+    expect(container.textContent).toContain('我的模型')
+    expect(container.textContent).toContain('自己组合')
+    expect(container.textContent).toContain('导入模型')
     // A model that is not downloaded shows its size and a 下载 action; its state is the action itself.
     expect(container.textContent).toContain('27.2 GB')
     expect(container.textContent).toContain('下载')

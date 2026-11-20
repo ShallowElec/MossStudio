@@ -136,6 +136,8 @@ export interface ModelSourceFile {
   size: number
   role: ScannedModel['role'] | 'control_adapter'
   state: 'available' | 'pending' | 'incompatible'
+  /** Why the engine cannot use an incompatible file, in one plain sentence. */
+  reason?: string
 }
 
 export interface ModelSourceStatus extends ModelSource {
@@ -562,6 +564,11 @@ export interface ModelEntry {
   notes?: string
   preview?: string
   localPath?: string
+  /**
+   * The person's own file (or a catalog part it stands in for) is not where it was added:
+   * `drive` when the disk it was on is not there, `file` when the file itself is gone.
+   */
+  missingFile?: 'drive' | 'file'
   installed: boolean
   installedBytes: number
 }
@@ -917,6 +924,62 @@ export interface EngineFeatures {
 }
 
 /** A control adapter file registered with the app (identified by the engine's `inspect`). */
+/** Why an imported file cannot be used; the sentence comes from `importProblemText` in shared/modelImport.ts. */
+export type ModelImportProblem =
+  | 'not-model'
+  | 'empty-folder'
+  | 'too-broad'
+  | 'not-moss'
+  | 'fp16'
+  | 'fp8'
+  | 'nvfp4'
+  | 'gguf'
+  | 'format'
+  | 'cli'
+  | 'lora-other'
+  | 'unsupported'
+  | 'folder-incomplete'
+  | 'network'
+  | 'unreadable'
+  | 'check-failed'
+
+/** What an imported file turned out to be: a whole model, a part of one, a LoRA, a control adapter, another app's model folder, or nothing usable. */
+export type ModelImportKind = 'model' | 'part' | 'lora' | 'control' | 'source' | 'unusable'
+
+/** One file or folder of an import (模型 › 导入模型, or files dropped on the window). */
+export interface ModelImportFile {
+  path: string
+  name: string
+  sizeBytes: number
+  /** `waiting`: no engine yet to ask; the check resumes when one is installed. */
+  state: 'checking' | 'waiting' | 'done'
+  kind?: ModelImportKind
+  role?: 'dit' | 'text_encoder' | 'vae' | 'full'
+  /** What the engine's `inspect` names the weights (`int8`, `int4`, `nvfp4`, `bf16`…). */
+  precision?: string
+  /** A GGUF main model: the engine converts it once, the first time it loads. */
+  converts?: boolean
+  /** The catalog part this file is, matched by file name and exact size. */
+  catalogName?: string
+  problem?: ModelImportProblem
+  /** The one way out for an unusable file: download this model instead. */
+  offer?: { bundleId: string; label: string }
+  /** The catalog id the file is used under (a model part, a LoRA or a control adapter). */
+  entryId?: string
+  /** A folder that is another app's install, added as a shared model folder instead. */
+  app?: ModelSourceKind
+}
+
+export interface ModelImportState {
+  id: string
+  phase: 'checking' | 'waiting-engine' | 'done'
+  files: ModelImportFile[]
+  /** Whole models these files made or completed: a catalog model or a saved combination. */
+  models: Array<{ bundleId: string; name: string }>
+  /** Several parts of one kind arrived together: 自己组合 opens with these instead of a guess. */
+  choose: { dit: string; textEncoder: string; vae: string } | null
+}
+
 export interface ControlAdapterEntry {
   id: string
   name: string

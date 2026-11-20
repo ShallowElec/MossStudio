@@ -31,6 +31,7 @@ import type {
   MossInferRelease,
   ControlAdapterEntry,
   EngineFeatures,
+  ModelImportState,
   ProjectDocument,
   Settings,
   TrainerVersion,
@@ -42,6 +43,8 @@ import {
   SFT_BUNDLE_IDS,
   catalogFixture,
   diagnosticFixture,
+  importFixtures,
+  movedOwnFileFixture,
   engineDownloadFixture,
   engineFeaturesFixture,
   engineReleaseFixture,
@@ -64,6 +67,8 @@ import {
   updaterStateFixture,
 } from './fixtures'
 import { installStateFixture, type MockInstallState } from './install'
+import type { MockImportFile } from './modelImport'
+import { combinationBundle } from '@shared/modelCombos'
 import {
   trainingBlockedFixture,
   trainingNotPreparedFixture,
@@ -104,10 +109,14 @@ export interface MockBackendState {
   pickedImages: string[]
   aiProviders: AiProviderInfo[]
   conversations: AiConversationInfo[]
-  /** The folder 「使用本地文件夹」 picks (models:import-folder); null = the dialog is canceled. */
-  localModelFolder: { path: string; name: string; bundleId: string } | null
-  /** 用电脑上的模型文件…: loose files in the picked folder, when it holds no complete model folder. */
-  localModelFiles: Array<{ path: string; role: 'dit' | 'text_encoder' | 'vae' }> | null
+  /** 导入模型: what the engine says each path is (./modelImport.ts); a path not listed is not a model file. */
+  importFiles: Record<string, MockImportFile>
+  /** What 选择文件… / 选择文件夹… (and 重新找到…) pick; null = the dialog is canceled. */
+  importPick: string[] | null
+  /** Keep the files 正在识别 until `finishImport()`, to see the sheet while the engine checks them. */
+  importHold: boolean
+  /** The import running or last finished (models:import-state). */
+  modelImport: ModelImportState | null
   /** What the engine's machine probe found (engine:plan runs the real chooser over it). */
   engineMachine: EngineMachine
   /** The release engine:plan plans against. */
@@ -146,6 +155,8 @@ export type ScenarioName =
   | 'updateAvailable'
   | 'remoteHost'
   | 'modelMissingRtx50'
+  | 'modelImport'
+  | 'modelFileMoved'
   | MachineScenario
   | 'vulkanOnly'
   | 'lowMemory'
@@ -210,8 +221,10 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     install: installStateFixture(),
     engineMachine: machineFixture('nvidia'),
     engineAssets: RELEASE_220,
-    localModelFolder: null,
-    localModelFiles: null,
+    importFiles: {},
+    importPick: null,
+    importHold: false,
+    modelImport: null,
     systemMemoryBytes: 32 * GiB,
     diskFree: {},
     // Ready to train on 本机 (RTX 4070, 12 GB), no trainings yet.
@@ -265,6 +278,31 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     }),
     /** Engine and the recommended bundle installed. */
     ready: () => ({}),
+    /** 导入模型: what the engine says about the files a spec drops or picks (importFixtures), the runtime config already here. */
+    modelImport: () => ({
+      catalog: catalogFixture({ installed: [...SFT_BUNDLE_IDS, 'moss-runtime-config'] }),
+      importFiles: importFixtures(),
+    }),
+    /** 我的模型 has a combination whose own main model was on a disk that is not plugged in. */
+    modelFileMoved: () => {
+      const catalog = catalogFixture({
+        installed: [...SFT_BUNDLE_IDS, 'qwen35-comfy-int8_convrot', 'flux2-vae-comfy-small', 'moss-runtime-config'],
+      })
+      const moved = movedOwnFileFixture()
+      const combination = combinationBundle(
+        {
+          id: 'combo-moved',
+          name: '我的 INT8',
+          components: { dit: moved.id, textEncoder: 'qwen35-comfy-int8_convrot', vae: 'flux2-vae-comfy-small' },
+          createdAt: FIXTURE_NOW,
+        },
+        [...catalog.models, moved],
+      )
+      return {
+        catalog: { ...catalog, models: [...catalog.models, moved], bundles: [...catalog.bundles, combination] },
+        importPick: ['F:\\Models\\moss_image_sft_int8.safetensors'],
+      }
+    },
     /** Ready, with one failed job in history and its diagnostic. */
     jobFailure: () => ({
       jobs: [

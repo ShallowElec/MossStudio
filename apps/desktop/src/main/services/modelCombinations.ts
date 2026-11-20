@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { legacyLocalCombination } from '@shared/modelCombos'
+import { ENGINE_CHECKED, legacyLocalCombination } from '@shared/modelCombos'
 import type { ModelCombination, ModelEntry } from '@shared/types'
 import { paths } from '../lib/paths'
 
@@ -49,7 +49,8 @@ export function listCombinations(): ModelCombination[] {
  */
 export function catalogCombinations(models: readonly ModelEntry[]): ModelCombination[] {
   if (existsSync(storeFile())) return listCombinations()
-  const legacy = legacyLocalCombination(models)
+  // Only files older versions registered by name made that model; what 导入模型 adds is assembled by the import.
+  const legacy = legacyLocalCombination(models.filter((model) => !model.tags.includes(ENGINE_CHECKED)))
   if (!legacy) return []
   write([legacy])
   return [legacy]

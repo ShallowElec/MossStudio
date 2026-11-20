@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { Events, Ipc } from '@shared/channels'
 import type {
-  AdapterEntry,
   AppNotification,
   Catalog,
   Diagnostic,
@@ -82,6 +81,8 @@ interface AppStore {
   studioReuseRequest: StudioReuseRequest | null
   /** 训练 → Studio handoff for 在创作中试用 (lib/studioTry.ts), consumed once by Studio. */
   studioTryRequest: StudioTryRequest | null
+  /** 导入模型 › 去创作: the model the selected 画面 should use, consumed once by Studio. */
+  studioModelRequest: string | null
   scanning: boolean
   scanSection: string | null
   gitMessage: string | null
@@ -126,13 +127,15 @@ interface AppStore {
   requestStudioTry: (request: StudioTryRequest) => void
   /** Returns the pending 在创作中试用 request once and clears it. */
   takeStudioTryRequest: () => StudioTryRequest | null
+  /** Ask Studio to run the selected 画面 with this model (a bundle id). */
+  requestStudioModel: (bundleId: string) => void
+  /** Returns the pending model request once and clears it. */
+  takeStudioModelRequest: () => string | null
   dismissAnnouncement: (id: string) => Promise<void>
   downloadModel: (modelId: string) => Promise<void>
   downloadAdapter: (adapterId: string) => Promise<void>
   /** Queue every missing file of a whole model (catalog bundle) on this machine. */
   downloadBundle: (bundleId: string) => Promise<DownloadTask[]>
-  /** Pick one or more local .safetensors files and register them as LoRAs. */
-  importAdapters: () => Promise<AdapterEntry[]>
   pauseDownload: (taskId: string) => Promise<void>
   cancelDownload: (taskId: string) => Promise<void>
   deleteModel: (kind: 'model' | 'adapter', id: string) => Promise<void>
@@ -463,6 +466,7 @@ export const useApp = create<AppStore>((set, get) => {
     notificationsOpen: false,
     studioBackground: null,
     studioReuseRequest: null,
+    studioModelRequest: null,
     studioTryRequest: null,
     scanning: false,
     scanSection: null,
@@ -695,6 +699,16 @@ export const useApp = create<AppStore>((set, get) => {
       return isStudioTryRequest(request) ? request : null
     },
 
+    requestStudioModel(bundleId) {
+      set({ studioModelRequest: bundleId })
+    },
+
+    takeStudioModelRequest() {
+      const request = get().studioModelRequest
+      if (request !== null) set({ studioModelRequest: null })
+      return request
+    },
+
     async dismissAnnouncement(id) {
       await call(Ipc.announcementsDismiss, { id })
       await get().refreshUpdate()
@@ -714,13 +728,6 @@ export const useApp = create<AppStore>((set, get) => {
       const tasks = await call<DownloadTask[]>(Ipc.modelBundleInstall, { id: bundleId })
       set((state) => ({ downloads: tasks.reduce(upsertDownload, state.downloads) }))
       return tasks
-    },
-
-    async importAdapters() {
-      const result = await call<{ canceled: boolean; adapters: AdapterEntry[] }>(Ipc.modelsImportAdapter)
-      if (result.canceled) return []
-      await get().refreshCatalog()
-      return result.adapters
     },
 
     async pauseDownload(taskId) {

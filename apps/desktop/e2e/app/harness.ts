@@ -31,6 +31,7 @@ export interface E2eMock {
   hold: MockBackend['hold']
   handle: MockBackend['handle']
   playDownload: MockBackend['playDownload']
+  finishImport: MockBackend['finishImport']
   playJob: MockBackend['playJob']
   /**
    * Run a submitted job to the end with `outputs` images (default 1); `previews`
@@ -124,6 +125,7 @@ export function installHarness(mount: () => void): E2eMock {
     hold: (channel) => backend.hold(channel),
     handle: (channel, handler) => backend.handle(channel, handler),
     playDownload: (task, options) => backend.playDownload(task, options),
+    finishImport: () => backend.finishImport(),
     playJob: (job, options) => backend.playJob(job, options),
     finishJob(id, options = {}) {
       const job = jobById(id)

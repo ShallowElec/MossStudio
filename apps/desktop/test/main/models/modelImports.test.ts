@@ -1,10 +1,11 @@
-import { mkdir, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  importModelFolder,
   readImportedModels,
   registerScannedModels,
+  relocateImportedModel,
   removeImportedModel,
   verifyImportedModelFile,
 } from '@main/services/modelImports'
@@ -19,105 +20,32 @@ async function put(path: string, content: string | Buffer): Promise<string> {
 }
 const indexFile = (): string => join(tempDir(), 'imports', 'index.json')
 
-describe('importModelFolder', () => {
-  it('imports recognized files, infers ComfyUI roles, and deduplicates by SHA256', async () => {
-    const models = join(tempDir(), 'ComfyUI', 'models')
-    await put(join(models, 'diffusion_models', 'model.safetensors'), 'same-content')
-    await put(join(models, 'vae', 'duplicate.safetensors'), 'same-content')
-    await put(join(models, 'vae', 'vae.safetensors'), 'vae-content')
-    await put(join(models, 'readme.txt'), 'ignored')
-
-    const result = await importModelFolder(models, indexFile())
-    const records = await readImportedModels(indexFile())
-
-    expect(result).toEqual({ added: 2, duplicates: 1 })
-    expect(records).toHaveLength(2)
-    expect(records.find((model) => model.name === 'model.safetensors')?.role).toBe('dit')
-    expect(records.find((model) => model.name === 'vae.safetensors')?.role).toBe('vae')
-    expect(await verifyImportedModelFile(records[0]!, records[0]!.sha256!, records[0]!.size)).toBe(true)
-    expect(records[0]!.id).toBe(`local-file-${records[0]!.sha256!.slice(0, 20)}`)
-  })
-
-  it('infers every directory role and falls back to full', async () => {
-    const models = join(tempDir(), 'm')
-    await put(join(models, 'unet', 'a.safetensors'), 'a')
-    await put(join(models, 'checkpoints', 'b.ckpt'), 'b')
-    await put(join(models, 'text_encoders', 'c.safetensors'), 'c')
-    await put(join(models, 'clip', 'd.bin'), 'd')
-    await put(join(models, 'VAES', 'e.pt'), 'e')
-    await put(join(models, 'misc', 'f.gguf'), 'f')
-    await importModelFolder(models, indexFile())
-    const roles = Object.fromEntries((await readImportedModels(indexFile())).map((m) => [m.name, m.role]))
-    expect(roles).toEqual({
-      'a.safetensors': 'dit',
-      'b.ckpt': 'dit',
-      'c.safetensors': 'text_encoder',
-      'd.bin': 'text_encoder',
-      'e.pt': 'vae',
-      'f.gguf': 'full',
-    })
-  })
-
-  it('skips hidden, tooling and output directories and empty files', async () => {
-    const models = join(tempDir(), 'm')
-    await put(join(models, '.git', 'a.safetensors'), 'a')
-    await put(join(models, 'node_modules', 'b.safetensors'), 'b')
-    await put(join(models, 'output', 'c.safetensors'), 'c')
-    await put(join(models, 'Cache', 'd.safetensors'), 'd')
-    await put(join(models, 'empty.safetensors'), '')
-    await put(join(models, 'kept.safetensors'), 'kept')
-    expect(await importModelFolder(models, indexFile())).toEqual({ added: 1, duplicates: 0 })
-    expect((await readImportedModels(indexFile())).map((m) => m.name)).toEqual(['kept.safetensors'])
-  })
-
-  it('reimport skips existing content and removing an import never deletes the source file', async () => {
-    const models = join(tempDir(), 'models')
-    const source = await put(join(models, 'checkpoint.safetensors'), 'checkpoint')
-    await importModelFolder(models, indexFile())
-
-    expect(await importModelFolder(models, indexFile())).toEqual({ added: 0, duplicates: 1 })
-    const [record] = await readImportedModels(indexFile())
-    await removeImportedModel(indexFile(), record!.id)
-
-    expect(await readImportedModels(indexFile())).toEqual([])
-    expect(await readFile(source, 'utf8')).toBe('checkpoint')
-  })
-
-  it('a record whose original file vanished is replaced by the new location', async () => {
-    const first = join(tempDir(), 'first')
-    const second = join(tempDir(), 'second')
-    await put(join(first, 'w.safetensors'), 'weights')
-    await put(join(second, 'w.safetensors'), 'weights')
-    await importModelFolder(first, indexFile())
-    await rm(first, { recursive: true })
-    expect(await importModelFolder(second, indexFile())).toEqual({ added: 1, duplicates: 0 })
-    const records = await readImportedModels(indexFile())
-    expect(records).toHaveLength(1)
-    expect(records[0]!.path).toBe(join(second, 'w.safetensors'))
-  })
-
-  it('leaves no temporary index files behind', async () => {
-    const models = join(tempDir(), 'models')
-    await put(join(models, 'a.safetensors'), 'a')
-    await importModelFolder(models, indexFile())
-    expect(await readdir(join(tempDir(), 'imports'))).toEqual(['index.json'])
-    expect(JSON.parse(await readFile(indexFile(), 'utf8')).schema_version).toBe(2)
-  })
-
-  it('rejects a directory without supported model files', async () => {
-    await expect(importModelFolder(tempDir(), indexFile())).rejects.toThrow(/没有可导入的模型文件/)
-  })
-
-  it('rejects a directory whose only model files are empty', async () => {
-    await put(join(tempDir(), 'm', 'empty.safetensors'), '')
-    await expect(importModelFolder(join(tempDir(), 'm'), indexFile())).rejects.toThrow(/非空模型文件/)
-  })
-
-  it('rejects a file path instead of a folder', async () => {
-    const path = await put(join(tempDir(), 'a.safetensors'), 'a')
-    await expect(importModelFolder(path, indexFile())).rejects.toThrow('请选择模型文件夹')
-  })
-})
+/** The record an older version wrote when it imported a file by hashing it; such records keep working. */
+async function hashedRecord(file: string, role: 'dit' | 'text_encoder' | 'vae' = 'vae'): Promise<void> {
+  const content = await readFile(file)
+  const sha256 = createHash('sha256').update(content).digest('hex')
+  const info = await stat(file)
+  await mkdir(join(indexFile(), '..'), { recursive: true })
+  await writeFile(
+    indexFile(),
+    JSON.stringify({
+      schema_version: 2,
+      models: [
+        {
+          id: `local-file-${sha256.slice(0, 20)}`,
+          name: 'w.safetensors',
+          path: file,
+          relativePath: 'w.safetensors',
+          sha256,
+          size: info.size,
+          mtimeMs: info.mtimeMs,
+          role,
+          importedAt: new Date(0).toISOString(),
+        },
+      ],
+    }),
+  )
+}
 
 describe('readImportedModels', () => {
   it('returns an empty list when the index does not exist', async () => {
@@ -233,10 +161,10 @@ describe('registerScannedModels', () => {
     await expect(readFile(indexFile())).rejects.toThrow()
   })
 
-  it('keeps a hash learned by a full import when the file is re-registered by a scan', async () => {
+  it('keeps a hash an older version learned when the file is registered again', async () => {
     const models = join(tempDir(), 'models')
     const file = await put(join(models, 'vae', 'v.safetensors'), 'vae')
-    await importModelFolder(models, indexFile())
+    await hashedRecord(file)
     const [imported] = await readImportedModels(indexFile())
     await registerScannedModels(indexFile(), [{ path: file, role: 'vae' }])
     const [after] = await readImportedModels(indexFile())
@@ -249,9 +177,10 @@ describe('verifyImportedModelFile', () => {
   it('fails for a scanned record, a hash/size mismatch, a vanished file or changed content', async () => {
     const models = join(tempDir(), 'models')
     const file = await put(join(models, 'w.safetensors'), 'weights')
-    await importModelFolder(models, indexFile())
+    await hashedRecord(file)
     const [record] = await readImportedModels(indexFile())
     const { sha256, size } = record as { sha256: string; size: number }
+    expect(await verifyImportedModelFile(record!, sha256, size)).toBe(true)
     expect(await verifyImportedModelFile({ ...record!, sha256: undefined }, sha256, size)).toBe(false)
     expect(await verifyImportedModelFile(record!, 'f'.repeat(64), size)).toBe(false)
     expect(await verifyImportedModelFile(record!, sha256, size + 1)).toBe(false)
@@ -260,5 +189,41 @@ describe('verifyImportedModelFile', () => {
     expect(await verifyImportedModelFile(record!, sha256, size)).toBe(false)
     await rm(file)
     expect(await verifyImportedModelFile(record!, sha256, size)).toBe(false)
+  })
+})
+
+describe('what the engine said about an imported file', () => {
+  it('keeps the precision and the catalog part a file stands in for', async () => {
+    const file = await put(join(tempDir(), 'models', 'moss_image_sft_int8_convrot.safetensors'), 'dit')
+    await registerScannedModels(indexFile(), [
+      { path: file, role: 'dit', layout: 'comfyui-single-file', precision: 'int8', catalogId: 'moss-sft-comfy-int8_convrot' },
+    ])
+    expect(await readImportedModels(indexFile())).toEqual([
+      expect.objectContaining({ path: file, role: 'dit', precision: 'int8', catalogId: 'moss-sft-comfy-int8_convrot' }),
+    ])
+    // A catalog part's own copy is removed by the part's id.
+    await removeImportedModel(indexFile(), 'moss-sft-comfy-int8_convrot')
+    expect(await readImportedModels(indexFile())).toEqual([])
+  })
+})
+
+describe('relocateImportedModel (重新找到…)', () => {
+  it('points the record at the file where it is now and keeps its id', async () => {
+    const before = await put(join(tempDir(), 'E', 'moss.safetensors'), 'dit')
+    const { ids } = await registerScannedModels(indexFile(), [{ path: before, role: 'dit', precision: 'int8' }])
+    await rm(join(tempDir(), 'E'), { recursive: true })
+    const after = await put(join(tempDir(), 'F', 'moved', 'moss-renamed.safetensors'), 'dit-longer')
+    const record = await relocateImportedModel(indexFile(), ids[0]!, after)
+    expect(record).toMatchObject({ id: ids[0], path: after, name: 'moss-renamed.safetensors', size: 10, precision: 'int8' })
+    expect(await readImportedModels(indexFile())).toEqual([record])
+  })
+
+  it('finds the own copy of a catalog part by the part id, and refuses a folder', async () => {
+    const file = await put(join(tempDir(), 'a', 'vae.safetensors'), 'vae')
+    await registerScannedModels(indexFile(), [{ path: file, role: 'vae', catalogId: 'flux2-vae-comfy-small' }])
+    const moved = await put(join(tempDir(), 'b', 'vae.safetensors'), 'vae')
+    expect((await relocateImportedModel(indexFile(), 'flux2-vae-comfy-small', moved)).path).toBe(moved)
+    await expect(relocateImportedModel(indexFile(), 'flux2-vae-comfy-small', tempDir())).rejects.toThrow('请选择模型文件')
+    await expect(relocateImportedModel(indexFile(), 'nope', moved)).rejects.toThrow('本地导入模型记录不存在')
   })
 })

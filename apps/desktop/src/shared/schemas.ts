@@ -487,6 +487,12 @@ export const schemas = {
 
   modelsDeleteCombination: z.object({ id: z.string().min(1).max(160) }),
 
+  /** Dropped files and folders; a drop of a whole folder tree is still one path. */
+  modelsImport: z.object({ paths: z.array(pathLike).min(1).max(500) }),
+  modelsImportPick: z.object({ kind: z.enum(['files', 'folder']) }),
+  modelsRelocate: z.object({ bundleId: z.string().min(1).max(160) }),
+  modelsForget: z.object({ bundleId: z.string().min(1).max(160) }),
+
   modelsRegisterScan: z.object({
     items: z
       .array(
@@ -852,8 +858,6 @@ export const schemas = {
     /** The mask this one replaces on the canvas (deleted when nothing else uses it). */
     replaces: z.string().min(1).max(4096).optional(),
   }),
-
-  controlAdapterAdd: z.object({ path: pathLike }),
 
   controlAdapterRemove: z.object({ id: z.string().min(1).max(200) }),
 

@@ -115,6 +115,25 @@ describe('studio/readiness deriveReadiness', () => {
     expect(blockers[0]).toMatchObject({ id: 'model-incomplete', message: '「BIG」还没有下载完' })
   })
 
+  it('asks to find a moved own file again instead of saying it is not downloaded', () => {
+    const own: ModelEntry = {
+      ...model('big-dit', false),
+      name: 'my_int8.safetensors',
+      provider: 'local',
+      localPath: 'E:\\Models\\my_int8.safetensors',
+      missingFile: 'drive',
+    }
+    const cat = catalog({ models: [model('sft-dit'), model('rl-dit'), own, model('te'), model('vae'), model('cfg')] })
+    const blockers = deriveReadiness(input({ catalog: cat, bundle: resolveBundle(cat, 'big', null) })).blockers
+    expect(blockers).toEqual([
+      {
+        id: 'model-file',
+        message: '找不到「my_int8」（E:\\Models\\my_int8.safetensors）。插上那块硬盘，或重新找到它。',
+        action: { label: '重新找到…', to: '/models?bundle=big' },
+      },
+    ])
+  })
+
   it('does not block while the catalog or engine state is still loading', () => {
     expect(deriveReadiness(input({ catalog: null, bundle: resolveBundle(null, undefined, null), engine: null })).blockers).toEqual([])
   })

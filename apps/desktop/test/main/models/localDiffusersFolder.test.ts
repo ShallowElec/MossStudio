@@ -104,8 +104,6 @@ function diffusersFolder(name: string, title = 'MOSS-Image-SFT', dtype: 'BF16' |
   return root
 }
 
-const index = async (): Promise<string> => join((await import('@main/lib/paths')).paths.modelImports(settings.modelsRoot), 'index.json')
-
 beforeEach(async () => {
   vi.resetModules()
   localReleaseDir.mockReset().mockImplementation(() => join(dataRoot(), 'release'))
@@ -227,21 +225,5 @@ describe('using an existing diffusers folder in place', () => {
     writeFileSync(join(root, 'vae', 'diffusion_pytorch_model.safetensors'), safetensors('F32', 128))
     const loaded = await models.getCatalog(settings, true)
     expect(loaded.models.find((model) => model.provider === 'local')!.installed).toBe(false)
-  })
-
-  it('添加整个模型文件夹: picking a folder registers each diffusers folder inside it as one model', async () => {
-    diffusersFolder('sft')
-    diffusersFolder('base', 'MOSS-Image-Base')
-    const result = await models.importModelFolder(userDisk(), settings)
-    expect(result).toMatchObject({ added: 2, duplicates: 0, folders: ['MOSS-Image Base（base）', 'MOSS-Image SFT（sft）'] })
-    const records = await imports.readImportedModels(await index())
-    expect(records.map((record) => [record.layout, record.role])).toEqual([
-      ['diffusers-folder', 'full'],
-      ['diffusers-folder', 'full'],
-    ])
-    // Nothing was hashed (that would read 27 GB): the records carry no sha256.
-    expect(records.every((record) => record.sha256 === undefined)).toBe(true)
-    // Picking it again updates instead of adding rows.
-    expect(await models.importModelFolder(userDisk(), settings)).toMatchObject({ added: 0, duplicates: 2 })
   })
 })

@@ -4,7 +4,6 @@ import type { AppInfo, EnginePlanView, ModelSpaceDisk, MossInferDownloadState, O
 import { call } from '../../lib/api'
 import { engineDownloadActive } from '../../lib/engineInstall'
 import { preparationProgress, type Preparation } from '../../lib/preparation'
-import { importFolderMessage, type ImportFolderResult } from '../../lib/modelFolder'
 import { useGpuInventory } from '../../lib/useGpuInventory'
 import { useApp } from '../../store'
 import { useAppInfo } from '../settings/useAppInfo'
@@ -32,9 +31,6 @@ export function useSetup(): {
   /** Detect the GPUs again (and re-plan). */
   redetect: () => Promise<void>
   redetecting: boolean
-  /** 已有模型文件？: use a model folder where it is; null when canceled, else what happened. */
-  chooseModelFolder: () => Promise<{ message: string; ready: boolean } | null>
-  usingFolder: boolean
   /** Folders, system memory and free space from the main process; re-read when settings change (a new folder). */
   info: AppInfo | null
 } {
@@ -209,32 +205,6 @@ export function useSetup(): {
     }
   }, [view, installEngine, downloadModels])
 
-  const refreshCatalog = useApp((state) => state.refreshCatalog)
-  const [usingFolder, setUsingFolder] = useState(false)
-  const chooseModelFolder = useCallback(async (): Promise<{ message: string; ready: boolean } | null> => {
-    setUsingFolder(true)
-    try {
-      const result = await call<ImportFolderResult>(Ipc.modelsImportFolder)
-      if (result.canceled) return null
-      const current = useApp.getState()
-      if (current.settings?.onboardingReusePending || current.settings?.onboardingModelId) {
-        await current.saveSettings({ onboardingReusePending: false, onboardingModelId: null })
-      }
-      await refreshCatalog()
-      const status = await loadStatus()
-      const ready = status?.steps.find((step) => step.id === 'model')?.status === 'ok'
-      setModelError(null)
-      return {
-        ready,
-        message: ready
-          ? `${importFolderMessage(result)}，不用再下载模型`
-          : `${importFolderMessage(result)}，但它不是可以直接使用的 MOSS-Image 模型；仍需下载推荐模型`,
-      }
-    } finally {
-      setUsingFolder(false)
-    }
-  }, [loadStatus, refreshCatalog])
-
   const redetect = useCallback(async () => {
     setRedetecting(true)
     try {
@@ -245,5 +215,5 @@ export function useSetup(): {
   }, [gpu, loadPlan])
 
   const modelName = onboarding?.bundleName ?? '推荐模型'
-  return { view, progress, modelName, starting, start, installEngine, gpu, redetect, redetecting, chooseModelFolder, usingFolder, info }
+  return { view, progress, modelName, starting, start, installEngine, gpu, redetect, redetecting, info }
 }

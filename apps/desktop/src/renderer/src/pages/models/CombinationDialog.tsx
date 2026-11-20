@@ -5,7 +5,6 @@ import {
   combinationIds,
   missingBytes,
   SLOT_LABEL,
-  SLOT_ROLE,
   SLOTS,
   slotChoices,
   suggestedName,
@@ -17,9 +16,6 @@ import { call } from '../../lib/api'
 import { Button, Field, Input, Modal, Select, Spinner, useToast } from '../../components/ui'
 import { recommendedBundle, sizeText } from './logic'
 import type { ModelLocation } from './useModelLocation'
-
-/** The option that opens a file picker instead of choosing a part. */
-const PICK_FILE = '__pick-file'
 
 export type SlotValues = Record<SlotKey, string>
 
@@ -56,7 +52,7 @@ export function CombinationDialog({
   open: boolean
   catalog: Catalog
   location: ModelLocation
-  /** Slots filled from a folder the person picked. */
+  /** Slots filled from files the person imported. */
   initial?: Partial<Record<SlotKey, string | null>>
   onClose: () => void
   onSaved?: (combination: ModelCombination) => Promise<void>
@@ -79,22 +75,6 @@ export function CombinationDialog({
   const shownName = named ? name : suggested
   const need = missingBytes(combinationIds(values, catalog.models), catalog.models, location.isModelInstalled)
   const complete = SLOTS.every((slot) => values[slot])
-
-  async function pickFile(slot: SlotKey): Promise<void> {
-    try {
-      const path = await call<string | null>(Ipc.pickDialog, { kind: 'model', title: `选择${SLOT_LABEL[slot]}文件` })
-      if (!path) return
-      const role = SLOT_ROLE[slot] as 'dit' | 'text_encoder' | 'vae'
-      const result = await call<{ ids: Array<string | null> }>(Ipc.modelsRegisterScan, {
-        items: [{ path, role, layout: 'comfyui-single-file' }],
-      })
-      const id = result.ids[0]
-      if (!id) throw new Error('找不到这个文件')
-      setValues((current) => ({ ...current, [slot]: id }))
-    } catch (cause) {
-      toast.push(cause instanceof Error ? cause.message : String(cause), 'error')
-    }
-  }
 
   async function save(): Promise<void> {
     setBusy(true)
@@ -163,10 +143,7 @@ export function CombinationDialog({
                 <Select
                   id={`combination-${slot}`}
                   value={values[slot]}
-                  onValueChange={(value) => {
-                    if (value === PICK_FILE) void pickFile(slot)
-                    else setValues((current) => ({ ...current, [slot]: value }))
-                  }}
+                  onValueChange={(value) => setValues((current) => ({ ...current, [slot]: value }))}
                 >
                   <optgroup label="下载">
                     {downloads.map((choice) => (
@@ -175,14 +152,15 @@ export function CombinationDialog({
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="电脑上的文件">
-                    {own.map((choice) => (
-                      <option key={choice.id} value={choice.id}>
-                        {optionText(choice)}
-                      </option>
-                    ))}
-                    <option value={PICK_FILE}>选择文件…</option>
-                  </optgroup>
+                  {own.length ? (
+                    <optgroup label="电脑上的文件">
+                      {own.map((choice) => (
+                        <option key={choice.id} value={choice.id}>
+                          {optionText(choice)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
                 </Select>
               </div>
             )

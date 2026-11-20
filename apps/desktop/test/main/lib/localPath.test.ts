@@ -1,8 +1,9 @@
+import { existsSync } from 'node:fs'
 import { mkdir, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { expandPathVariables, isNetworkPath, linksToNetwork } from '@main/lib/localPath'
+import { expandPathVariables, isNetworkPath, linksToNetwork, missingPlace } from '@main/lib/localPath'
 import { useTempDir } from '@test/helpers/tempDir'
 
 const temp = useTempDir('mossstudio-local-path-')
@@ -57,5 +58,26 @@ describe('linksToNetwork', () => {
     expect(await linksToNetwork(join(temp(), 'remote'))).toBe(true)
     expect(await linksToNetwork(join(temp(), 'local'))).toBe(false)
     expect(await linksToNetwork(join(temp(), 'weights'))).toBe(false)
+  })
+})
+
+describe('missingPlace', () => {
+  it('says the file is gone when its folder is still there, or when only a folder inside the disk is gone', async () => {
+    expect(await missingPlace(join(temp(), 'moss_image_sft_int8.safetensors'))).toBe('file')
+    expect(await missingPlace(join(temp(), 'moved', 'models', 'moss_image_sft_int8.safetensors'))).toBe('file')
+  })
+
+  it('says the disk is missing when its mount folder or drive letter is gone', async () => {
+    const mountParent = ['/mnt', '/Volumes', '/media'].find((folder) => existsSync(folder))
+    const drive = 'QRSTUVWXYZ'.split('').find((letter) => !existsSync(`${letter}:\\`))
+    const path =
+      process.platform === 'win32'
+        ? `${drive}:\\Models\\moss.safetensors`
+        : `${mountParent}/mossstudio-unplugged-disk/models/moss.safetensors`
+    expect(await missingPlace(path)).toBe('drive')
+  })
+
+  it('never reads a network path', async () => {
+    expect(await missingPlace('\\\\nas\\models\\moss.safetensors')).toBe('file')
   })
 })

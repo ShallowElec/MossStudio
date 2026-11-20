@@ -29,7 +29,7 @@ import type { ParseView } from './CardStatus'
 import { PARSE_CHECKING } from '@shared/gbc'
 import { useShell } from '../../lib/shell'
 import { newCanvasMenu } from './connect'
-import { isImageFile } from './imageNodes'
+import { boardTakesDrag, isImageFile, sortBoardDrop } from './imageNodes'
 import { cardJobView, type CardJobView } from './jobStatus'
 import { LinkMenu } from './LinkMenu'
 import { linkSourceImage, type LinkRole } from './links'
@@ -115,6 +115,10 @@ export interface BoardProps {
   onRemoveLink: (canvasId: string, role: LinkRole, at?: number | string) => void
   /** Picture files dropped or pasted onto the board, at a board point. */
   onImportImages: (files: File[], at: { x: number; y: number }) => void
+  /** Model files or folders dropped on the board: they go to 导入模型. */
+  onImportModels: (files: File[]) => void
+  /** A drop the board cannot use (not a picture, not a model): said out loud, never dropped silently. */
+  onRefuseDrop: () => void
   /** A painted mask to store for a canvas (null: nothing painted any more). */
   onSaveMask: (canvasId: string, png: Uint8Array | null) => void
   /** What an empty input slot's menu does (add from the board or a file, choose a control adapter). */
@@ -1000,11 +1004,29 @@ export function Board(props: BoardProps): React.JSX.Element {
       }}
       onDragOver={(event) => {
         if (![...event.dataTransfer.types].includes('Files')) return
+        // The board answers every file drag itself, so the window's import layer stays away; what it cannot take shows no copy cursor.
         event.preventDefault()
-        event.dataTransfer.dropEffect = 'copy'
+        const types = [...event.dataTransfer.items].filter((item) => item.kind === 'file').map((item) => item.type)
+        event.dataTransfer.dropEffect = boardTakesDrag(types) ? 'copy' : 'none'
       }}
       onDrop={(event) => {
-        if (importFiles(event.dataTransfer.files, boardPoint(event.clientX, event.clientY))) event.preventDefault()
+        if (![...event.dataTransfer.types].includes('Files')) return
+        event.preventDefault()
+        const entries = [...event.dataTransfer.items].filter((item) => item.kind === 'file')
+        const files = [...event.dataTransfer.files].map((file, index) => ({
+          file,
+          type: file.type,
+          name: file.name,
+          folder: Boolean(entries[index]?.webkitGetAsEntry()?.isDirectory),
+        }))
+        const { images, models, other } = sortBoardDrop(files)
+        if (images.length)
+          props.onImportImages(
+            images.map((item) => item.file),
+            boardPoint(event.clientX, event.clientY),
+          )
+        if (models.length) props.onImportModels(models.map((item) => item.file))
+        if (other.length) props.onRefuseDrop()
       }}
       onPaste={onPaste}
       onContextMenu={openMenu}

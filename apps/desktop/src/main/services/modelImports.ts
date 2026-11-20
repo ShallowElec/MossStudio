@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 export type ImportedModelRole = 'full' | 'dit' | 'text_encoder' | 'vae' | 'support'
 
@@ -17,6 +17,12 @@ export interface ImportedModelFile {
   role: ImportedModelRole
   /** Set by a directory scan: a diffusers folder vs a single ComfyUI weights file. */
   layout?: 'comfyui-single-file' | 'diffusers-folder'
+  /** What the engine's `inspect` named the weights when the file was imported. */
+  precision?: string
+  /** The catalog part this file is (same name and size): it stands in for that part instead of being listed on its own. */
+  catalogId?: string
+  /** The engine's `inspect` recognised the file in this role (导入模型); older registrations went by folder names. */
+  inspected?: boolean
   importedAt: string
 }
 
@@ -25,14 +31,7 @@ interface ImportIndex {
   models: ImportedModelFile[]
 }
 
-export interface ImportFolderResult {
-  added: number
-  duplicates: number
-}
-
-const modelExtensions = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.gguf', '.onnx'])
 const skippedDirectories = new Set(['.git', '.venv', 'venv', 'node_modules', '__pycache__', 'cache', 'input', 'output', 'temp'])
-const maxDepth = 12
 const maxFiles = 5000
 
 function isImportedModelFile(value: unknown): value is ImportedModelFile {
@@ -50,6 +49,9 @@ function isImportedModelFile(value: unknown): value is ImportedModelFile {
     Number.isFinite(model.mtimeMs) &&
     ['full', 'dit', 'text_encoder', 'vae', 'support'].includes(model.role ?? '') &&
     (model.layout === undefined || ['comfyui-single-file', 'diffusers-folder'].includes(model.layout)) &&
+    (model.precision === undefined || typeof model.precision === 'string') &&
+    (model.catalogId === undefined || typeof model.catalogId === 'string') &&
+    (model.inspected === undefined || typeof model.inspected === 'boolean') &&
     typeof model.importedAt === 'string'
   )
 }
@@ -84,38 +86,6 @@ async function writeImportedModels(indexFile: string, models: ImportedModelFile[
   }
 }
 
-function roleFor(relativePath: string): ImportedModelRole {
-  const directories = relativePath
-    .split(/[\\/]/)
-    .slice(0, -1)
-    .map((part) => part.toLowerCase())
-  if (directories.some((part) => /^(vae|vaes)$/.test(part))) return 'vae'
-  if (directories.some((part) => /^(text[_-]?encoders?|clip)$/.test(part))) return 'text_encoder'
-  if (directories.some((part) => /^(diffusion[_-]?models?|unet|checkpoints?)$/.test(part))) return 'dit'
-  return 'full'
-}
-
-async function scanDirectory(root: string): Promise<string[]> {
-  const found: string[] = []
-  async function visit(directory: string, depth: number): Promise<void> {
-    if (depth > maxDepth) return
-    const entries = await readdir(directory, { withFileTypes: true })
-    entries.sort((a, b) => a.name.localeCompare(b.name))
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (!entry.name.startsWith('.') && !skippedDirectories.has(entry.name.toLowerCase())) {
-          await visit(join(directory, entry.name), depth + 1)
-        }
-      } else if (entry.isFile() && modelExtensions.has(extname(entry.name).toLowerCase())) {
-        found.push(join(directory, entry.name))
-        if (found.length > maxFiles) throw new Error(`所选目录中模型文件超过 ${maxFiles} 个，请选择更具体的文件夹`)
-      }
-    }
-  }
-  await visit(root, 0)
-  return found
-}
-
 function hashFile(file: string): Promise<string> {
   return new Promise((resolveHash, reject) => {
     const hash = createHash('sha256')
@@ -124,57 +94,6 @@ function hashFile(file: string): Promise<string> {
     stream.on('end', () => resolveHash(hash.digest('hex')))
     stream.on('error', reject)
   })
-}
-
-export async function importModelFolder(directory: string, indexFile: string): Promise<ImportFolderResult> {
-  const root = await realpath(resolve(directory))
-  if (!(await stat(root)).isDirectory()) throw new Error('请选择模型文件夹')
-  const files = await scanDirectory(root)
-  if (files.length === 0) throw new Error('所选目录中没有可导入的模型文件')
-
-  const models = await readImportedModels(indexFile)
-  const byHash = new Map(models.filter((model) => model.sha256).map((model) => [model.sha256 as string, model]))
-  let added = 0
-  let duplicates = 0
-  for (const file of files) {
-    const before = await stat(file)
-    if (!before.isFile() || before.size <= 0) continue
-    const sha256 = await hashFile(file)
-    const after = await stat(file)
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
-      throw new Error(`模型文件在导入时发生变化：${relative(root, file)}`)
-    }
-    const existing = byHash.get(sha256)
-    if (existing) {
-      try {
-        if (existing.path === file || ((await stat(existing.path)).isFile() && (await hashFile(existing.path)) === sha256)) {
-          duplicates += 1
-          continue
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-    }
-    const relativePath = relative(root, file)
-    const record: ImportedModelFile = {
-      id: `local-file-${sha256.slice(0, 20)}`,
-      name: basename(file),
-      path: file,
-      relativePath,
-      sha256,
-      size: after.size,
-      mtimeMs: after.mtimeMs,
-      role: roleFor(relativePath),
-      importedAt: new Date().toISOString(),
-    }
-    if (existing) models.splice(models.indexOf(existing), 1, record)
-    else models.push(record)
-    byHash.set(sha256, record)
-    added += 1
-  }
-  if (!added && !duplicates) throw new Error('没有找到可读取的非空模型文件')
-  await writeImportedModels(indexFile, models)
-  return { added, duplicates }
 }
 
 /* ------------------------------------------------------------------ */
@@ -297,7 +216,8 @@ export function diffusersFolderName(directory: string, flavor: DiffusersFolderIn
 
 export async function removeImportedModel(indexFile: string, id: string): Promise<void> {
   const models = await readImportedModels(indexFile)
-  const next = models.filter((model) => model.id !== id)
+  // A catalog part's own copy is known by the part's id.
+  const next = models.filter((model) => model.id !== id && model.catalogId !== id)
   if (next.length === models.length) throw new Error('本地导入模型记录不存在')
   await writeImportedModels(indexFile, next)
 }
@@ -308,6 +228,9 @@ export interface ScannedRegistration {
   name?: string
   relativePath?: string
   layout?: 'comfyui-single-file' | 'diffusers-folder'
+  precision?: string
+  catalogId?: string
+  inspected?: boolean
 }
 
 export interface RegisterScanResult {
@@ -373,6 +296,9 @@ export async function registerScannedModels(indexFile: string, items: ScannedReg
       role: item.role,
       importedAt: existing?.importedAt ?? new Date().toISOString(),
       ...(layout ? { layout } : {}),
+      ...(item.precision ? { precision: item.precision } : {}),
+      ...(item.catalogId ? { catalogId: item.catalogId } : {}),
+      ...(item.inspected || existing?.inspected ? { inspected: true } : {}),
       ...(existing?.sha256 ? { sha256: existing.sha256 } : {}),
     }
     if (existing) {
@@ -387,6 +313,34 @@ export async function registerScannedModels(indexFile: string, items: ScannedReg
   }
   if (result.added || result.updated) await writeImportedModels(indexFile, models)
   return result
+}
+
+/**
+ * 重新找到…: the record keeps its id (so every combination and 画面 using it keeps
+ * working) and now points at the file where it is.
+ */
+export async function relocateImportedModel(indexFile: string, id: string, path: string): Promise<ImportedModelFile> {
+  const models = await readImportedModels(indexFile)
+  // A catalog part's own copy is known by the part's id.
+  const existing = models.find((model) => model.id === id || model.catalogId === id)
+  if (!existing) throw new Error('本地导入模型记录不存在')
+  const actual = await realpath(resolve(path))
+  const info = await stat(actual)
+  if (!info.isFile() || info.size <= 0) throw new Error('请选择模型文件')
+  const record: ImportedModelFile = {
+    ...existing,
+    name: basename(actual),
+    path: actual,
+    relativePath: basename(actual),
+    size: info.size,
+    mtimeMs: info.mtimeMs,
+  }
+  delete record.sha256
+  await writeImportedModels(
+    indexFile,
+    models.map((model) => (model === existing ? record : model)),
+  )
+  return record
 }
 
 export async function verifyImportedModelFile(model: ImportedModelFile, sha256: string, size: number): Promise<boolean> {

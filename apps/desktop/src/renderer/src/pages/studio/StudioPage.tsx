@@ -67,6 +67,7 @@ import { dropRun, givesPicture, isActiveRun, keepCardsShown, pictureLink, pinRun
 import { resolveJobInputs } from './jobInputs'
 import { useGenerate } from './useGenerate'
 import { useInputImport } from './useInputImport'
+import { droppedPaths, useModelImport } from '../../lib/modelImport'
 import { useStudioProject } from './useStudioProject'
 import { usePictureRegions } from './usePictureRegions'
 
@@ -133,12 +134,14 @@ export function StudioPage(): React.JSX.Element {
   const settings = useApp((state) => state.settings)
   const engineReadiness = useApp((state) => state.engineReadiness)
   const update = useApp((state) => state.update)
-  const importAdapters = useApp((state) => state.importAdapters)
+  const pickModelImport = useModelImport((state) => state.pick)
+  const startModelImport = useModelImport((state) => state.start)
   const cancelJob = useApp((state) => state.cancelJob)
   const studioBackground = useApp((state) => state.studioBackground)
   const setStudioBackground = useApp((state) => state.setStudioBackground)
   const reuseRequest = useApp((state) => state.studioReuseRequest)
   const tryRequest = useApp((state) => state.studioTryRequest)
+  const modelRequest = useApp((state) => state.studioModelRequest)
 
   const root = useRef<HTMLDivElement>(null)
   const board = useRef<BoardHandle>(null)
@@ -362,6 +365,21 @@ export function StudioPage(): React.JSX.Element {
     select(made.layout.id)
     requestAnimationFrame(() => board.current?.fit())
   }, [loaded, tryRequest, canvasesRef, setCanvases, select])
+
+  // 导入模型 › 去创作: the selected 画面 runs with the imported model, and it becomes the one picked next time.
+  useEffect(() => {
+    if (!loaded || !modelRequest) return
+    const id = useApp.getState().takeStudioModelRequest()
+    const to = id ? catalog?.bundles.find((item) => item.id === id) : undefined
+    if (!id || !to) return
+    setPreferredBundleId(id)
+    writeStorage(BUNDLE_KEY, id)
+    const target = canvasesRef.current.find((canvas) => canvas.id === selectedRef.current)
+    if (target?.kind === 'layout') {
+      const from = resolveBundle(catalog, target.modelBundleId, id).bundle
+      updateCanvas(target.id, (canvas) => ({ ...canvas, ...samplingForBundle(canvas, from, to), modelBundleId: id }))
+    }
+  }, [loaded, modelRequest, catalog, canvasesRef, selectedRef, updateCanvas])
 
   const changeSelected = (update: (canvas: ProjectCanvas) => ProjectCanvas): void => {
     if (selected) project.updateCanvas(selected.id, update)
@@ -969,6 +987,14 @@ export function StudioPage(): React.JSX.Element {
           onImportImages={(files, at) => {
             void boardAssets.importImages(files, at)
           }}
+          onImportModels={(files) => {
+            const paths = droppedPaths(files)
+            if (paths.length)
+              void startModelImport(paths).catch((error: unknown) =>
+                toast.push(error instanceof Error ? error.message : String(error), 'error'),
+              )
+          }}
+          onRefuseDrop={() => toast.push('这里只能放图片或模型文件', 'info')}
           onSaveMask={(canvasId, png) => {
             void boardAssets.saveMask(canvasId, png)
           }}
@@ -1123,20 +1149,11 @@ export function StudioPage(): React.JSX.Element {
           })
         }
         onImport={async () => {
-          const imported = await importAdapters().catch((error: unknown) => {
-            toast.push(error instanceof Error ? error.message : String(error), 'error')
-            return []
-          })
-          if (!imported.length) return
-          // The user opened the picker to use what they import; select it.
-          changeSelected((canvas) => ({
-            ...canvas,
-            adapters: normalizeCanvasAdapters([
-              ...normalizeCanvasAdapters(canvas.adapters),
-              ...imported.map((entry) => ({ id: entry.id, strength: ADAPTER_STRENGTH_DEFAULT })),
-            ]),
-          }))
-          toast.push(`已导入 ${imported.length} 个 LoRA`, 'success')
+          // The same import as everywhere: the engine recognises the files and puts each where it belongs.
+          setAdapterPickerOpen(false)
+          await pickModelImport('files').catch((error: unknown) =>
+            toast.push(error instanceof Error ? error.message : String(error), 'error'),
+          )
         }}
       />
     </div>

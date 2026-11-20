@@ -172,38 +172,62 @@ describe('first run', () => {
     expect((await app.calls<{ onboardingState?: string }>('settings:update')).at(-1)).toEqual({ onboardingState: 'active' })
   })
 
-  it('已有模型文件… uses a local folder instead of the 25 GB download', async () => {
+  it('使用已有模型 opens 导入模型: a model folder used where it is replaces the 25 GB download', async () => {
     const page = await app.open({ scenario: 'firstRun', route: '/setup', defer: true })
     await page.evaluate(() => {
-      window.__mock.state.localModelFolder = {
-        path: '/workspace/Models/MOSS-Image/sft',
-        name: 'MOSS-Image SFT（sft）',
-        bundleId: 'moss-sft',
-      }
+      window.__mock.state.importFiles = window.__mock.fixtures.importFixtures()
+      window.__mock.state.importPick = ['/workspace/Models/MOSS-Image/sft']
     })
     await app.start()
     await page.getByRole('button', { name: '使用已有模型', exact: true }).click()
-    await page.getByRole('button', { name: '已有模型文件…' }).click()
-    await expect.poll(() => app.calls('models:import-folder').then((calls) => calls.length)).toBe(1)
-    await expect.poll(() => page.getByText(/已在原位置使用 MOSS-Image SFT（sft），不用再下载模型/).isVisible()).toBe(true)
-    // The quiet action leaves once the model is there, and only the runtime is left to download.
-    await expect.poll(() => page.getByRole('button', { name: '已有模型文件…' }).count()).toBe(0)
+    const idle = page.getByRole('dialog', { name: '导入模型' })
+    await expect.poll(() => idle.isVisible()).toBe(true)
+    await idle.getByRole('button', { name: '选择文件夹…' }).click()
+    // A model folder is read without the engine, so it is recognised before one is installed.
+    const done = page.getByRole('dialog', { name: '可以用了：MOSS-Image SFT' })
+    await expect.poll(() => done.isVisible()).toBe(true)
+    await done.getByRole('button', { name: '用这个模型' }).click()
+    await expect.poll(() => page.evaluate(() => window.__mock.state.settings.onboardingModelId)).toBe('moss-sft')
+    // Only the runtime is left to download.
     await expect.poll(() => page.locator('[data-setup-summary]').innerText()).toMatch(/下载约 \d+ MB/)
     await page.getByRole('button', { name: '开始下载' }).click()
     await expect.poll(() => app.calls('mossinfer:download').then((calls) => calls.length)).toBe(1)
     expect(await app.calls('models:download')).toEqual([])
   })
 
-  it('a folder that is not a usable MOSS-Image keeps the download, and says why', async () => {
+  it('a file that is not a MOSS-Image model says why, and the download stays', async () => {
     const page = await app.open({ scenario: 'firstRun', route: '/setup', defer: true })
     await page.evaluate(() => {
-      window.__mock.state.localModelFolder = { path: '/data/my-finetune', name: 'my-finetune', bundleId: 'none' }
+      window.__mock.state.importFiles = window.__mock.fixtures.importFixtures()
+      window.__mock.state.importPick = ['/drop/sd_xl_base_1.0.safetensors']
+      // An engine to ask: the setup page installs one before weight files can be checked.
+      window.__mock.state.engineReadiness = window.__mock.fixtures.engineReadyFixture()
     })
     await app.start()
     await page.getByRole('button', { name: '使用已有模型', exact: true }).click()
-    await page.getByRole('button', { name: '已有模型文件…' }).click()
-    await expect.poll(() => page.getByText(/不是可以直接使用的 MOSS-Image 模型/).isVisible()).toBe(true)
-    expect(await page.getByRole('button', { name: '已有模型文件…' }).count()).toBe(1)
+    await page.getByRole('dialog', { name: '导入模型' }).getByRole('button', { name: '选择文件…' }).click()
+    const done = page.getByRole('dialog', { name: '识别完了' })
+    await expect.poll(() => done.getByText('sd_xl_base_1.0 不是 MOSS-Image 模型，MossStudio 用不了它。').isVisible()).toBe(true)
+    expect(await done.getByRole('button', { name: '用这个模型' }).count()).toBe(0)
+    await done.getByRole('button', { name: '留在这里' }).click()
+    expect(await page.evaluate(() => window.__mock.state.settings.onboardingModelId)).toBeFalsy()
+    expect(await page.getByRole('button', { name: '开始下载' }).count()).toBe(1)
+  })
+
+  it('a weight file waits for the engine: 装引擎 prepares it right there', async () => {
+    const page = await app.open({ scenario: 'firstRun', route: '/setup', theme: 'light', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.importFiles = window.__mock.fixtures.importFixtures()
+      window.__mock.state.importPick = ['/drop/moss_image_sft_int8_convrot.safetensors']
+    })
+    await app.start()
+    await page.getByRole('button', { name: '使用已有模型', exact: true }).click()
+    await page.getByRole('dialog', { name: '导入模型' }).getByRole('button', { name: '选择文件…' }).click()
+    const waiting = page.getByRole('dialog', { name: '正在识别 1 个文件…' })
+    await expect.poll(() => waiting.getByText('装好引擎后才能认出这些文件').isVisible()).toBe(true)
+    await app.screenshot('setup-import-waiting-engine-light')
+    await waiting.getByRole('button', { name: '装引擎' }).click()
+    await expect.poll(() => app.calls('mossinfer:download').then((calls) => calls.length)).toBe(1)
   })
 
   it('keeps setup in reuse mode when the engine is being prepared before choosing weights', async () => {

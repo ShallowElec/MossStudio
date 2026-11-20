@@ -21,6 +21,7 @@
 import { bestBundleFor, cliGpuUuids, generationGpus, isFileBundle } from '@shared/bundleFit'
 import { Events, Ipc, type EventChannel } from '@shared/channels'
 import { combinationBundle } from '@shared/modelCombos'
+import { isModelFileName } from '@shared/modelImport'
 import { isSharedModelId } from '@shared/sharedModels'
 import { MANGA_SCHEMA_VERSION, seriesSummary, type MangaSeries, type MangaSeriesSave } from '@shared/manga/model'
 import type { AiChatInput, AiConversationInfo, AiMessage } from '@shared/ai'
@@ -51,7 +52,6 @@ import {
   FIXTURE_MODELS_PATH,
   FIXTURE_NOW,
   GiB,
-  controlAdapterFixture,
   localHostFixture,
   downloadFixture,
   gbcPictureFixture,
@@ -65,11 +65,13 @@ import {
 import { scenario, type MockBackendState, type ScenarioName } from './scenarios'
 import { addInstallHandlers } from './install'
 import { addTrainingHandlers } from './training'
+import { addModelImportHandlers, finishModelImport } from './modelImport'
 
 export * from './fixtures'
 export * from './scenarios'
 export * from './install'
 export * from './training'
+export * from './modelImport'
 
 export type CloverBridge = Window['clover']
 
@@ -121,6 +123,8 @@ export interface MockBackend {
   playJob(job: JobRecord, options?: JobLifecycleOptions): JobRecord[]
   /** Emit queued → running → verifying → done (or error) for a download task. */
   playDownload(task: DownloadTask, options?: { error?: string }): DownloadTask[]
+  /** Let an import held with `state.importHold` finish: every file gets the engine's verdict from `state.importFiles`. */
+  finishImport(): void
   install(target?: { clover?: CloverBridge }): () => void
   reset(next?: ScenarioName | MockBackendState): void
 }
@@ -481,72 +485,7 @@ function defaultHandlers(): Map<string, Handler> {
     ctx.emit(Events.settingsChanged, ctx.state.settings)
     return syncSources(ctx)
   })
-  // 添加整个模型文件夹: like main with a MOSS-Image SFT diffusers folder picked
-  // (state.localModelFolder; null = the dialog was canceled). Its bundle's components become ready.
-  h.set(Ipc.modelsImportFolder, (_, { state }) => {
-    const folder = state.localModelFolder
-    if (!folder) return { canceled: true, added: 0, duplicates: 0 }
-    const bundle = state.catalog.bundles.find((item) => item.id === folder.bundleId)
-    const ids = new Set(bundle ? [...Object.values(bundle.components), bundle.support] : [])
-    state.catalog = {
-      ...state.catalog,
-      models: state.catalog.models.map((model) =>
-        ids.has(model.id)
-          ? {
-              ...model,
-              installed: true,
-              installState: 'ready' as const,
-              installedBytes: model.sizeBytes,
-              localPath: folder.path,
-              tags: [...model.tags, 'local-folder'],
-            }
-          : model,
-      ),
-    }
-    return { canceled: false, added: 1, duplicates: 0, folders: [folder.name] }
-  })
-  // 用电脑上的模型文件…: a complete model folder (state.localModelFolder) is added as with
-  // import-folder; loose files (state.localModelFiles) become local entries for 自己组合.
-  h.set(Ipc.modelsUseFolder, (_, ctx) => {
-    const { state, emit } = ctx
-    if (state.localModelFolder) {
-      const imported = h.get(Ipc.modelsImportFolder)!(null, ctx) as Record<string, unknown>
-      emit(Events.modelsChanged, null)
-      return { ...imported, slots: null }
-    }
-    const files = state.localModelFiles
-    if (!files) return { canceled: true, added: 0, duplicates: 0, slots: null }
-    const entries: ModelEntry[] = files.map((file, index) => ({
-      id: `local-scan-${index}`,
-      name: file.path.split('/').at(-1)!,
-      provider: 'local',
-      repo: file.path,
-      revision: 'local',
-      role: file.role,
-      format: 'comfyui',
-      family: 'local',
-      precision: 'local',
-      license: 'local',
-      tags: ['local-import', 'comfyui', 'unhashed'],
-      localPath: file.path,
-      installState: 'ready',
-      installed: true,
-      installedBytes: 5_400_000_000,
-      sizeBytes: 5_400_000_000,
-    }))
-    state.catalog = {
-      ...state.catalog,
-      models: [...state.catalog.models.filter((model) => !entries.some((entry) => entry.id === model.id)), ...entries],
-    }
-    emit(Events.modelsChanged, null)
-    const idOf = (role: ModelEntry['role']) => entries.find((entry) => entry.role === role)?.id ?? null
-    return {
-      canceled: false,
-      added: entries.length,
-      duplicates: 0,
-      slots: entries.length ? { dit: idOf('dit'), textEncoder: idOf('text_encoder'), vae: idOf('vae') } : null,
-    }
-  })
+  addModelImportHandlers((channel, handler) => h.set(channel, handler))
   h.set(Ipc.modelsSaveCombination, (payload, { state, emit }) => {
     const input = p<{ id?: string; name: string; components: ModelCombination['components'] }>(payload)
     const combination: ModelCombination = {
@@ -629,7 +568,6 @@ function defaultHandlers(): Map<string, Handler> {
       }
     return null
   })
-  h.set(Ipc.modelsImportAdapter, () => ({ canceled: true, adapters: [] }))
   h.set(Ipc.modelsRemoteInventory, () => ({ root: '/fixture/models', files: 0, models: [], adapters: [] }))
   h.set(Ipc.modelsRemoteDelete, (payload) => ({
     removed: p<{ ids: string[] }>(payload).ids.map((id) => `/fixture/models/${id}`),
@@ -854,15 +792,6 @@ function defaultHandlers(): Map<string, Handler> {
     return { path: `/fixture/projects/${projectId}/assets/mask-${canvasId}.png` }
   })
   h.set(Ipc.controlAdaptersList, (_, { state }) => state.controlAdapters)
-  h.set(Ipc.controlAdaptersAdd, (payload, { state, emit }) => {
-    const { path } = p<{ path: string }>(payload)
-    if (!/\.safetensors$/i.test(path)) throw new MockIpcError('E_NOT_CONTROL_ADAPTER', '这个文件不是控制适配器')
-    const name = path.split(/[\\/]/).pop()!
-    const entry = controlAdapterFixture({ id: `control-${state.controlAdapters.length + 1}`, name, path })
-    state.controlAdapters = [...state.controlAdapters.filter((item) => item.path !== path), entry]
-    emit(Events.modelsChanged, null)
-    return entry
-  })
   h.set(Ipc.controlAdaptersRemove, (payload, { state, emit }) => {
     const { id } = p<{ id: string }>(payload)
     state.controlAdapters = state.controlAdapters.filter((item) => item.id !== id)
@@ -1074,6 +1003,8 @@ export function createMockBackend(initial: ScenarioName | MockBackendState = 're
       acrylic: options.bridge?.acrylic ?? false,
       windowKind: options.bridge?.windowKind ?? 'launcher',
       channel: options.bridge?.channel ?? 'dev',
+      // A dropped model file is at /drop/<name>; a picture has no path, like a pasted one, so the board reads its bytes.
+      pathForFile: (file: File) => (isModelFileName(file.name) ? `/drop/${file.name}` : ''),
       on(channel, callback) {
         const set = listeners.get(channel) ?? new Set()
         set.add(callback)
@@ -1209,6 +1140,10 @@ export function createMockBackend(initial: ScenarioName | MockBackendState = 're
         backend.emit(Events.download, step)
       }
       return sequence
+    },
+    finishImport() {
+      backend.state.importHold = false
+      finishModelImport(backend.state, (event, data) => backend.emit(event, data))
     },
     install(target = globalThis.window as unknown as { clover?: CloverBridge }) {
       const previous = target.clover

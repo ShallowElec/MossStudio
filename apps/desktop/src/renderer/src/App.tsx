@@ -7,6 +7,7 @@ import { useShell } from './lib/shell'
 import type { WindowIntent } from './lib/windows'
 import { useApp } from './store'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { ModelImportHost } from './components/ModelImport'
 import { ToastProvider, cn, useToast } from './components/ui'
 import { ActivityPanel } from './components/shell/ActivityPanel'
 import { Rail } from './components/shell/Rail'
@@ -134,6 +135,7 @@ function StudioShell(): React.JSX.Element {
           <ActivityPanel />
         </main>
       </div>
+      <ModelImportHost />
     </div>
   )
 }

@@ -540,3 +540,57 @@ describe('bundleBlocker with shared folders', () => {
     expect(bundleBlocker(folder, models, { remote: false, gpus: [cli], cliGpus: new Set(['GPU-CLI']) })).toBeNull()
   })
 })
+
+describe('a model whose own file moved', () => {
+  const own = (patch: Partial<ModelEntry> = {}): ModelEntry => ({
+    id: 'local-scan-1',
+    name: 'moss_image_sft_int8.safetensors',
+    provider: 'local',
+    repo: 'E:\\Models\\moss_image_sft_int8.safetensors',
+    revision: 'local',
+    role: 'dit',
+    format: 'comfyui',
+    precision: 'int8',
+    license: 'local',
+    tags: ['local-import'],
+    localPath: 'E:\\Models\\moss_image_sft_int8.safetensors',
+    installState: 'error',
+    missingFile: 'drive',
+    installed: false,
+    installedBytes: 0,
+    sizeBytes: 5_413_698_958,
+    ...patch,
+  })
+  const combination = (dit: string): ModelBundle => ({
+    id: 'combo-1',
+    name: '我的 INT8',
+    description: '',
+    components: { dit, textEncoder: 'qwen35-comfy-int8_convrot', vae: 'flux2-vae-comfy-small' },
+    support: 'moss-runtime-config',
+    custom: true,
+  })
+  const here = catalog(['qwen35-comfy-int8_convrot', 'flux2-vae-comfy-small', 'moss-runtime-config']).models
+
+  it('says 找不到文件 and offers no download (B1: it said 还差 1 个文件 · 下载 and fetched another file)', () => {
+    const view = bundleView(combination('local-scan-1'), [...here, own()], [])
+    expect(view).toMatchObject({ status: 'lost', stateText: '找不到文件', action: null, downloadBytes: 0 })
+    expect(bundleTone(view.status)).toBe('warn')
+    expect(bundleProgress(view)).toBeNull()
+  })
+
+  it('keeps a combination whose shared file was deleted on the page (B2: it disappeared)', () => {
+    const views = [...catalog().bundles, combination('shared-deadbeef')].map((item) => bundleView(item, here, []))
+    expect(views.at(-1)).toMatchObject({ status: 'lost', stateText: '找不到文件' })
+    const sections = modelSections(views, here, { remote: false, gpus: [] })
+    expect(sections.mine.map((view) => view.bundle.id)).toEqual(['combo-1'])
+  })
+
+  it('lists what is here, own models and moved ones under 我的模型, the rest under 推荐模型', () => {
+    const models = [...catalog(SFT).models, own()]
+    const views = [...catalog().bundles, combination('local-scan-1')].map((item) => bundleView(item, models, []))
+    const sections = modelSections(views, models, { remote: false, gpus: [] }, 'moss-sft-int8')
+    expect(sections.featured?.bundle.id).toBe('moss-sft-int8')
+    expect(sections.mine.map((view) => view.bundle.id)).toEqual(['moss-sft', 'combo-1'])
+    expect(sections.certified.map((view) => view.bundle.id)).not.toContain('moss-sft')
+  })
+})

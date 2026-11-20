@@ -329,11 +329,42 @@ describe('shared model index', () => {
       expect.arrayContaining([
         { path: join(folder, 'ready.safetensors'), name: 'ready.safetensors', size: 6, role: 'lora', state: 'available' },
         { path: join(folder, 'pending.safetensors'), name: 'pending.safetensors', size: 6, role: 'lora', state: 'pending' },
-        { path: join(folder, 'unavailable.safetensors'), name: 'unavailable.safetensors', size: 6, role: 'lora', state: 'incompatible' },
+        // B7: an incompatible file says why, in the words the import uses.
+        {
+          path: join(folder, 'unavailable.safetensors'),
+          name: 'unavailable.safetensors',
+          size: 6,
+          role: 'lora',
+          state: 'incompatible',
+          reason: 'unavailable 不是给 MOSS-Image 用的，MossStudio 用不了它。',
+        },
       ]),
     )
     expect(sharedAdapters().map(({ name }) => name)).toEqual(['ready.safetensors'])
     expect(status?.issues).toEqual([expect.stringContaining('engine busy')])
+  })
+
+  it('asks the engine about a GGUF main model instead of refusing its format', async () => {
+    // B9: every .gguf file was listed as incompatible without asking the engine, which converts GGUF DiTs itself.
+    const base = temp()
+    const folder = join(base, 'models', 'diffusion_models')
+    const server = join(base, 'moss-server')
+    await mkdir(folder, { recursive: true })
+    await writeFile(server, 'engine')
+    await writeFile(join(folder, 'moss-image-sft-Q4_K_M.gguf'), 'gguf-weights')
+    await writeFile(join(folder, 'moss-image-sft-Q3_K.gguf'), 'gguf-weights')
+    mocks.server = server
+    mocks.inspect.mockImplementation(async (_server: string, _method: string, { path }: { path: string }) =>
+      path.includes('Q4_K_M')
+        ? { kind: 'dit', loadable: true, precision: 'int8', quantization: 'GGUF Q4_K + Q6_K + BF16 + F32, runs as INT8 ConvRot' }
+        : { kind: 'unknown', loadable: false, note: 'GGUF tensors of types the engine does not read: Q3_K' },
+    )
+    const settings = settingsFixture({ modelsRoot: join(base, 'moss-studio'), modelSources: [{ id: 'gguf', kind: 'custom', path: base }] })
+    await refreshModelSources(settings)
+    const [status] = (await modelSourcesView(settings, 'connected')).sources
+    expect(status).toMatchObject({ available: 1, incompatible: 1 })
+    expect(sharedModels()).toEqual([expect.objectContaining({ name: 'moss-image-sft-Q4_K_M.gguf', role: 'dit', precision: 'int8' })])
+    expect(status?.files.find((file) => file.state === 'incompatible')?.reason).toBe('这种压缩格式引擎读不了。')
   })
 
   it('uses weights where they are, lists each once, and keeps the same id after a folder comes back', async () => {
@@ -616,11 +647,13 @@ describe('shared model scan', () => {
       settingsFixture({ modelsRoot: join(temp(), 'moss'), modelSources: [{ id: 'one', kind: 'custom', path: root }] }),
     )
     const [shared] = sharedModels()
-    const registered = { ...shared!, id: 'local-scan-dit', tags: ['local-import'] }
+    const registered = { ...shared!, id: 'local-scan-dit', tags: ['local-import', 'engine-checked'] }
     const models = [registered, shared!]
     expect(shared!.localPath).toBe(file)
     expect(duplicatesImportedFile(shared!, models)).toBe(true)
     expect(slotChoices(models, 'dit').map((choice) => choice.id)).toEqual(['local-scan-dit'])
+    // One registered by its folder name alone is not offered, so the shared one is.
+    expect(slotChoices([{ ...registered, tags: ['local-import'] }, shared!], 'dit').map((choice) => choice.id)).toEqual([shared!.id])
     // A combination saved with the shared id still finds its part.
     const components = { dit: shared!.id, textEncoder: 'qwen35-encoder', vae: 'flux2-vae-small' }
     expect(bundleWeightProblem({ components }, [...models, { id: 'qwen35-encoder' }, { id: 'flux2-vae-small' }])).toBeNull()

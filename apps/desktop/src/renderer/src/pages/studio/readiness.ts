@@ -11,6 +11,7 @@ import type {
 import { bundleGpusProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle } from '@shared/bundleFit'
 import { adapterStatuses, normalizeCanvasAdapters } from '@shared/adapters'
 import { CLI_ENGINE_LABEL, cliBundleProblem } from '@shared/cliEngine'
+import { lostFile, lostFileText } from '@shared/modelImport'
 import { compileCanvasPrompt, type CompiledPrompt } from './prompt'
 
 /** Problems with a canvas's pictures and sampling choices (see jobInputs.ts). */
@@ -28,6 +29,7 @@ export interface Blocker {
     | 'model-none'
     | 'model-missing'
     | 'model-incomplete'
+    | 'model-file'
     | 'model-engine'
     | 'engine'
     | 'remote-path'
@@ -137,12 +139,23 @@ export function deriveReadiness(input: ReadinessInput): Readiness {
     } else if (!input.bundle.bundle) {
       blockers.push({ id: 'model-none', message: '还没有可用的模型', action: toModels })
     } else if (!input.bundle.installed) {
-      blockers.push({ id: 'model-incomplete', message: `「${input.bundle.bundle.name}」还没有下载完`, action: toModels })
+      // The person's own file that moved is found again, not downloaded.
+      const lost = lostFile(input.bundle.bundle, input.catalog.models)
+      blockers.push(
+        lost
+          ? {
+              id: 'model-file',
+              message: lostFileText(input.bundle.bundle.name, lost),
+              action: { label: '重新找到…', to: `/models?bundle=${encodeURIComponent(input.bundle.bundle.id)}` },
+            }
+          : { id: 'model-incomplete', message: `「${input.bundle.bundle.name}」还没有下载完`, action: toModels },
+      )
     }
   }
 
-  // No engine loads an fp16 main model; the checks below would only add a second reason.
-  const weights = input.catalog && input.bundle.bundle ? bundleWeightProblem(input.bundle.bundle, input.catalog.models) : null
+  // No engine loads an fp16 main model; the checks below would only add a second reason. A moved file already said why.
+  const lostOwn = input.catalog && input.bundle.bundle ? lostFile(input.bundle.bundle, input.catalog.models) : null
+  const weights = input.catalog && input.bundle.bundle && !lostOwn ? bundleWeightProblem(input.bundle.bundle, input.catalog.models) : null
   if (weights) blockers.push({ id: 'model-engine', message: `「${input.bundle.bundle!.name}」${weights}，请换一个模型`, action: toModels })
 
   // A CLI engine (兼容模式 / AMD 原生) reads a bf16 bundle folder only.

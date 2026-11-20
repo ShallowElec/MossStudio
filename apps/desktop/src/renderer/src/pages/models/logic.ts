@@ -1,6 +1,7 @@
 import { bestBundleFor, bundleGpusProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle } from '@shared/bundleFit'
 import type { AdapterEntry, DownloadTask, GpuInventoryDevice, ModelBundle, ModelEntry, ModelSource, ModelSourcesView } from '@shared/types'
 import { isSharedModelId } from '@shared/sharedModels'
+import { goneOwnPart, isLostOwnFile, isOwnFile, lostFile } from '@shared/modelImport'
 import { eta } from '../../lib/format'
 
 /**
@@ -41,7 +42,17 @@ export function bundleComponentIds(bundle: ModelBundle): string[] {
   )
 }
 
-export type BundleStatus = 'ready' | 'downloading' | 'verifying' | 'paused' | 'failed' | 'partial' | 'missing' | 'unavailable'
+export type BundleStatus =
+  | 'ready'
+  | 'downloading'
+  | 'verifying'
+  | 'paused'
+  | 'failed'
+  | 'partial'
+  | 'missing'
+  | 'unavailable'
+  /** One of the person's own files is not where it was added: found again or removed, never downloaded. */
+  | 'lost'
 export type BundleAction = 'download' | 'resume' | 'pause' | null
 
 /** Pill tone of a state: ready is ok, in progress is accent, partly done is warn, failed is danger. */
@@ -56,6 +67,7 @@ const BUNDLE_TONE: Record<BundleStatus, StateTone> = {
   partial: 'warn',
   missing: 'neutral',
   unavailable: 'warn',
+  lost: 'warn',
 }
 
 export function bundleTone(status: BundleStatus): StateTone {
@@ -140,6 +152,21 @@ function bundleState(
     percent,
   }
 
+  // An own file that moved is not a missing download: offering one would fetch other weights in its place.
+  const lost = components.some((model) => !isInstalled(model) && isLostOwnFile(model)) || ids.some((id) => goneOwnPart(id, models))
+  if (lost)
+    return {
+      ...base,
+      missing: [],
+      downloadBytes: 0,
+      doneBytes: 0,
+      remainingBytes: 0,
+      percent: 0,
+      status: 'lost',
+      stateText: '找不到文件',
+      action: null,
+      actionLabel: '',
+    }
   if (components.length < ids.length) {
     return { ...base, status: 'unavailable', stateText: '模型信息不完整，刷新后再试', action: null, actionLabel: '' }
   }
@@ -195,6 +222,8 @@ export interface ModelPlace {
 
 /** Why a whole model cannot run at this place, or null. */
 export function bundleBlocker(bundle: ModelBundle, models: readonly ModelEntry[], place: ModelPlace): string | null {
+  // A moved own file is its own state (找不到文件), with its own way out.
+  if (lostFile(bundle, models)) return null
   const weights = bundleWeightProblem(bundle, models)
   if (weights) return weights
   if (place.remote) return isLocalOnlyBundle(bundle, models) ? '只能在这台电脑上使用，其他电脑请用官方模型' : null
@@ -204,6 +233,8 @@ export function bundleBlocker(bundle: ModelBundle, models: readonly ModelEntry[]
 export interface ModelSections {
   /** The one model shown large: the deep-linked one, else the best pick for this place. */
   featured: BundleView | undefined
+  /** 我的模型: what is here (ready), the person's own combinations and imports, and models whose own file moved. */
+  mine: BundleView[]
   /** Set when the featured model is the best pick for this place; `reason` says why, when the GPU is known. */
   pick: { reason: string | null } | null
   /** Engine-certified models (推荐模型), the featured one excluded. */
@@ -227,11 +258,14 @@ export function modelSections(
   const best = bestBundleFor(candidates, place.remote ? [] : place.gpus, place.cliGpus)
   const featured = views.find((view) => view.bundle.id === preferredId) ?? views.find((view) => view.bundle.id === best?.bundle.id)
   const listed = views.filter((view) => view !== featured && view.status !== 'unavailable')
+  const mine = listed.filter((view) => view.status === 'ready' || view.status === 'lost' || view.bundle.custom)
+  const rest = listed.filter((view) => !mine.includes(view))
   return {
     featured,
     pick: featured && best && featured.bundle.id === best.bundle.id ? { reason: best.reason } : null,
-    certified: listed.filter((view) => view.bundle.certified),
-    others: listed.filter((view) => !view.bundle.certified),
+    mine,
+    certified: rest.filter((view) => view.bundle.certified),
+    others: rest.filter((view) => !view.bundle.certified),
   }
 }
 
@@ -280,7 +314,10 @@ export function bundleDeletePlan(
   const present = bundleComponentIds(bundle)
     .filter(installed)
     .filter((id) => !isSharedModelId(id))
-    .filter((id) => !localOnly || models.find((model) => model.id === id)?.provider === 'local')
+    .filter((id) => {
+      const model = models.find((entry) => entry.id === id)
+      return !localOnly || Boolean(model && isOwnFile(model))
+    })
   const ids = present.filter((id) => !othersInUse.has(id))
   const kept = present.filter((id) => othersInUse.has(id))
   const bytes = ids.reduce((sum, id) => {
@@ -292,9 +329,10 @@ export function bundleDeletePlan(
 
 /** A model whose weights are all files registered where they are on this computer (not downloaded). */
 export function localFilesOnly(bundle: ModelBundle, models: readonly ModelEntry[]): boolean {
-  return [bundle.components.dit, bundle.components.textEncoder, bundle.components.vae].every(
-    (id) => models.find((model) => model.id === id)?.provider === 'local',
-  )
+  return [bundle.components.dit, bundle.components.textEncoder, bundle.components.vae].every((id) => {
+    const model = models.find((entry) => entry.id === id)
+    return Boolean(model && isOwnFile(model))
+  })
 }
 
 /** Names of complete models (other than `exceptBundleId`) that include a part. */

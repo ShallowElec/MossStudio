@@ -289,6 +289,34 @@ const cases = {
     rejects: { 'no id': {}, 'empty id': { id: '' } },
   },
 
+  modelsImport: {
+    valid: { paths: [' /m/dit.safetensors '] },
+    output: { paths: ['/m/dit.safetensors'] },
+    accepts: { '500 paths': { paths: Array.from({ length: 500 }, (_, index) => `/m/${index}`) } },
+    rejects: {
+      'no paths': { paths: [] },
+      '501 paths': { paths: Array.from({ length: 501 }, (_, index) => `/m/${index}`) },
+      'a blank path': { paths: [' '] },
+      'an overlong path': { paths: [long(4097)] },
+    },
+  },
+
+  modelsImportPick: {
+    valid: { kind: 'files' },
+    accepts: { 'a folder': { kind: 'folder' } },
+    rejects: { 'no kind': {}, 'another kind': { kind: 'image' } },
+  },
+
+  modelsRelocate: {
+    valid: { bundleId: 'combo-1' },
+    rejects: { 'no id': {}, 'empty id': { bundleId: '' } },
+  },
+
+  modelsForget: {
+    valid: { bundleId: 'combo-1' },
+    rejects: { 'no id': {}, 'empty id': { bundleId: '' } },
+  },
+
   instanceModelBinding: {
     valid: { id: 'i1', binding: null },
     accepts: { binding: { id: 'i1', binding: { bundleId: 'b', dit: 'd', textEncoder: 't', vae: 'v' } } },
@@ -980,8 +1008,6 @@ const cases = {
       'png as base64': { projectId: 'p', canvasId: 'c1', png: 'iVBOR' },
     },
   },
-
-  controlAdapterAdd: { valid: { path: '/m/control.safetensors' }, rejects: { 'blank path': { path: ' ' } } },
 
   controlAdapterRemove: { valid: { id: 'control-1' }, rejects: { 'empty id': { id: '' } } },
 

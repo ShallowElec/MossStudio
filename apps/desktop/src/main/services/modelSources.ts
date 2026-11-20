@@ -6,6 +6,7 @@ import type {
   AdapterEntry,
   ControlAdapterEntry,
   ModelEntry,
+  ModelImportProblem,
   ModelSource,
   ModelSourceFile,
   ModelSourceStatus,
@@ -14,6 +15,7 @@ import type {
   Settings,
 } from '@shared/types'
 import { SHARED_MODEL_PREFIX } from '@shared/sharedModels'
+import { importProblemText, recognize } from '@shared/modelImport'
 import { writeFileAtomic } from '../lib/atomicWrite'
 import { isNetworkPath, modelPathKey } from '../lib/localPath'
 import { isInside, paths } from '../lib/paths'
@@ -52,6 +54,7 @@ const sourceStatusSchema = discoveredSourceSchema.extend({
     scanFileSchema.pick({ path: true, name: true, size: true }).extend({
       role: z.enum(['dit', 'text_encoder', 'vae', 'support', 'full', 'lora', 'control_adapter']),
       state: z.enum(['available', 'pending', 'incompatible']),
+      reason: z.string().optional(),
     }),
   ),
 })
@@ -141,45 +144,51 @@ function separateFromDownloads(root: string, writable: string[]): { readable: bo
 /** A cached answer for an unchanged file, or null when the engine must be asked and is not there. Engine errors throw. */
 async function inspectWeight(file: ScannedModel, request: EngineRequest | null): Promise<Inspection | string | null> {
   if (file.layout === 'diffusers-folder') {
-    const dir = await inspectDiffusersFolder(file.path)
-    if (!dir) return '模型文件夹不完整'
-    try {
-      const index = JSON.parse(await readFile(join(file.path, 'model_index.json'), 'utf8')) as { _class_name?: unknown }
-      if (typeof index._class_name !== 'string' || !/moss.?image/i.test(index._class_name)) return '此模型文件夹不是 MOSS-Image'
-      if (dir.dtype === 'fp16') return '当前引擎不支持此 FP16 主模型'
-      if (!(await legacyModelReady(file.path))) return '模型文件夹缺少运行配置或权重分片'
-      return { role: 'full', precision: dir.dtype ?? 'local' }
-    } catch {
-      return '读不到模型配置'
-    }
+    const folder = await diffusersFolderProblem(file.path)
+    if (typeof folder === 'string') return importProblemText(folder, file.path)
+    return { role: 'full', precision: folder.dtype ?? 'local' }
   }
-  if (extname(file.path).toLowerCase() !== '.safetensors') return '当前引擎无法直接加载此格式'
+  if (!engineReads(file.path)) return importProblemText('format', file.path)
   const key = modelPathKey(file.path)
   const cached = inspected.get(key)
   if (cached?.size === file.size && cached.mtimeMs === file.mtimeMs) return cached.value
   if (!request) return null
   const result = await request('inspect', { path: file.path })
-  const kind = result.kind
-  const base = typeof result.base_model === 'string' && result.base_model ? result.base_model : undefined
-  let value: Inspection | string
-  if (
-    result.loadable === true &&
-    (kind === 'dit' || kind === 'text_encoder' || kind === 'vae' || kind === 'lora' || kind === 'control_adapter')
-  ) {
-    const precision = typeof result.precision === 'string' ? result.precision : 'local'
-    value = {
-      role: kind,
-      precision: precision === 'w4a4' ? 'int4' : precision,
-      base,
-      controlKinds: Array.isArray(result.control_kinds)
-        ? result.control_kinds.filter((item): item is string => typeof item === 'string')
-        : [],
-    }
-  } else {
-    value = '当前引擎无法使用此权重'
-  }
+  // The engine's own answer, also for a GGUF main model it converts on first load.
+  const recognition = recognize(result, file.path)
+  const value: Inspection | string = recognition.kind
+    ? {
+        role: recognition.kind,
+        precision: recognition.precision ?? 'local',
+        base: recognition.baseModel,
+        controlKinds: recognition.controlKinds ?? [],
+      }
+    : importProblemText(recognition.problem ?? 'not-moss', file.path)
   inspected.set(key, { size: file.size, mtimeMs: file.mtimeMs, value })
   return value
+}
+
+/** Weight files the engine opens itself: safetensors, and GGUF for a main model. */
+export function engineReads(path: string): boolean {
+  return ['.safetensors', '.sft', '.gguf'].includes(extname(path).toLowerCase())
+}
+
+/**
+ * Why a diffusers folder cannot be used as a whole model, or what it is: a
+ * MOSS-Image `model_index.json`, not FP16, with its runtime configs.
+ */
+export async function diffusersFolderProblem(path: string): Promise<ModelImportProblem | { dtype: string | null }> {
+  const dir = await inspectDiffusersFolder(path)
+  if (!dir) return 'folder-incomplete'
+  try {
+    const index = JSON.parse(await readFile(join(path, 'model_index.json'), 'utf8')) as { _class_name?: unknown }
+    if (typeof index._class_name !== 'string' || !/moss.?image/i.test(index._class_name)) return 'not-moss'
+    if (dir.dtype === 'fp16') return 'fp16'
+    if (!(await legacyModelReady(path))) return 'folder-incomplete'
+    return { dtype: dir.dtype }
+  } catch {
+    return 'folder-incomplete'
+  }
 }
 
 function errorText(error: unknown): string {
@@ -312,8 +321,10 @@ async function scanSources(settings: Settings, generation: number, changed: bool
         const result = results.get(id)
         failure ??= failures.get(id)
         const entry: ModelSourceFile = { path: file.path, name: file.name, size: file.size, role: file.role, state: 'pending' }
-        if (typeof result === 'string') entry.state = 'incompatible'
-        else if (result) {
+        if (typeof result === 'string') {
+          entry.state = 'incompatible'
+          entry.reason = result
+        } else if (result) {
           entry.state = 'available'
           entry.role = result.role
           const { path, name, size, mtimeMs, layout } = file
@@ -332,11 +343,7 @@ async function scanSources(settings: Settings, generation: number, changed: bool
   const needsEngine = groups.some(({ files }) =>
     [...files.values()].some((file) => {
       const cached = inspected.get(modelPathKey(file.path))
-      return (
-        file.layout !== 'diffusers-folder' &&
-        extname(file.path).toLowerCase() === '.safetensors' &&
-        (cached?.size !== file.size || cached.mtimeMs !== file.mtimeMs)
-      )
+      return file.layout !== 'diffusers-folder' && engineReads(file.path) && (cached?.size !== file.size || cached.mtimeMs !== file.mtimeMs)
     }),
   )
   if (engineKey && server && needsEngine) {

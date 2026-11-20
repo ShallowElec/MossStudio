@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Events } from '@shared/channels'
@@ -226,7 +226,28 @@ describe('model downloads', () => {
     const local = join(dataRoot(), 'mine', 'w.safetensors')
     mkdirSync(join(local, '..'), { recursive: true })
     writeFileSync(local, weights)
-    await models.importModelFolder(join(dataRoot(), 'mine'), settings)
+    // A record an older version wrote when it imported the file with its SHA-256 (imports no longer hash).
+    const info = statSync(local)
+    mkdirSync(join(modelsRoot(), 'imports'), { recursive: true })
+    writeFileSync(
+      join(modelsRoot(), 'imports', 'index.json'),
+      JSON.stringify({
+        schema_version: 2,
+        models: [
+          {
+            id: `local-file-${sha256(weights).slice(0, 20)}`,
+            name: 'w.safetensors',
+            path: local,
+            relativePath: 'w.safetensors',
+            sha256: sha256(weights),
+            size: info.size,
+            mtimeMs: info.mtimeMs,
+            role: 'full',
+            importedAt: new Date(0).toISOString(),
+          },
+        ],
+      }),
+    )
     const task = await models.startDownload('model', 'vae-a', settings)
     expect((await settle(task.id)).state).toBe('done')
     const fetched = hf.requests.filter((r) => r.includes('/resolve/'))
@@ -286,6 +307,27 @@ describe('model downloads', () => {
     await settle('model:vae-a')
     expect(await models.installBundle('b1', settings)).toEqual([])
     await expect(models.installBundle('nope', settings)).rejects.toThrow('模型组合不存在')
+  })
+
+  it('installBundle never downloads in place of an own file that moved, and says to find it again', async () => {
+    // B1: a combination with the person's own file that moved offered a download of a catalog part instead.
+    const own = join(dataRoot(), 'E', 'moss_image_sft_int8.safetensors')
+    mkdirSync(join(own, '..'), { recursive: true })
+    writeFileSync(own, 'dit-weights')
+    const { ids } = await models.registerScannedModels(settings, [
+      { path: own, role: 'vae', layout: 'comfyui-single-file', precision: 'fp32' },
+    ])
+    writeCatalog(releaseDir(), {
+      schema_version: 2,
+      models: [vae, support],
+      bundles: [{ ...bundle, components: { ...bundle.components, vae: ids[0]! } }],
+    })
+    rmSync(join(dataRoot(), 'E'), { recursive: true })
+    await expect(models.installBundle('b1', settings)).rejects.toMatchObject({
+      code: 'E_MODEL_FILE_MISSING',
+      message: '找不到「moss_image_sft_int8.safetensors」的文件，请在「模型」页点「重新找到…」',
+    })
+    expect(models.listDownloads()).toEqual([])
   })
 
   it('installBundle reports a component missing from the catalog', async () => {

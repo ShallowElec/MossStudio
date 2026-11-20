@@ -14,7 +14,6 @@ import {
   launchDeviceFixture,
   launchRowFixture,
   scenario,
-  localAdapterFixture,
   updateAvailableFixture,
   updateFailedFixture,
   updateReadyFixture,
@@ -364,21 +363,11 @@ describe('downloads and models', () => {
     expect(store().catalog!.models.find((model) => model.id === 'moss-sft-dit')!.installed).toBe(false)
   })
 
-  it('importAdapters returns [] without refreshing when the picker is canceled', async () => {
-    const { backend, store } = await ready()
-    expect(await store().importAdapters()).toEqual([])
-    expect(backend.callsTo(Ipc.modelsCatalog)).toEqual([])
-  })
-
-  it('importAdapters refreshes the catalog and returns the imported adapters', async () => {
-    const { backend, store } = await ready()
-    const adapter = localAdapterFixture()
-    backend.handle(Ipc.modelsImportAdapter, (_, { state }) => {
-      state.catalog = { ...state.catalog, adapters: [...state.catalog.adapters, adapter] }
-      return { canceled: false, adapters: [adapter] }
-    })
-    expect(await store().importAdapters()).toEqual([adapter])
-    expect(store().catalog!.adapters.some((item) => item.id === adapter.id)).toBe(true)
+  it('hands a model to Studio once: 导入模型 › 去创作', async () => {
+    const { store } = await ready()
+    store().requestStudioModel('combo-1')
+    expect(store().takeStudioModelRequest()).toBe('combo-1')
+    expect(store().takeStudioModelRequest()).toBeNull()
   })
 })
 

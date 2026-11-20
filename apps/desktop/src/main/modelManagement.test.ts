@@ -1,19 +1,11 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { getSettings } from './services/settings'
-import {
-  componentSnapshot,
-  deleteModel,
-  getCatalog,
-  importModelFolder,
-  installBundle,
-  listDownloads,
-  startDownload,
-} from './services/models'
+import { componentSnapshot, deleteModel, getCatalog, installBundle, listDownloads, startDownload } from './services/models'
 import { bundleBinding, prepareModelBundle } from './services/modelBundles'
 import { ensureDirs, paths } from './lib/paths'
 
@@ -149,10 +141,29 @@ export async function runModelManagementTests(): Promise<void> {
     const externalDir = join(external.modelsRoot, 'ComfyUI', 'models', 'text_encoders')
     await mkdir(externalDir, { recursive: true })
     await writeFile(join(externalDir, 'qwen.safetensors'), te)
-    assert.deepEqual(await importModelFolder(join(external.modelsRoot, 'ComfyUI', 'models'), external), {
-      added: 1,
-      duplicates: 0,
-    })
+    // A file an older version imported with its SHA-256 (imports no longer hash): a download still reuses it.
+    const externalFile = join(externalDir, 'qwen.safetensors')
+    const externalInfo = await stat(externalFile)
+    await mkdir(paths.modelImports(external.modelsRoot), { recursive: true })
+    await writeFile(
+      join(paths.modelImports(external.modelsRoot), 'index.json'),
+      JSON.stringify({
+        schema_version: 2,
+        models: [
+          {
+            id: 'local-file-' + createHash('sha256').update(te).digest('hex').slice(0, 20),
+            name: 'qwen.safetensors',
+            path: externalFile,
+            relativePath: 'text_encoders/qwen.safetensors',
+            sha256: createHash('sha256').update(te).digest('hex'),
+            size: externalInfo.size,
+            mtimeMs: externalInfo.mtimeMs,
+            role: 'text_encoder',
+            importedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    )
     const importedCatalog = await getCatalog(external, true)
     const localModel = importedCatalog.models.find((model) => model.provider === 'local')
     assert.equal(localModel?.installed, true)

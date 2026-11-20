@@ -1,5 +1,6 @@
-import { readlink } from 'node:fs/promises'
+import { readlink, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { dirname, parse, resolve } from 'node:path'
 
 /**
  * Variables a model path in another app's config may use. Anything else stays
@@ -43,4 +44,31 @@ export function isNetworkPath(path: string): boolean {
 export async function linksToNetwork(path: string): Promise<boolean> {
   const target = await readlink(path).catch(() => null)
   return target !== null && isNetworkPath(target)
+}
+
+/** Folders removable disks are mounted under on Linux and macOS; a missing folder right below one is a missing disk. */
+const MOUNT_PARENTS = ['/media', '/mnt', '/run/media', '/Volumes']
+
+/**
+ * Why a file the person added is not there: `drive` when the disk it was on is
+ * not plugged in (its drive letter, or its mount folder under /media, /mnt or
+ * /Volumes, is gone), else `file`. Only local folders are read: a network path
+ * is always `file`, so a share is never contacted.
+ */
+export async function missingPlace(path: string): Promise<'drive' | 'file'> {
+  if (isNetworkPath(path)) return 'file'
+  const exists = async (folder: string): Promise<boolean> => Boolean(await stat(folder).catch(() => null))
+  const full = resolve(path)
+  const root = parse(full).root
+  if (/^[a-z]:[\\/]?$/i.test(root)) return (await exists(root)) ? 'file' : 'drive'
+  // The nearest folder that is still there, and the gone one just below it.
+  let gone = full
+  let folder = dirname(full)
+  while (folder !== root && !(await exists(folder))) {
+    gone = folder
+    folder = dirname(folder)
+  }
+  if (gone === full) return 'file'
+  // Desktop Linux mounts a disk one level deeper, under the user's own folder in /media or /run/media.
+  return MOUNT_PARENTS.includes(folder) || ['/media', '/run/media'].includes(dirname(folder)) ? 'drive' : 'file'
 }

@@ -1,7 +1,8 @@
-import { ArrowDownToLine, Pause, Play, RotateCw, Trash2, X } from 'lucide-react'
+import { ArrowDownToLine, FileSearch, Pause, Play, RotateCw, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Ipc } from '@shared/channels'
+import { lostFile, lostFileText } from '@shared/modelImport'
 import type { ModelBundle, ModelEntry } from '@shared/types'
 import { call } from '../../lib/api'
 import { ModelName } from '../../components/common/ModelName'
@@ -77,6 +78,60 @@ export function RemoveButton({
 /** A whole model whose files all stay where they are on this computer (registered, not downloaded). */
 const isLocalOnly = (view: BundleView): boolean => localFilesOnly(view.bundle, view.components)
 
+/** Where a model's own file was, and what to do: the line under a model whose file moved. */
+export function lostLine(view: BundleView, models: readonly ModelEntry[]): string | null {
+  const lost = view.status === 'lost' ? lostFile(view.bundle, models) : null
+  return lost ? lostFileText(view.bundle.name, lost) : null
+}
+
+/**
+ * 重新找到… and 移除 for a model whose own file is not where it was added. Nothing
+ * is downloaded in its place: the person's file is found again, or the model
+ * leaves the list (the files stay wherever they are).
+ */
+function LostActions({ view, compact }: { view: BundleView; compact?: boolean }): React.JSX.Element {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  async function relocate(): Promise<void> {
+    setBusy(true)
+    try {
+      const { found } = await call<{ found: number }>(Ipc.modelsRelocate, { bundleId: view.bundle.id })
+      if (found) toast.push(`找到了「${view.bundle.name}」的文件`, 'success')
+    } catch (cause) {
+      toast.push(errorText(cause), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function forget(): Promise<void> {
+    setRemoving(false)
+    try {
+      await call(Ipc.modelsForget, { bundleId: view.bundle.id })
+      toast.push(`已移除 ${view.bundle.name}`, 'success')
+    } catch (cause) {
+      toast.push(`没能移除：${errorText(cause)}`, 'error')
+    }
+  }
+  return (
+    <>
+      <RemoveButton remove name={view.bundle.name} onClick={() => setRemoving(true)} />
+      <Button tone="secondary" size={compact ? 'sm' : 'md'} disabled={busy} onClick={() => void relocate()}>
+        {busy ? <Spinner /> : <FileSearch className="size-4" strokeWidth={1.6} />}
+        重新找到…
+      </Button>
+      <ConfirmDialog
+        open={removing}
+        title={`移除「${view.bundle.name}」？`}
+        description="只从模型库里移除，电脑上的文件不会被删除。"
+        confirmLabel="移除"
+        onClose={() => setRemoving(false)}
+        onConfirm={() => void forget()}
+      />
+    </>
+  )
+}
+
 /** A model's total size, in its own column next to the action, so sizes line up down a list. */
 export function SizeText({ bytes }: { bytes: number }): React.JSX.Element | null {
   if (!bytes) return null
@@ -122,12 +177,15 @@ function useBundleActions(location: ModelLocation) {
 /** The featured model, with its state in plain words and one main action. */
 export function FeaturedModel({
   view,
+  models,
   location,
   pick,
   deletable,
   onDelete,
 }: {
   view: BundleView
+  /** The catalog's parts: a model whose own file moved names it. */
+  models: readonly ModelEntry[]
   location: ModelLocation
   /** Set when this is the best pick for this computer; `reason` says why, when the GPU is known. */
   pick?: { reason: string | null }
@@ -149,10 +207,13 @@ export function FeaturedModel({
           <p className="text-ui text-ink-2">{view.bundle.description}</p>
           {pick?.reason ? <p className="text-caption text-ink-2">{pick.reason}</p> : null}
           {view.blocked ? <p className="text-caption text-ink-2">{view.blocked}</p> : null}
+          {lostLine(view, models) ? <p className="text-caption text-ink-2">{lostLine(view, models)}</p> : null}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <SizeText bytes={view.totalBytes} />
-          {view.status === 'ready' ? (
+          {view.status === 'lost' ? (
+            <LostActions view={view} />
+          ) : view.status === 'ready' ? (
             <>
               {deletable ? <RemoveButton remove={isLocalOnly(view)} name={view.bundle.name} onClick={() => onDelete(view.bundle)} /> : null}
               {location.kind === 'local' && !view.blocked ? (
@@ -182,12 +243,14 @@ export function FeaturedModel({
 /** Every other model: one row each with its size, state and one action. */
 export function ModelList({
   views,
+  models,
   location,
   highlightId,
   deletable,
   onDelete,
 }: {
   views: BundleView[]
+  models: readonly ModelEntry[]
   location: ModelLocation
   highlightId?: string | null
   deletable: (bundle: ModelBundle) => boolean
@@ -212,13 +275,16 @@ export function ModelList({
               <span className="flex flex-col gap-1.5">
                 <span>{view.bundle.description}</span>
                 {view.blocked ? <span>{view.blocked}</span> : null}
+                {lostLine(view, models) ? <span>{lostLine(view, models)}</span> : null}
                 {progress ? <DownloadProgress info={progress} label={`${view.bundle.name} 下载进度`} className="max-w-md pt-1" /> : null}
               </span>
             }
           >
             <SizeText bytes={view.totalBytes} />
             <StatePill view={view} />
-            {view.status === 'ready' ? (
+            {view.status === 'lost' ? (
+              <LostActions view={view} compact />
+            ) : view.status === 'ready' ? (
               deletable(view.bundle) ? (
                 <RemoveButton remove={isLocalOnly(view)} name={view.bundle.name} onClick={() => onDelete(view.bundle)} />
               ) : null

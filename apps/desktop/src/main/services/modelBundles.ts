@@ -95,9 +95,10 @@ export async function prepareModelSource(binding: ModelBinding, settings: Settin
   const files: Array<string | undefined> = []
   for (const part of parts) {
     if (!isSingleFile(part)) files.push(undefined)
-    else if (part.provider === 'local') {
-      const path = isSharedModelId(part.id) ? await requireSharedWeight(part.id, part.name) : part.localPath
-      if (!path) throw new Error(`找不到「${part.name}」的文件，请重新添加`)
+    else if (part.provider === 'local' || part.tags.includes('local-file')) {
+      // The person's own file (also one standing in for a catalog part), used where it is.
+      const path = isSharedModelId(part.id) ? await requireSharedWeight(part.id, part.name) : part.installed ? part.localPath : undefined
+      if (!path) throw new Error(`找不到「${part.name}」的文件，请在「模型」页点「重新找到…」`)
       files.push(path)
     } else files.push(await componentFile(part.id, settings))
   }

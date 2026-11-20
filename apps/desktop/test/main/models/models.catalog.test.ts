@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Settings } from '@shared/types'
@@ -394,14 +394,77 @@ describe('local imports and bundles in the catalog', () => {
     expect(entry).toMatchObject({ installState: 'error', installed: false, installedBytes: 0 })
   })
 
-  it('a hashed full import is tagged with its SHA256', async () => {
-    const dir = join(dataRoot(), 'imports-src')
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, 'w.safetensors'), 'content')
-    expect(await models.importModelFolder(dir, settings)).toEqual({ added: 1, duplicates: 0 })
+  it('a file an older version imported with its SHA256 is tagged with it', async () => {
+    const file = join(dataRoot(), 'imports-src', 'w.safetensors')
+    mkdirSync(join(file, '..'), { recursive: true })
+    writeFileSync(file, 'content')
+    const info = statSync(file)
+    mkdirSync(join(modelsRoot(), 'imports'), { recursive: true })
+    writeFileSync(
+      join(modelsRoot(), 'imports', 'index.json'),
+      JSON.stringify({
+        schema_version: 2,
+        models: [
+          {
+            id: `local-file-${sha256('content').slice(0, 20)}`,
+            name: 'w.safetensors',
+            path: file,
+            relativePath: 'w.safetensors',
+            sha256: sha256('content'),
+            size: info.size,
+            mtimeMs: info.mtimeMs,
+            role: 'full',
+            importedAt: new Date(0).toISOString(),
+          },
+        ],
+      }),
+    )
     const entry = (await models.getCatalog(settings)).models.find((m) => m.provider === 'local')!
     expect(entry.tags).toContain(`sha256:${sha256('content')}`)
     expect(entry.notes).toContain(sha256('content'))
+  })
+
+  it('names the precision the engine reported, and whether the disk or the file of a moved one is missing', async () => {
+    const file = join(dataRoot(), 'own', 'moss.safetensors')
+    mkdirSync(join(file, '..'), { recursive: true })
+    writeFileSync(file, 'dit')
+    await models.registerScannedModels(settings, [{ path: file, role: 'dit', layout: 'comfyui-single-file', precision: 'int8' }])
+    expect((await models.getCatalog(settings, true)).models.find((m) => m.provider === 'local')).toMatchObject({
+      precision: 'int8',
+      installed: true,
+    })
+    rmSync(file)
+    const moved = (await models.getCatalog(settings, true)).models.find((m) => m.provider === 'local')!
+    expect(moved).toMatchObject({ installed: false, installState: 'error', missingFile: 'file', localPath: file })
+  })
+
+  it('an own copy of a catalog single file (same name and size) stands in for that part, and is missed when it moves', async () => {
+    const single = rawModel({
+      id: 'vae-single',
+      repo: 'org/single',
+      role: 'vae',
+      format: 'comfyui',
+      files: ['vae/flux2-vae_small.safetensors'],
+      size_bytes: 9,
+    })
+    writeCatalog(releaseDir(), { schema_version: 3, models: [vae, single], bundles: [bundle], adapters: [] })
+    const file = join(dataRoot(), 'ComfyUI', 'vae', 'flux2-vae_small.safetensors')
+    mkdirSync(join(file, '..'), { recursive: true })
+    writeFileSync(file, 'vae-bytes')
+    await models.registerScannedModels(settings, [{ path: file, role: 'vae', layout: 'comfyui-single-file', catalogId: 'vae-single' }])
+    let catalog = await models.getCatalog(settings, true)
+    expect(byId(catalog.models, 'vae-single')).toMatchObject({ installed: true, localPath: file, provider: 'hf' })
+    expect(byId(catalog.models, 'vae-single')!.tags).toContain('local-file')
+    // It is that part, not a second row of its own.
+    expect(catalog.models.filter((m) => m.provider === 'local')).toEqual([])
+    rmSync(file)
+    catalog = await models.getCatalog(settings, true)
+    expect(byId(catalog.models, 'vae-single')).toMatchObject({ installed: false, missingFile: 'file', localPath: file })
+    // 移除 drops the stand-in: the part is an ordinary download again.
+    await models.deleteModel('model', 'vae-single', settings)
+    catalog = await models.getCatalog(settings, true)
+    expect(byId(catalog.models, 'vae-single')).toMatchObject({ installed: false, tags: [] })
+    expect(byId(catalog.models, 'vae-single')!.localPath).toBeUndefined()
   })
 
   it('refuses to start a remote download for a local import', async () => {
@@ -452,38 +515,42 @@ describe('adapters', () => {
     })
   })
 
-  it('imports a LoRA file by copying it under a sanitised, unique id', async () => {
+  it('uses an imported LoRA where it is, once per file however often it is imported', async () => {
+    // B6: importing copied the file each time and made a -2 copy on the second import.
     const source = join(dataRoot(), 'downloads', 'My Style (v2).safetensors')
     mkdirSync(join(source, '..'), { recursive: true })
     writeFileSync(source, 'lora-bytes')
-    const first = await models.importAdapterFile(settings, { sourcePath: source })
-    const second = await models.importAdapterFile(settings, { sourcePath: source, name: '  Custom  ' })
+    const first = await models.linkAdapterFile(settings, { path: source, base: 'moss-sft' })
+    const second = await models.linkAdapterFile(settings, { path: source })
     expect(first).toMatchObject({
-      id: 'My-Style--v2-',
+      id: expect.stringMatching(/^lora-[0-9a-f]{16}$/),
       name: 'My Style (v2)',
       provider: 'local',
-      tags: ['local-import'],
+      tags: ['local-file'],
       installed: true,
       sizeBytes: 10,
+      base: 'moss-sft',
     })
-    expect(second).toMatchObject({ id: 'My-Style--v2--2', name: 'Custom' })
-    expect(readFileSync(join(adaptersRoot(), 'My-Style--v2-', 'My Style (v2).safetensors'), 'utf8')).toBe('lora-bytes')
-
-    const catalog = await models.getCatalog(settings)
-    expect(catalog.adapters.map((a) => a.id)).toEqual(['lora-a', 'My-Style--v2-', 'My-Style--v2--2'])
-    expect(await models.resolveAdapterFile(settings, 'My-Style--v2-')).toBe(
-      join(adaptersRoot(), 'My-Style--v2-', 'My Style (v2).safetensors'),
-    )
+    expect(second.id).toBe(first.id)
+    // Nothing is copied into the LoRA folder.
+    expect(existsSync(join(adaptersRoot(), first.id))).toBe(false)
+    const catalog = await models.getCatalog(settings, true)
+    expect(catalog.adapters.map((a) => a.id)).toEqual(['lora-a', first.id])
+    expect(await models.resolveAdapterFile(settings, first.id)).toBe(source)
   })
 
-  it('rejects non-safetensors LoRA files', async () => {
-    await expect(models.importAdapterFile(settings, { sourcePath: '/x/model.ckpt' })).rejects.toThrow(/\.safetensors/)
-  })
-
-  it('falls back to "lora" for a file name without usable characters', async () => {
-    const source = join(dataRoot(), '风格.safetensors')
-    writeFileSync(source, 'x')
-    expect((await models.importAdapterFile(settings, { sourcePath: source })).id).toBe('lora')
+  it('keeps a moved LoRA listed as not there, and removing it leaves the file alone', async () => {
+    const source = join(dataRoot(), 'loras', 'ink.safetensors')
+    mkdirSync(join(source, '..'), { recursive: true })
+    writeFileSync(source, 'ink')
+    const entry = await models.linkAdapterFile(settings, { path: source })
+    rmSync(source)
+    expect(byId((await models.getCatalog(settings, true)).adapters, entry.id)).toMatchObject({ installed: false })
+    expect(await models.resolveAdapterFile(settings, entry.id)).toBeNull()
+    writeFileSync(source, 'ink')
+    await models.deleteModel('adapter', entry.id, settings)
+    expect(byId((await models.getCatalog(settings, true)).adapters, entry.id)).toBeUndefined()
+    expect(readFileSync(source, 'utf8')).toBe('ink')
   })
 
   it('registerTrainedAdapter replaces a previous record with the same id', async () => {

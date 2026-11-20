@@ -258,17 +258,23 @@ describe('studio inputs', () => {
 describe('模型 › 控制适配器', () => {
   const app = useApp()
 
-  it('adds a control adapter file, shows the engine error for a wrong file, removes after confirming', async () => {
-    const page = await app.open({ scenario: 'ready', route: '/models', theme: 'light' })
+  it('lists a control adapter that 导入模型 recognised, and removes it after confirming', async () => {
+    const page = await app.open({ scenario: 'ready', route: '/models', theme: 'light', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.importFiles = window.__mock.fixtures.importFixtures()
+      window.__mock.state.importPick = ['/drop/depth-control.safetensors', '/home/me/models/notes.txt']
+    })
+    await app.start()
     const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '控制适配器' }) })
     await expect.poll(() => section.getByText('还没有控制适配器').isVisible()).toBe(true)
-
-    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickDialog, () => '/home/me/models/notes.txt'))
-    await section.getByRole('button', { name: '添加文件' }).click()
-    await expect.poll(() => page.getByText('没能添加：这个文件不是控制适配器').isVisible()).toBe(true)
-
-    await page.evaluate(() => window.__mock.handle(window.__mock.Ipc.pickDialog, () => '/home/me/models/depth-control.safetensors'))
-    await section.getByRole('button', { name: '添加文件' }).click()
+    // There is no 添加文件 here any more: files come in through 导入模型, which routes them.
+    expect(await section.getByRole('button', { name: '添加文件' }).count()).toBe(0)
+    await page.getByRole('button', { name: '导入模型' }).click()
+    await page.getByRole('menuitem', { name: '选择文件…' }).click()
+    const dialog = page.getByRole('dialog', { name: '识别完了' })
+    await expect.poll(() => dialog.getByText('控制适配器', { exact: true }).isVisible()).toBe(true)
+    expect(await dialog.getByText('notes.txt 不是模型文件。').isVisible()).toBe(true)
+    await dialog.getByRole('button', { name: '留在这里' }).click()
     await expect.poll(() => section.getByText('depth-control.safetensors').isVisible()).toBe(true)
     // The kinds are tags; the size is a column of its own.
     for (const kind of ['深度', '边缘', '姿态']) expect(await section.getByText(kind, { exact: true }).first().isVisible()).toBe(true)

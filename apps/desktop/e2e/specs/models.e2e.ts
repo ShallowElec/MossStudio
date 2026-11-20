@@ -128,7 +128,7 @@ describe('models', () => {
     await expect.poll(() => card.getByRole('button', { name: '去创作' }).isVisible()).toBe(true)
   })
 
-  it('lists every certified model under 推荐模型 and the unverified ones under 其他模型', async () => {
+  it('lists every certified model under 推荐模型, and no 其他模型 while the catalog has no unverified one', async () => {
     const page = await app.open({ scenario: 'engineInstalledModelMissing', route: '/models', theme: 'light' })
     const section = (title: string) => page.locator('section').filter({ has: page.getByRole('heading', { name: title, exact: true }) })
     const recommended = section('推荐模型')
@@ -146,8 +146,9 @@ describe('models', () => {
       expect(await recommended.locator(`[data-model-name="${name}"]`).count()).toBe(1)
     }
     expect(await recommended.getByText('显存占用约减四成，速度约快 2.5 倍，日常首选。', { exact: false }).count()).toBe(1)
-    const others = section('其他模型')
-    expect(await others.getByText('引擎没有验证过', { exact: false }).count()).toBeGreaterThan(0)
+    // The shipped catalog has no unverified model, so 其他模型 is not shown; 自己组合 sits beside 我的模型.
+    expect(await page.getByRole('heading', { name: '其他模型', exact: true }).count()).toBe(0)
+    expect(await section('我的模型').getByRole('button', { name: '自己组合' }).isVisible()).toBe(true)
     // The engine refuses the FP16-fixed DiTs, so no list offers them.
     expect(await page.locator('[data-model-name^="MOSS-Image SFT FP16-fixed"]').count()).toBe(0)
     expect(await page.locator('[data-model-name^="MOSS-Image Base FP16-fixed"]').count()).toBe(0)
@@ -236,9 +237,8 @@ describe('models', () => {
     await expect.poll(() => app.calls('models:download')).toEqual([{ kind: 'adapter', id: adapter.id }])
   })
 
-  const openCombine = async (page: Page, item: string) => {
+  const openCombine = async (page: Page) => {
     await page.getByRole('button', { name: '自己组合' }).click()
-    await page.getByRole('menuitem', { name: item }).click()
   }
   const dialog = (page: Page) => page.locator('[data-combination-dialog]')
   /** A saved combination's row title: its name, then the 我的组合 tag. */
@@ -246,7 +246,7 @@ describe('models', () => {
 
   it('builds a model from parts, downloading only what is missing', async () => {
     const page = await app.open({ scenario: 'ready', route: '/models', theme: 'light' })
-    await openCombine(page, '挑选要下载的部件')
+    await openCombine(page)
     const parts = dialog(page)
     await expect.poll(() => parts.isVisible()).toBe(true)
     // It starts from the recommended model, which is here: nothing to download.
@@ -273,55 +273,27 @@ describe('models', () => {
     await expect.poll(() => comboTitle(page, 'SFT INT8 + Qwen3.5 W4A8').isVisible()).toBe(true)
   })
 
-  it('fills the slots from the model files in a folder on this computer', async () => {
-    const page = await app.open({ scenario: 'ready', route: '/models', theme: 'dark', defer: true })
-    await page.evaluate(() => {
-      window.__mock.state.localModelFiles = [
-        { path: '/data/ComfyUI/models/diffusion_models/moss_image_sft_int8.safetensors', role: 'dit' },
-        { path: '/data/ComfyUI/models/text_encoders/qwen3.5_int8.safetensors', role: 'text_encoder' },
-      ]
-    })
-    await app.start()
-    await openCombine(page, '用电脑上的模型文件…')
-    const parts = dialog(page)
-    await expect.poll(() => parts.isVisible()).toBe(true)
-    expect(await parts.getByLabel('主模型').inputValue()).toBe('local-scan-0')
-    expect(await parts.getByLabel('文本编码器').inputValue()).toBe('local-scan-1')
-    // Nothing found for the VAE: it takes the one already downloaded.
-    expect(await parts.getByLabel('VAE').inputValue()).toBe('flux2-vae-small')
-    expect(await parts.getByLabel('名字').inputValue()).toBe('moss_image_sft_int8 + qwen3.5_int8')
-    await expect.poll(() => page.locator('[data-combination-need]').textContent()).toBe('还要下载 20 MB')
-    await app.screenshot('models-combine-own-files-dark')
-    await page.getByRole('button', { name: '下载并保存' }).click()
-    await expect
-      .poll(() => app.calls<{ components: unknown }>('models:save-combination').then((calls) => calls[0]?.components))
-      .toEqual({
-        dit: 'local-scan-0',
-        textEncoder: 'local-scan-1',
-        vae: 'flux2-vae-small',
-      })
-  })
-
-  it('adds a complete model folder where it is (no copy), and says so', async () => {
+  it('adds a complete model folder where it is (no copy), and says it can be used', async () => {
     const page = await app.open({ scenario: 'engineInstalledModelMissing', route: '/models', theme: 'light', defer: true })
     await page.evaluate(() => {
-      window.__mock.state.localModelFolder = {
-        path: '/workspace/Models/MOSS-Image/sft',
-        name: 'MOSS-Image SFT（sft）',
-        bundleId: 'moss-sft',
-      }
+      window.__mock.state.importFiles = window.__mock.fixtures.importFixtures()
+      window.__mock.state.importPick = ['/workspace/Models/MOSS-Image/sft']
     })
     await app.start()
-    await openCombine(page, '用电脑上的模型文件…')
-    await expect.poll(() => app.calls('models:use-folder').then((calls) => calls.length)).toBe(1)
-    await expect.poll(() => page.getByText('已在原位置使用 MOSS-Image SFT（sft）').isVisible()).toBe(true)
+    await page.getByRole('button', { name: '导入模型' }).click()
+    await page.getByRole('menuitem', { name: '选择文件夹…' }).click()
+    await expect.poll(() => app.calls('models:import-pick')).toEqual([{ kind: 'folder' }])
+    const dialog = page.getByRole('dialog', { name: '可以用了：MOSS-Image SFT' })
+    await expect.poll(() => dialog.isVisible()).toBe(true)
+    expect(await dialog.getByText('在原位置使用，不占额外空间').isVisible()).toBe(true)
+    await dialog.getByRole('button', { name: '留在这里' }).click()
     await expect.poll(() => featured(page).getByText('可以使用').isVisible()).toBe(true)
-    expect(await dialog(page).count()).toBe(0)
+    expect(await app.calls('models:install-bundle')).toEqual([])
   })
 
   it('deletes a saved combination, keeping the files other models use', async () => {
     const page = await app.open({ scenario: 'ready', route: '/models' })
-    await openCombine(page, '挑选要下载的部件')
+    await openCombine(page)
     await page.getByRole('button', { name: '保存', exact: true }).click()
     const name = 'SFT BF16 + Qwen3.5 BF16'
     await expect.poll(() => comboTitle(page, name).isVisible()).toBe(true)

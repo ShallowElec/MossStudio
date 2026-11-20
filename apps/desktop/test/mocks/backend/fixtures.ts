@@ -8,6 +8,7 @@ import releaseCatalog from '../../../resources/models.json'
 import type { AiConversationInfo, AiProviderInfo } from '@shared/ai'
 import type { GbcParseResult, GbcPicture, GbcStatus } from '@shared/gbc'
 import type { UpdateAnnouncement, UpdaterState } from '@shared/update'
+import type { MockImportFile } from './modelImport'
 import type {
   AdapterEntry,
   ControlAdapterEntry,
@@ -847,3 +848,57 @@ export { machineFixture, inventoryDevicesFor } from './machines'
 
 /** 漫画 fixtures, reachable from E2E specs as window.__mock.fixtures. */
 export * from './manga'
+
+// ---------------------------------------------------------------------------
+// 导入模型
+
+/** Files a spec drops (`/drop/<name>`) or picks, as the engine reads them. */
+export function importFixtures(): Record<string, MockImportFile> {
+  return {
+    '/drop/moss_image_sft_int8_convrot.safetensors': {
+      sizeBytes: 5_413_698_958,
+      kind: 'part',
+      role: 'dit',
+      precision: 'int8',
+      catalogId: 'moss-sft-comfy-int8_convrot',
+    },
+    '/drop/my-finetune.safetensors': { sizeBytes: 5_400_000_000, kind: 'part', role: 'dit', precision: 'int8' },
+    '/drop/qwen3.5_int8.safetensors': { sizeBytes: 9_700_000_000, kind: 'part', role: 'text_encoder', precision: 'int8' },
+    '/drop/flux2-vae.safetensors': { sizeBytes: 250_000_000, kind: 'part', role: 'vae' },
+    '/drop/moss-image-sft-Q4_K_M.gguf': { sizeBytes: 6_100_000_000, kind: 'part', role: 'dit', precision: 'int8', converts: true },
+    '/drop/ink-style.safetensors': { sizeBytes: 150_000_000, kind: 'lora' },
+    '/drop/depth-control.safetensors': { sizeBytes: 300_000_000, kind: 'control' },
+    '/drop/sd_xl_base_1.0.safetensors': { sizeBytes: 6_900_000_000, kind: 'unusable', problem: 'not-moss' },
+    '/drop/moss_image_sft_fp16_fixed.safetensors': {
+      sizeBytes: 10_164_655_600,
+      kind: 'unusable',
+      problem: 'fp16',
+      offerBundleId: 'moss-sft-int8',
+    },
+    '/workspace/Models/MOSS-Image/sft': { sizeBytes: 27_000_000_000, kind: 'model', bundleId: 'moss-sft' },
+    '/workspace/ComfyUI': { sizeBytes: 0, kind: 'source', app: 'comfyui' },
+  }
+}
+
+/** An own main model on a disk that is not plugged in (E:), as main lists it. */
+export function movedOwnFileFixture(): ModelEntry {
+  return {
+    id: 'local-scan-moved',
+    name: 'moss_image_sft_int8.safetensors',
+    provider: 'local',
+    repo: 'E:\\Models\\moss_image_sft_int8.safetensors',
+    revision: 'local',
+    role: 'dit',
+    format: 'comfyui',
+    family: 'local',
+    precision: 'int8',
+    license: 'local',
+    tags: ['local-import', 'comfyui', 'unhashed', 'engine-checked'],
+    localPath: 'E:\\Models\\moss_image_sft_int8.safetensors',
+    missingFile: 'drive',
+    installState: 'error',
+    installed: false,
+    installedBytes: 0,
+    sizeBytes: 5_413_698_958,
+  }
+}

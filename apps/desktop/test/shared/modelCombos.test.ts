@@ -59,11 +59,27 @@ describe('slotChoices', () => {
 
   it('adds the person’s own single files that are still there, after the downloads', () => {
     const list = slotChoices(
-      models([], [own('my-dit', 'dit'), own('gone-dit', 'dit', { installed: false }), own('my-folder', 'dit', { format: 'diffusers' })]),
+      models(
+        [],
+        [
+          own('my-dit', 'dit', { tags: ['local-import', 'engine-checked'] }),
+          own('gone-dit', 'dit', { installed: false, tags: ['local-import', 'engine-checked'] }),
+          own('my-folder', 'dit', { format: 'diffusers', tags: ['local-import', 'engine-checked'] }),
+        ],
+      ),
       'dit',
     )
     expect(list.at(-1)).toMatchObject({ id: 'my-dit', label: 'my-dit.safetensors', local: true, installed: true })
     expect(list.filter((choice) => choice.local)).toHaveLength(1)
+  })
+
+  it('offers only own files the engine recognised in that role, not ones added by their folder name', () => {
+    // B5: any file could be put in a slot; a file the engine never checked now stays out of the choices.
+    const list = slotChoices(
+      models([], [own('checked', 'dit', { tags: ['local-import', 'engine-checked'] }), own('unchecked', 'dit')]),
+      'dit',
+    )
+    expect(list.filter((choice) => choice.local).map((choice) => choice.id)).toEqual(['checked'])
   })
 })
 

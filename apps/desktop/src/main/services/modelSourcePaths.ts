@@ -155,7 +155,8 @@ async function runtimeKind(path: string): Promise<ModelSourceKind | undefined> {
   return (await desktopProfileName(path)) ? 'comfyui' : undefined
 }
 
-async function installationKind(path: string): Promise<ModelSourceKind | undefined> {
+/** The app installed at this folder (ComfyUI, Stable Diffusion WebUI or Forge), read from its files; undefined for any other folder. */
+export async function installationKind(path: string): Promise<ModelSourceKind | undefined> {
   const kinds = await Promise.all((await runtimeLocations(path)).map(runtimeKind))
   return kinds.find((kind) => kind !== undefined)
 }

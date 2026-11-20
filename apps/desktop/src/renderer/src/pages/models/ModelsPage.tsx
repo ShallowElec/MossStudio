@@ -1,4 +1,4 @@
-import { Download, FolderOpen, Package, Plus, RefreshCw } from 'lucide-react'
+import { ChevronDown, Download, FolderOpen, Package, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cliGpuUuids, generationGpus } from '@shared/bundleFit'
@@ -6,8 +6,8 @@ import { isSharedModelId } from '@shared/sharedModels'
 import { Ipc } from '@shared/channels'
 import type { SlotKey } from '@shared/modelCombos'
 import type { AppInfo, Catalog, ModelBundle, ModelSourceFile, ModelSourceStatus } from '@shared/types'
-import { importFolderMessage, type UseFolderResult } from '../../lib/modelFolder'
 import { call } from '../../lib/api'
+import { useModelImport } from '../../lib/modelImport'
 import { useGpuInventory } from '../../lib/useGpuInventory'
 import { DownloadQueue } from '../../components/DownloadQueue'
 import { MenuItem, Popover } from '../../components/common/Popover'
@@ -105,7 +105,6 @@ function ModelsTab({
   location: ModelLocation
   preferredBundleId: string | null
 }): React.JSX.Element {
-  const toast = useToast()
   const [deleting, setDeleting] = useState<ModelBundle | null>(null)
   const [sources, setSources] = useState<ModelSourceStatus[]>([])
   const [showIncompatible, setShowIncompatible] = useState(false)
@@ -149,6 +148,7 @@ function ModelsTab({
   const featuredCard = featuredView ? (
     <FeaturedModel
       view={featuredView}
+      models={catalog.models}
       location={location}
       pick={sections.pick ?? undefined}
       deletable={deletable(featuredView.bundle)}
@@ -157,57 +157,13 @@ function ModelsTab({
   ) : null
   const featuredCertified = Boolean(featuredView?.bundle.certified)
 
-  async function addFromFolder(): Promise<void> {
-    try {
-      const result = await call<UseFolderResult>(Ipc.modelsUseFolder)
-      if (result.canceled) return
-      if (result.folders?.length) {
-        toast.push(importFolderMessage(result), 'success')
-        return
-      }
-      if (!result.slots) {
-        toast.push('这个文件夹里没有找到主模型、文本编码器或 VAE', 'info')
-        return
-      }
-      setCombining({ initial: result.slots })
-    } catch (cause) {
-      toast.push(cause instanceof Error ? cause.message : String(cause), 'error')
-    }
-  }
-
+  // 自己组合 stays at hand: it pairs with imported files, and its slots offer the ones the engine recognised.
   const combine =
     location.kind === 'local' ? (
-      <Popover
-        align="end"
-        label="自己组合"
-        trigger={(menu) => (
-          <Button tone="ghost" onClick={menu.toggle} aria-expanded={menu['aria-expanded']} aria-haspopup="menu">
-            <Plus className="size-4" strokeWidth={1.6} />
-            自己组合
-          </Button>
-        )}
-      >
-        {(close) => (
-          <>
-            <MenuItem
-              onSelect={() => {
-                close()
-                setCombining({})
-              }}
-            >
-              挑选要下载的部件
-            </MenuItem>
-            <MenuItem
-              onSelect={() => {
-                close()
-                void addFromFolder()
-              }}
-            >
-              用电脑上的模型文件…
-            </MenuItem>
-          </>
-        )}
-      </Popover>
+      <Button tone="secondary" onClick={() => setCombining({})}>
+        <Plus className="size-4" strokeWidth={1.6} />
+        自己组合
+      </Button>
     ) : null
 
   return (
@@ -223,6 +179,25 @@ function ModelsTab({
         >
           读不到 {location.host?.name ?? '远程主机'} 上的模型：{location.scanError}。检查这台主机是否在线，然后重试。
         </Notice>
+      ) : null}
+
+      {location.ready && (sections.mine.length || combine) ? (
+        <Section title="我的模型" actions={combine}>
+          {sections.mine.length ? (
+            <ModelList
+              views={sections.mine}
+              models={catalog.models}
+              location={location}
+              highlightId={preferredBundleId}
+              deletable={deletable}
+              onDelete={setDeleting}
+            />
+          ) : (
+            <Group>
+              <EmptyState size="section" title="还没有自己的模型" />
+            </Group>
+          )}
+        </Section>
       ) : null}
 
       {location.kind === 'local' ? (
@@ -256,7 +231,7 @@ function ModelsTab({
                   {showIncompatible ? (
                     <Group className="max-h-96 overflow-y-auto">
                       {incompatible.map((file) => (
-                        <Row key={file.path} title={file.name} description={sharedRoleLabels[file.role]}>
+                        <Row key={file.path} title={file.name} description={file.reason ?? sharedRoleLabels[file.role]}>
                           <SizeText bytes={file.size} />
                         </Row>
                       ))}
@@ -282,6 +257,7 @@ function ModelsTab({
               {sections.certified.length ? (
                 <ModelList
                   views={sections.certified}
+                  models={catalog.models}
                   location={location}
                   highlightId={preferredBundleId}
                   deletable={deletable}
@@ -302,17 +278,16 @@ function ModelsTab({
         </Group>
       )}
 
-      {location.ready && (sections.others.length || combine) ? (
-        <Section title="其他模型" description="自己组合的模型，引擎没有验证过，不保证能正常出图" actions={combine}>
-          {sections.others.length ? (
-            <ModelList
-              views={sections.others}
-              location={location}
-              highlightId={preferredBundleId}
-              deletable={deletable}
-              onDelete={setDeleting}
-            />
-          ) : null}
+      {location.ready && sections.others.length ? (
+        <Section title="其他模型" description="引擎没有验证过，不保证能正常出图">
+          <ModelList
+            views={sections.others}
+            models={catalog.models}
+            location={location}
+            highlightId={preferredBundleId}
+            deletable={deletable}
+            onDelete={setDeleting}
+          />
         </Section>
       ) : null}
 
@@ -431,6 +406,47 @@ export function ModelsPage(): React.JSX.Element {
       )
     ) : null
 
+  const pickImport = useModelImport((state) => state.pick)
+  // One way in for files on this computer: the engine says what each one is.
+  const importButton =
+    location.kind === 'local' ? (
+      <Popover
+        align="end"
+        label="导入模型"
+        trigger={(menu) => (
+          <Button tone="primary" onClick={menu.toggle} aria-expanded={menu['aria-expanded']} aria-haspopup="menu">
+            导入模型
+            <ChevronDown className="size-4" strokeWidth={1.6} />
+          </Button>
+        )}
+      >
+        {(close) => (
+          <>
+            <MenuItem
+              onSelect={() => {
+                close()
+                void pickImport('files').catch((cause: unknown) =>
+                  toast.push(cause instanceof Error ? cause.message : String(cause), 'error'),
+                )
+              }}
+            >
+              选择文件…
+            </MenuItem>
+            <MenuItem
+              onSelect={() => {
+                close()
+                void pickImport('folder').catch((cause: unknown) =>
+                  toast.push(cause instanceof Error ? cause.message : String(cause), 'error'),
+                )
+              }}
+            >
+              选择文件夹…
+            </MenuItem>
+          </>
+        )}
+      </Popover>
+    ) : null
+
   async function refresh(): Promise<void> {
     setRefreshing(true)
     try {
@@ -454,6 +470,7 @@ export function ModelsPage(): React.JSX.Element {
             <IconButton label="刷新" disabled={refreshing} onClick={() => void refresh()}>
               <RefreshCw className={refreshing ? 'size-4 animate-spin' : 'size-4'} strokeWidth={1.6} />
             </IconButton>
+            {importButton}
           </>
         }
       />

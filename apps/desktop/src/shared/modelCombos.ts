@@ -1,5 +1,5 @@
-import { localFilesBundle } from './localBundle'
-import { duplicatesImportedFile } from './sharedModels'
+import { localDitNeeds, localFilesBundle } from './localBundle'
+import { duplicatesImportedFile, isSharedModelId } from './sharedModels'
 import type { ModelBundle, ModelCombination, ModelEntry } from './types'
 
 /**
@@ -16,6 +16,9 @@ import type { ModelBundle, ModelCombination, ModelEntry } from './types'
 import { isFp16Dit, RUNTIME_CONFIG_ID } from './bundleFit'
 export { RUNTIME_CONFIG_ID }
 export const PIPELINE_ID = 'moss-pipeline'
+
+/** Tag of an own file the engine's `inspect` recognised in its role (导入模型), as opposed to one added by its folder name. */
+export const ENGINE_CHECKED = 'engine-checked'
 
 export type SlotKey = 'dit' | 'textEncoder' | 'vae'
 export const SLOTS: readonly SlotKey[] = ['dit', 'textEncoder', 'vae']
@@ -40,6 +43,8 @@ export function combinationBundle(combination: ModelCombination, models: readonl
   const parts = [dit, textEncoder, vae]
     .map((id) => models.find((model) => model.id === id))
     .filter((model): model is ModelEntry => Boolean(model))
+  // The person's own main model brings the tier (and GPU) its weights need, as a catalog single-file model does.
+  const ownDit = parts.find((model) => model.id === dit && model.provider === 'local')
   return {
     id: combination.id,
     name: combination.name,
@@ -48,6 +53,7 @@ export function combinationBundle(combination: ModelCombination, models: readonl
     support: supportFor(parts),
     recommended: false,
     custom: true,
+    ...(ownDit ? localDitNeeds(ownDit) : {}),
   }
 }
 
@@ -76,7 +82,7 @@ export interface SlotChoice {
 /**
  * What a slot offers: each downloadable part once under its label (the copy
  * already here first, else the folder version, which the official models
- * share), then the person's own files.
+ * share), then the person's own files the engine recognised as this part.
  */
 export function slotChoices(
   models: readonly ModelEntry[],
@@ -102,9 +108,17 @@ export function slotChoices(
       local: false,
     }
   })
-  for (const model of models) {
-    if (model.role !== role || model.provider !== 'local' || !isSingleFile(model) || !isInstalled(model)) continue
-    if (duplicatesImportedFile(model, models)) continue
+  // Only files the engine recognised in this role: imported ones, and a shared folder's (its scan asks the engine).
+  const own = models.filter(
+    (model) =>
+      model.role === role &&
+      model.provider === 'local' &&
+      isSingleFile(model) &&
+      isInstalled(model) &&
+      (isSharedModelId(model.id) || model.tags.includes(ENGINE_CHECKED)),
+  )
+  for (const model of own) {
+    if (duplicatesImportedFile(model, own)) continue
     choices.push({ id: model.id, label: model.name, ids: [model.id], sizeBytes: model.sizeBytes, installed: true, local: true })
   }
   return choices
