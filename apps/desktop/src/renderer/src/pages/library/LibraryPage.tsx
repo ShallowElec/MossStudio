@@ -8,9 +8,8 @@ import { cloverUrl } from '../../lib/clover'
 import { Notice } from '../../components/common/Notice'
 import { Button, EmptyState, IconButton, Input, LoadingRow, PageHeader, Select, cn } from '../../components/ui'
 import { usePictureActions } from '../../lib/usePictureActions'
-import { overlaps, type Rect } from '../studio/boardLayout'
+import type { Rect } from '../studio/boardLayout'
 import { BoardMenu } from '../studio/BoardMenu'
-import { boxBetween } from '../studio/selection'
 import { DetailPanel } from './DetailPanel'
 import {
   EMPTY_FILTERS,
@@ -20,17 +19,14 @@ import {
   countLabel,
   groupByDay,
   hasFilters,
-  joinPicks,
   listedPicks,
   stepIndex,
   type LibraryFilters,
   type TimeFilter,
 } from './logic'
+import { startMarquee } from './marquee'
 import { SelectionBar } from './SelectionBar'
 import { useGallery } from './useGallery'
-
-/** How far (pixels) a press on empty space must move before it draws a box. */
-const BOX_START = 4
 
 function useProjects(): ProjectSummary[] {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -207,38 +203,12 @@ export function LibraryPage(): React.JSX.Element {
     const element = event.currentTarget
     // A press on the scrollbar scrolls; clientWidth stops where the scrollbar starts.
     if (event.clientX - element.getBoundingClientRect().left >= element.clientWidth) return
-    const pointerId = event.pointerId
-    const origin = { x: event.clientX, y: event.clientY }
-    const base = event.ctrlKey || event.metaKey || event.shiftKey ? picked : []
-    let moved = false
-    element.setPointerCapture(pointerId)
-    const move = (next: PointerEvent): void => {
-      if (next.pointerId !== pointerId) return
-      if (!moved && Math.hypot(next.clientX - origin.x, next.clientY - origin.y) < BOX_START) return
-      moved = true
-      const screen = boxBetween(origin, { x: next.clientX, y: next.clientY })
-      const touched = [...element.querySelectorAll<HTMLElement>('[data-library-item]')]
-        .filter((tile) => {
-          const rect = tile.getBoundingClientRect()
-          return overlaps({ x: rect.left, y: rect.top, w: rect.width, h: rect.height }, screen)
-        })
-        .map((tile) => tile.dataset.libraryItem!)
-      setPicked(listedPicks(joinPicks(base, touched), order))
-      const frame = element.getBoundingClientRect()
-      setBox({ ...screen, x: screen.x - frame.left, y: screen.y - frame.top + element.scrollTop })
-    }
-    const stop = (next: PointerEvent): void => {
-      if (next.pointerId !== pointerId) return
-      element.removeEventListener('pointermove', move)
-      element.removeEventListener('pointerup', stop)
-      element.removeEventListener('pointercancel', stop)
-      if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId)
-      setBox(null)
-      if (!moved && next.type === 'pointerup' && !base.length) setPicked([])
-    }
-    element.addEventListener('pointermove', move)
-    element.addEventListener('pointerup', stop)
-    element.addEventListener('pointercancel', stop)
+    startMarquee(element, event, {
+      base: event.ctrlKey || event.metaKey || event.shiftKey ? picked : [],
+      onPick: (paths) => setPicked(listedPicks(paths, order)),
+      onBox: setBox,
+      onClear: () => setPicked([]),
+    })
   }
 
   const filtered = hasFilters(filters)

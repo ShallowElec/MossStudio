@@ -177,16 +177,27 @@ describe('library', () => {
     const page = await openLibrary()
     const first = (await tiles(page).nth(0).boundingBox())!
     const second = (await tiles(page).nth(1).boundingBox())!
-    // From below the row, up across the first two tiles.
-    await page.mouse.move(first.x + 10, first.y + first.height + 40)
+    // Pressed in the page margin left of the first tile, then to the middle of the second. The
+    // tiles are grouped by local day, so the second may sit beside the first or start the next
+    // row (the fixtures straddle midnight in UTC); either way this box touches exactly those two.
+    const empty = { x: first.x - 16, y: first.y + first.height / 2 }
+    const target = { x: second.x + second.width / 2, y: second.y + second.height / 2 }
+    await page.mouse.move(empty.x, empty.y)
     await page.mouse.down()
-    await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 6 })
+    await page.mouse.move(target.x, target.y, { steps: 6 })
     await expect.poll(() => pickedPaths(page)).toEqual([pathOf(0), pathOf(1)])
     await page.mouse.up()
     await expect.poll(() => bar(page).getByText('已选 2 张').isVisible()).toBe(true)
     // A click on empty space lets them go.
-    await page.mouse.click(first.x + 10, first.y + first.height + 40)
+    await page.mouse.click(empty.x, empty.y)
     await expect.poll(() => pickedPaths(page)).toEqual([])
+
+    // A fast drag: one jump from empty space onto the second tile, let go at once.
+    await page.mouse.move(empty.x, empty.y)
+    await page.mouse.down()
+    await page.mouse.move(target.x, target.y)
+    await page.mouse.up()
+    await expect.poll(() => pickedPaths(page)).toEqual([pathOf(0), pathOf(1)])
   })
 
   it('exports the picked pictures to a folder, with their 生成参数 when asked', async () => {
