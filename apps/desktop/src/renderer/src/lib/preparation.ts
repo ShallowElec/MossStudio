@@ -1,5 +1,6 @@
 import type { DownloadTask, MossInferDownloadState } from '@shared/types'
 import { engineDownloadActive } from './engineInstall'
+import { bytes } from './format'
 
 /** One thing being prepared: the runtime (engine packages) or the model files. */
 export interface PreparationPart {
@@ -37,8 +38,8 @@ function enginePart(download: MossInferDownloadState | null | undefined): Prepar
   const index = download.step?.index ?? 0
   const each = download.totalBytes
   const total = each * count
-  // Past the download (verifying, unpacking) the current package counts as fetched.
-  const current = download.phase === 'downloading' ? download.bytes : each
+  // Past the download (verifying, unpacking) the current package counts as fetched; a failed one counts what arrived.
+  const current = download.phase === 'downloading' || download.phase === 'error' ? download.bytes : each
   const done = download.phase === 'done' ? total : Math.min(total, each * index + current)
   if (total <= 0 && !active) return null
   return {
@@ -109,4 +110,10 @@ export function timeLeftLabel(seconds: number | null): string | null {
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
   return rest ? `约 ${hours} 小时 ${rest} 分钟` : `约 ${hours} 小时`
+}
+
+/** "1.2 GB / 25 GB"; 准备中 until the first bytes arrive, so it never reads 未知. */
+export function preparationAmount(done: number, total: number): string {
+  if (done <= 0 || total <= 0) return '准备中'
+  return `${bytes(done)} / ${bytes(total)}`
 }

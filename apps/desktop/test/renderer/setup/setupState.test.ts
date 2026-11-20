@@ -132,6 +132,39 @@ describe('deriveSetup', () => {
     expect(stepsToStart(view)).toEqual(['engine', 'model'])
   })
 
+  it('keeps going while one part failed: the failed part has its reason, its own retry and another download line', () => {
+    const view = deriveSetup(
+      input({
+        engineDownload: engineDownloadFixture({ phase: 'error', error: '下载中断，请检查网络' }),
+        downloads: [downloadFixture({ targetId: SFT_BUNDLE_IDS[0], state: 'running', bytes: 2 * GiB, totalBytes: 8 * GiB })],
+      }),
+    )
+    expect(view.phase).toBe('running')
+    expect(view.steps[1]).toEqual({ id: 'engine', title: '安装引擎', state: 'error', detail: '下载中断，请检查网络', switchMirror: true })
+    expect(view.steps[2]!.state).toBe('running')
+    expect(stepsToStart(view)).toEqual(['engine'])
+  })
+
+  it('offers another download line for a failed model file while the engine keeps installing', () => {
+    const view = deriveSetup(
+      input({
+        engineDownload: engineDownloadFixture({ bytes: 186 * 1024 ** 2, totalBytes: 290 * 1024 ** 2, percent: 64 }),
+        downloads: [downloadFixture({ targetId: SFT_BUNDLE_IDS[0], state: 'error', error: 'HTTP 502' })],
+      }),
+    )
+    expect(view.phase).toBe('running')
+    expect(view.steps[2]).toMatchObject({ state: 'error', detail: 'HTTP 502', switchMirror: true })
+    expect(stepsToStart(view)).toEqual(['model'])
+  })
+
+  it('does not offer another download line when the download never started or was paused', () => {
+    expect(deriveSetup(input({ engineError: '显卡驱动版本过旧' })).steps[1]!.switchMirror).toBeUndefined()
+    expect(deriveSetup(input({ modelError: '没有找到可下载的推荐模型' })).steps[2]!.switchMirror).toBeUndefined()
+    const paused = deriveSetup(input({ downloads: [downloadFixture({ targetId: SFT_BUNDLE_IDS[0], state: 'paused' })] }))
+    expect(paused.steps[2]).toMatchObject({ state: 'error', detail: 'MossDiT SFT · 下载已暂停' })
+    expect(paused.steps[2]!.switchMirror).toBeUndefined()
+  })
+
   it('reports a preflight failure such as an old driver', () => {
     const view = deriveSetup(input({ engineError: '显卡驱动版本过旧' }))
     expect(view.steps[1]).toMatchObject({ state: 'error', detail: '显卡驱动版本过旧' })

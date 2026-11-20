@@ -40,22 +40,24 @@ export function PreparationChip(): React.JSX.Element | null {
   if (!progress.active && !progress.failed) return null
   const percent = Math.round(progress.percent)
   const left = timeLeftLabel(progress.secondsLeft)
+  // A part that failed shows even while the other keeps downloading.
+  const warn = progress.failed
   return (
     <button
       type="button"
       data-preparation-chip
       onClick={() => void navigate('/setup')}
-      title="查看准备进度"
+      title={warn ? '有一项没有下载完，点开重试' : '查看准备进度'}
       className={cn(
         'no-drag flex h-7 shrink-0 items-center gap-2 rounded-full px-3 text-caption transition-colors hover:bg-raised',
-        progress.failed && !progress.active ? 'bg-warn-soft font-medium text-warn' : 'bg-well text-ink',
+        warn ? 'bg-warn-soft font-medium text-warn' : 'bg-well text-ink',
       )}
     >
-      {progress.failed && !progress.active ? (
-        <>
-          <AlertTriangle className="size-3.5" strokeWidth={1.6} aria-hidden="true" />
-          准备没有完成
-        </>
+      {warn ? <AlertTriangle className="size-3.5" strokeWidth={1.6} aria-hidden="true" /> : null}
+      {!progress.active ? (
+        '准备没有完成'
+      ) : warn ? (
+        <span className="tabular">准备中 {percent}% · 有一项没下载完</span>
       ) : (
         <>
           <span className="tabular">准备中 {percent}%</span>

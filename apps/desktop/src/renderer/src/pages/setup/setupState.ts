@@ -32,12 +32,14 @@ export interface SetupStep {
   detail: string
   /** 0–100 while there is measurable progress. */
   percent?: number
+  /** It failed while downloading, so another download line (镜像 or 直连) may get it through. */
+  switchMirror?: true
 }
 
 /**
  * - checking: still reading what is already on this computer
  * - idle: ready for 开始准备
- * - running: something is being installed or downloaded
+ * - running: something is being installed or downloaded; a part that failed meanwhile is a step in error, shown with its own 重试
  * - done: everything is in place, 开始创作 is available
  * - blocked: no GPU the engine runs on, or too little GPU memory (or macOS); nothing can be prepared here
  * - error: a step failed and needs 重试
@@ -159,7 +161,11 @@ function engineStep(input: SetupInput, gpuReady: boolean): SetupStep {
   const missing = input.plan?.missing ?? []
   if (input.engine?.state === 'ready' && missing.length === 0) return { ...base, state: 'done', detail: 'MossInfer 已安装' }
   const error = input.engineError ?? engineInstallError(input.engine, download)
-  if (error && input.engine?.state !== 'ready') return { ...base, state: 'error', detail: error }
+  if (error && input.engine?.state !== 'ready') {
+    // A failure before the download started (an old driver) is not fixed by another line.
+    const downloadFailed = !input.engineError && download?.phase === 'error'
+    return { ...base, state: 'error', detail: error, ...(downloadFailed ? { switchMirror: true as const } : {}) }
+  }
   if (download?.phase === 'canceled' && input.engine?.state !== 'ready') return { ...base, state: 'error', detail: '安装已取消' }
   if (!input.engine) return { ...base, state: 'waiting', detail: '正在检查…' }
   const plan = input.plan
@@ -203,7 +209,7 @@ function modelStep(input: SetupInput, gpuReady: boolean): SetupStep {
     return { ...base, state: 'running', detail: `${name} · ${label}`, ...(percent === undefined ? {} : { percent }) }
   }
   const error = input.modelError ?? failed?.error ?? (failed ? '下载失败' : null)
-  if (error) return { ...base, state: 'error', detail: error }
+  if (error) return { ...base, state: 'error', detail: error, ...(!input.modelError && failed ? { switchMirror: true as const } : {}) }
   if (tasks.some((task) => task.state === 'paused')) return { ...base, state: 'error', detail: `${name} · 下载已暂停` }
   const size = step.sizeBytes ? ` · ${bytes(step.sizeBytes)}` : ''
   return { ...base, state: gpuReady ? 'waiting' : 'blocked', detail: `${name}${size}` }

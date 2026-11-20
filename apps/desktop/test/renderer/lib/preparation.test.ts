@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localModelTasks, preparationProgress, timeLeftLabel } from '@renderer/lib/preparation'
+import { localModelTasks, preparationAmount, preparationProgress, timeLeftLabel } from '@renderer/lib/preparation'
 import { downloadFixture, engineDownloadFixture } from '../../mocks/backend/fixtures'
 
 const MB = 1_000_000
@@ -62,5 +62,26 @@ describe('timeLeftLabel', () => {
     expect(timeLeftLabel(17 * 60 + 5)).toBe('约 18 分钟')
     expect(timeLeftLabel(3600)).toBe('约 1 小时')
     expect(timeLeftLabel(80 * 60)).toBe('约 1 小时 20 分钟')
+  })
+})
+
+describe('preparationProgress with a failed part', () => {
+  it('counts only what arrived of a failed engine package, while the model keeps going', () => {
+    const engine = engineDownloadFixture({ phase: 'error', bytes: 50 * MB, totalBytes: 200 * MB, error: 'x' })
+    const tasks = [downloadFixture({ targetId: 'dit', state: 'running', bytes: 100 * MB, totalBytes: 600 * MB, speedBps: 20 * MB })]
+    const progress = preparationProgress(engine, tasks)!
+    expect(progress).toMatchObject({ done: 150 * MB, total: 800 * MB, active: true, failed: true })
+    expect(progress.parts[0]).toMatchObject({ id: 'engine', done: 50 * MB, failed: true, finished: false })
+  })
+})
+
+describe('preparationAmount', () => {
+  it('says 准备中 until the first bytes arrive, never 未知', () => {
+    expect(preparationAmount(0, 25 * 1024 ** 3)).toBe('准备中')
+    expect(preparationAmount(0, 0)).toBe('准备中')
+  })
+
+  it('reads done of total once bytes arrive', () => {
+    expect(preparationAmount(3 * 1024 ** 3, 25 * 1024 ** 3)).toBe('3.0 GB / 25 GB')
   })
 })
