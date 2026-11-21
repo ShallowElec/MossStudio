@@ -22,11 +22,11 @@ import {
   uninstallMcpClient,
 } from './mcp'
 import { listLoraProfiles, saveLoraProfile, cachedSafetensorsTriggers } from './services/loraProfiles'
-import { isNetworkPath } from './lib/localPath'
+import { isNetworkPath, pathLinksToNetwork } from './lib/localPath'
 import { agentHub, attachCapabilityApproval, capabilityApprovalQueue, stopAgentHub } from './agentHub'
 import { assertExternalAgentsOn, externalAgentsOn } from './externalAgents'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
 import { totalmem } from 'node:os'
 import { ZodError, type ZodType } from 'zod'
 import { Events, Ipc } from '@shared/channels'
@@ -299,6 +299,8 @@ export async function syncExternalAgents(settings: Settings): Promise<void> {
     return
   }
   await Promise.all([stopMcpServer(), stopAgentHub()])
+  // One left by a crash would point clients at a dead port and token.
+  rmSync(paths.mcpDiscovery(), { force: true })
 }
 
 export function registerIpc(): void {
@@ -429,7 +431,8 @@ export function registerIpc(): void {
   })
   handle(Ipc.loraProfilesInspect, schemas.loraProfilesInspect, async ({ filePath, loraId }) => {
     // A file on a network share is never opened for its trigger words (lib/localPath.ts).
-    if (filePath && isNetworkPath(filePath)) throw new Error('不能读取网络位置上的文件，请手动填写触发词')
+    if (filePath && (isNetworkPath(filePath) || (await pathLinksToNetwork(filePath))))
+      throw new Error('不能读取网络位置上的文件，请手动填写触发词')
     const resolved =
       filePath && existsSync(filePath) ? filePath : loraId ? await resolveAdapterFile(getSettings(), loraId).catch(() => null) : null
     if (!resolved || !existsSync(resolved)) {

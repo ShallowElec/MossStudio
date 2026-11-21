@@ -126,14 +126,16 @@ async function studioReady(waitMs: number): Promise<boolean> {
  * says so plainly when it still cannot run.
  */
 export function installExternalToolBridge(options: { openStudio: () => void; waitMs?: number }): () => void {
+  // One call at a time: each call's board changes, also those after an await, must land in its own undo step.
+  let queue: Promise<void> = Promise.resolve()
   return onEvent<AiToolCallRequest>(Events.aiToolCall, (request) => {
     if (!request.external) return
-    void (async () => {
+    queue = queue.then(async () => {
       if (!getStudioApi()) options.openStudio()
       const result = (await studioReady(options.waitMs ?? STUDIO_OPEN_WAIT_MS))
         ? await runExternalToolCall(request)
         : { ok: false, content: JSON.stringify({ error: 'MossStudio 的创作页还没有打开，请让用户先打开创作页再试' }) }
       await call(Ipc.aiToolResult, { callId: request.callId, result }).catch(() => undefined)
-    })()
+    })
   })
 }

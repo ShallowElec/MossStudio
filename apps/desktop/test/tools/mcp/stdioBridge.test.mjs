@@ -1,6 +1,6 @@
 // The zero-dependency stdio bridge external MCP clients launch (tools/mcp/mossstudio-mcp-stdio.mjs).
 import { describe, expect, it } from 'vitest'
-import { createBridge, defaultDiscoveryPaths, forwardJsonRpcLine } from '../../../../../tools/mcp/mossstudio-mcp-stdio.mjs'
+import { anySignal, createBridge, defaultDiscoveryPaths, forwardJsonRpcLine } from '../../../../../tools/mcp/mossstudio-mcp-stdio.mjs'
 
 const env = { MOSSSTUDIO_MCP_URL: 'http://127.0.0.1:4321/mcp', MOSSSTUDIO_MCP_TOKEN: 'test-token-0123456789' }
 
@@ -92,6 +92,17 @@ describe('tools/mcp stdio bridge', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     await bridge.close()
     expect(callSignal.aborted).toBe(true)
+  })
+
+  it('combines signals without AbortSignal.any, which older node lacks', () => {
+    const a = new AbortController()
+    const b = new AbortController()
+    const combined = anySignal([a.signal, b.signal])
+    expect(combined.aborted).toBe(false)
+    b.abort('gone')
+    expect(combined.aborted).toBe(true)
+    expect(combined.reason).toBe('gone')
+    expect(anySignal([AbortSignal.abort('x')]).aborted).toBe(true)
   })
 
   it('finds the discovery file the app names, before any guessed location', () => {

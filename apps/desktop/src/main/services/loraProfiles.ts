@@ -4,7 +4,7 @@ import type { LoraMetadata, LoraProfile } from '@shared/types'
 import { schemas } from '@shared/schemas'
 import { paths } from '../lib/paths'
 import { writeFileAtomic } from '../lib/atomicWrite'
-import { isNetworkPath, linksToNetwork } from '../lib/localPath'
+import { isNetworkPath, pathLinksToNetwork } from '../lib/localPath'
 
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
@@ -117,8 +117,8 @@ async function readProfiles(): Promise<{ rows: LoraProfile[]; damaged: boolean }
   try {
     raw = await readFile(paths.loraProfiles(), 'utf8')
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { rows: [], damaged: false }
-    throw error
+    // Optional metadata must not make the model inventory unavailable: an unreadable file reads as none, kept aside on save.
+    return { rows: [], damaged: (error as NodeJS.ErrnoException).code !== 'ENOENT' }
   }
   let parsed: unknown
   try {
@@ -164,7 +164,7 @@ const triggerCache = new Map<string, { size: number; mtimeMs: number; metadata: 
 
 /** The file's trigger words, read once per version of the file. A network path is never opened. */
 export async function cachedSafetensorsTriggers(filePath: string): Promise<LoraMetadata> {
-  if (isNetworkPath(filePath) || (await linksToNetwork(filePath))) return {}
+  if (isNetworkPath(filePath) || (await pathLinksToNetwork(filePath))) return {}
   const info = await stat(filePath)
   const cached = triggerCache.get(filePath)
   if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) return cached.metadata

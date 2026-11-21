@@ -424,7 +424,6 @@ export const schemas = {
               name: z.string().min(1).max(256),
               mime: z.string().min(1).max(128),
               dataUrl: z.string().max(14_000_000).optional(),
-              path: pathLike.optional(),
             })
             .strict(),
         )

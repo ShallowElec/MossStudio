@@ -5,6 +5,7 @@ import {
   getSelectedTrainingHost,
   resolveTrainingHost,
   setSelectedTrainingHost,
+  trainingSshHosts,
 } from '@renderer/lib/trainingHost'
 
 describe('lib/trainingHost', () => {
@@ -58,5 +59,16 @@ describe('lib/trainingHost', () => {
     ] as const)('id %s with remote=%s resolves to %s', (id, remote, expected) => {
       expect(resolveTrainingHost(id, hosts, remote)).toBe(expected)
     })
+  })
+})
+
+describe('trainingSshHosts', () => {
+  it('offers SSH hosts for training but never a Worker host, which only generates pictures', () => {
+    const hosts = [
+      { id: 'local', kind: 'local' as const },
+      { id: 'gpu', kind: 'ssh' as const },
+      { id: 'worker', kind: 'ssh' as const, remoteBackend: 'worker-daemon' as const },
+    ]
+    expect(trainingSshHosts(hosts).map((host) => host.id)).toEqual(['gpu'])
   })
 })

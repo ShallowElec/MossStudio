@@ -83,7 +83,8 @@ export interface AgentSendInput {
   text: string
   studioContext?: string
   toolProfile?: ToolProfileId
-  attachments?: Array<{ name: string; mime: string; dataUrl?: string; path?: string }>
+  /** Pictures carried inline; main never reads a file the renderer names. */
+  attachments?: Array<{ name: string; mime: string; dataUrl?: string }>
 }
 export interface AgentHubEvent {
   backendId: string

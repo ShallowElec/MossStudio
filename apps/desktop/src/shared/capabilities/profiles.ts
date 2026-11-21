@@ -25,6 +25,8 @@ export interface ToolProfileOptions {
   surface?: CapabilitySurface
   enabledFlags?: Readonly<Record<string, boolean>>
   enabledPacks?: readonly CapabilityId[]
+  /** Packs left out whatever the profile says (the ask cards, which only the 助手's chat shows). */
+  excludePacks?: readonly CapabilityId[]
   includeExternal?: boolean
   headlessOnly?: boolean
   audience?: readonly SkillAudience[]
@@ -55,7 +57,7 @@ export const COMPACT_PROFILE_PACKS: readonly CapabilityId[] = [
 
 /** Project actions, provider tool schemas and synchronized Skill markdown for a Tool Profile. */
 export function projectCapabilities(registry: CapabilityRegistry, options: ToolProfileOptions): ProjectedToolset {
-  const actions = registry.listActions({
+  const listed = registry.listActions({
     surface: options.surface,
     enabledFlags: options.enabledFlags,
     enabledPacks: options.enabledPacks ?? (options.profile === 'compact' ? COMPACT_PROFILE_PACKS : undefined),
@@ -63,6 +65,7 @@ export function projectCapabilities(registry: CapabilityRegistry, options: ToolP
     headlessOnly: options.headlessOnly,
     ...(options.profile === 'proposal-only' ? { excludeEffects: MUTATING_EFFECTS } : {}),
   })
+  const actions = options.excludePacks?.length ? listed.filter((action) => !options.excludePacks!.includes(action.packId)) : listed
   const tools = registry.toToolDefinitions(actions, { nameStyle: options.nameStyle ?? 'canonical' })
   const skill = registry.synthesizeSkill({
     actions,

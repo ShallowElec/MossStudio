@@ -46,6 +46,21 @@ export async function linksToNetwork(path: string): Promise<boolean> {
   return target !== null && isNetworkPath(target)
 }
 
+/**
+ * Whether the path or any folder above it is a link to a network place, read
+ * without opening a target: `realpath` would follow such a folder link and
+ * contact the share before its result could be refused.
+ */
+export async function pathLinksToNetwork(path: string): Promise<boolean> {
+  let current = resolve(path)
+  for (;;) {
+    if (await linksToNetwork(current)) return true
+    const parent = dirname(current)
+    if (parent === current) return false
+    current = parent
+  }
+}
+
 /** Folders removable disks are mounted under on Linux and macOS; a missing folder right below one is a missing disk. */
 const MOUNT_PARENTS = ['/media', '/mnt', '/run/media', '/Volumes']
 

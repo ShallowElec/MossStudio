@@ -41,6 +41,9 @@ export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SUPPORTED_VERSIONS: readonly string[] = ['2024-11-05', MCP_PROTOCOL_VERSION, '2025-06-18']
 const MAX_BODY_BYTES = 4 * 1024 * 1024
 
+/** Packs no MCP client is offered, whatever its profile. */
+export const MCP_EXCLUDED_PACKS: readonly CapabilityId[] = ['studio.ask']
+
 export const MCP_RESOURCE_URIS = {
   activeSkill: 'mossstudio://skill/active',
   promptcraft: 'mossstudio://skill/promptcraft',
@@ -239,6 +242,8 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
     dispatcher.list({
       profile,
       enabledPacks,
+      // 问你一句 / 等你确认 cards show only in the 助手's chat: an Agent asking there would wait for an answer nobody sees.
+      excludePacks: MCP_EXCLUDED_PACKS,
       nameStyle: 'canonical',
     })
 
@@ -477,6 +482,8 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
           name: 'system.context.get',
           arguments: {},
           source: 'external-agent',
+          allowed: new Set(activeProjected().actions.map((action) => action.id)),
+          readOnly: true,
           runInRenderer: options.runInRenderer,
         })
         return {
@@ -493,6 +500,9 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
         }
       }
       if (uri === MCP_RESOURCE_URIS.recentAudit) {
+        // The trail is shown only to a profile that offers the tool that reads it.
+        if (!activeProjected().actions.some((action) => action.id === 'system.audit.recent'))
+          return { status: 200, body: rpcError(id, -32002, `Unknown MCP resource URI: ${uri}`) }
         const entries = await listCapabilityAudit({ limit: 50, source: 'external-agent' })
         return {
           status: 200,
@@ -707,14 +717,19 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
 }
 
 let activeServer: McpServerInstance | null = null
+/** A start in progress: a second caller waits for it instead of starting another server. */
+let starting: Promise<McpServerInstance> | null = null
 
 export async function startMcpServer(options: McpServerOptions = {}): Promise<McpServerInstance> {
   if (activeServer) return activeServer
-  activeServer = await createMcpServer(options)
-  return activeServer
+  starting ??= createMcpServer(options)
+    .then((server) => (activeServer = server))
+    .finally(() => (starting = null))
+  return starting
 }
 
 export async function stopMcpServer(): Promise<void> {
+  if (starting) await starting.catch(() => undefined)
   if (!activeServer) return
   const current = activeServer
   activeServer = null

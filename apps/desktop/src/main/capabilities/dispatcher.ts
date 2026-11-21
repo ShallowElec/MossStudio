@@ -57,6 +57,7 @@ export interface ListCapabilitiesInput {
   profile?: ToolProfileId
   surface?: CapabilitySurface
   enabledPacks?: readonly CapabilityId[]
+  excludePacks?: readonly CapabilityId[]
   headlessOnly?: boolean
   includeExternal?: boolean
   audience?: readonly SkillAudience[]
@@ -154,6 +155,7 @@ export function createMainCapabilityDispatcher(options: MainCapabilityDispatcher
       surface: input.surface,
       enabledFlags: readFlags(),
       enabledPacks: input.enabledPacks,
+      excludePacks: input.excludePacks,
       includeExternal: input.includeExternal,
       headlessOnly: input.headlessOnly,
       audience: input.audience,

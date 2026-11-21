@@ -14,10 +14,12 @@ import type {
   AgentSetModelInput,
 } from '@shared/agentHub'
 import { getMcpServerState } from '../mcp/server'
-import { bridgeLaunch } from '../mcp/clientInstaller'
+import { bridgeLaunch, findExecutableOnPath } from '../mcp/clientInstaller'
 
 /** A turn that streams nothing for this long is stopped: the Agent hung or lost its model. */
 export const PROMPT_IDLE_TIMEOUT_MS = 10 * 60_000
+/** Pages of `session/list` read at most. */
+const SESSION_LIST_PAGES = 10
 
 export async function resolveAcpLaunch(
   command: string,
@@ -40,8 +42,10 @@ export async function resolveAcpLaunch(
   if (!match) throw new Error('此 Windows 命令不是可安全启动的 Node.js shim，请填写脚本入口。')
   const script = resolve(dirname(candidate), match[1]!.replace(/\\/g, '/'))
   if (!existsSync(script)) throw new Error('Agent 的脚本入口不存在，请重新安装命令。')
+  // As npm's own shim: the node beside it, else the one on PATH; this app's binary (run as node) only without either.
   const localNode = resolve(dirname(candidate), 'node.exe')
-  return { command: existsSync(localNode) ? localNode : process.execPath, args: [script, ...args] }
+  const pathNode = findExecutableOnPath(['node'], process.env, 'win32')
+  return { command: existsSync(localNode) ? localNode : (pathNode ?? process.execPath), args: [script, ...args] }
 }
 
 /** The environment of a child: Electron runs a script as node only with ELECTRON_RUN_AS_NODE, and only this app's own binary needs it. */
@@ -52,9 +56,7 @@ export function childEnv(command: string): NodeJS.ProcessEnv {
 }
 
 function attachmentSummary(input: AgentSendInput): string {
-  return [input.text, ...(input.attachments ?? []).map((file) => `${file.name} (${file.mime})${file.path ? `: ${file.path}` : ''}`)].join(
-    '\n',
-  )
+  return [input.text, ...(input.attachments ?? []).map((file) => `${file.name} (${file.mime})`)].join('\n')
 }
 
 const probes = new Map<string, { expires: number; result: Promise<boolean> }>()
@@ -84,13 +86,6 @@ function buildAcpPromptBlocks(input: AgentSendInput, bodyText: string): Array<Re
     if (attachment.dataUrl) {
       const match = /^data:([^;,]+);base64,(.+)$/s.exec(attachment.dataUrl)
       if (match) blocks.push({ type: 'image', data: match[2]!, mimeType: match[1] || attachment.mime || 'image/png' })
-    } else if (attachment.path && existsSync(attachment.path)) {
-      try {
-        const data = readFileSync(attachment.path).toString('base64')
-        blocks.push({ type: 'image', data, mimeType: attachment.mime || 'image/png' })
-      } catch {
-        // Text summary still includes the path.
-      }
     }
   }
   return blocks
@@ -250,7 +245,8 @@ export function createAcpDriver(options: {
     const change = object(params.update)
     const kind = text(change.sessionUpdate)
     if (kind === 'user_message_chunk') {
-      // Only `session/load` sends the person's own messages: the history it replays.
+      // The person's own messages belong only to the history `session/load` replays; a live turn already holds them.
+      if (!session.loading) return
       const content = object(change.content)
       if (content.type !== 'text') return
       session.assistant = undefined
@@ -456,8 +452,16 @@ export function createAcpDriver(options: {
     async listSessions() {
       if (connected && canList) {
         // The Agent's own list, so conversations from before a restart are there to load.
-        const result = object(await rpc('session/list', {}))
-        for (const raw of Array.isArray(result.sessions) ? result.sessions : []) {
+        const rows: unknown[] = []
+        let cursor = ''
+        // Follows the Agent's pages, up to a bound, so a conversation bound to a project is not lost past the first.
+        for (let page = 0; page < SESSION_LIST_PAGES; page++) {
+          const result = object(await rpc('session/list', cursor ? { cursor } : {}))
+          if (Array.isArray(result.sessions)) rows.push(...result.sessions)
+          cursor = text(result.nextCursor)
+          if (!cursor) break
+        }
+        for (const raw of rows) {
           const row = object(raw)
           const id = text(row.sessionId)
           if (!id || sessions.has(id)) continue

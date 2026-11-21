@@ -13,7 +13,7 @@ import {
 import { homedir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { APPROVAL_WAIT_MS } from '../agentHub/approvalQueue'
-import { resolveAcpLaunch } from '../agentHub/acpDriver'
+import { childEnv, resolveAcpLaunch } from '../agentHub/acpDriver'
 import { paths } from '../lib/paths'
 import { run, type RunResult } from '../lib/run'
 import { getMcpServerState } from './server'
@@ -60,6 +60,8 @@ export interface McpClientInstallerOptions {
   execPath?: string
   /** Where registrations are remembered; defaults to `<dataRoot>/mcp/clients.json`. */
   recordPath?: string
+  /** How long one CLI call may take; uninstalling uses less. */
+  cliTimeoutMs?: number
   /** Runs a CLI without a shell (tests replace it). */
   runCli?: (command: string, args: string[]) => Promise<RunResult>
 }
@@ -100,7 +102,11 @@ function resolve(options: McpClientInstallerOptions = {}): Resolved {
       options.runCli ??
       (async (command, args) => {
         const launch = await resolveAcpLaunch(command, args, platform)
-        return run(launch.command, launch.args, { timeoutMs: CLI_TIMEOUT_MS, env })
+        // A Windows shim may resolve to this app's own binary, which runs the script only as node.
+        return run(launch.command, launch.args, {
+          timeoutMs: options.cliTimeoutMs ?? CLI_TIMEOUT_MS,
+          env: { ...env, ...childEnv(launch.command) },
+        })
       }),
   }
 }
@@ -227,7 +233,8 @@ async function register(id: McpClientId, resolved: Resolved, launch: BridgeLaunc
   if (id === 'claude-code') {
     // Removed first so a changed path replaces the old entry; a missing entry is not an error here.
     await resolved.runCli(cli, ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME])
-    const config = { type: 'stdio', command: launch.command, args: launch.args, env: launch.env, timeout: CLIENT_TOOL_TIMEOUT_SEC * 1000 }
+    // No `timeout`: Claude Code's default for a stdio server (about 28 hours) already outlasts an approval.
+    const config = { type: 'stdio', command: launch.command, args: launch.args, env: launch.env }
     const result = await resolved.runCli(cli, ['mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(config)])
     if (result.code !== 0) throw failure('claude mcp add-json', result)
     return
@@ -288,7 +295,8 @@ export async function refreshMcpClientRegistrations(options: McpClientInstallerO
 export async function uninstallRecordedMcpClients(dataRoot: string, options: McpClientInstallerOptions = {}): Promise<void> {
   const recordPath = join(dataRoot, 'mcp', 'clients.json')
   for (const id of Object.keys(readRecords(recordPath)) as McpClientId[]) {
-    if (id in CLIENTS) await uninstallMcpClient(id, { ...options, recordPath, stdioBridgePath: '', discoveryPath: '' })
+    // A client that hangs must not hold up the uninstall for long.
+    if (id in CLIENTS) await uninstallMcpClient(id, { cliTimeoutMs: 8000, ...options, recordPath, stdioBridgePath: '', discoveryPath: '' })
   }
 }
 

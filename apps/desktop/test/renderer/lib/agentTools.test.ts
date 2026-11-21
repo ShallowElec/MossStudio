@@ -530,6 +530,30 @@ describe('lib/agentTools bridge: the 助手 and external Agents', () => {
     uninstall()
   })
 
+  it("runs an external Agent's calls one at a time, so a slow call's later edits stay in its own step", async () => {
+    const backend = createMockBackend('ready')
+    const uninstall = backend.install()
+    const order: string[] = []
+    let release = (): void => undefined
+    const followExternal = vi.fn(async <T>(call: string, run: () => Promise<T>) => {
+      order.push(`start ${call}`)
+      if (call === 'slow') await new Promise<void>((resolve) => (release = resolve))
+      const result = await run()
+      order.push(`end ${call}`)
+      return result
+    })
+    registerStudioTools(api({ followExternal } as Partial<StudioToolApi>))
+    const off = installExternalToolBridge({ openStudio: () => undefined })
+    backend.emit(Events.aiToolCall, { callId: 'slow', name: 'studio_read_context', arguments: '{}', external: true })
+    backend.emit(Events.aiToolCall, { callId: 'fast', name: 'studio_read_context', arguments: '{}', external: true })
+    await flush()
+    expect(order).toEqual(['start slow'])
+    release()
+    await vi.waitFor(() => expect(order).toEqual(['start slow', 'end slow', 'start fast', 'end fast']))
+    off()
+    uninstall()
+  })
+
   it('opens the Studio for an external call made from another page, and says so when it never opens', async () => {
     const backend = createMockBackend('ready')
     const uninstall = backend.install()

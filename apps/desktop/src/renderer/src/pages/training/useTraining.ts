@@ -3,7 +3,13 @@ import { Events, Ipc } from '@shared/channels'
 import type { TrainingProject, TrainingReadiness } from '@shared/training'
 import type { ManagedHost } from '@shared/types'
 import { call, onEvent } from '../../lib/api'
-import { TRAINING_HOST_EVENT, announceTrainingHost, getSelectedTrainingHost, resolveTrainingHost } from '../../lib/trainingHost'
+import {
+  TRAINING_HOST_EVENT,
+  announceTrainingHost,
+  getSelectedTrainingHost,
+  resolveTrainingHost,
+  trainingSshHosts,
+} from '../../lib/trainingHost'
 import { useApp } from '../../store'
 
 export function errorText(error: unknown): string {
@@ -58,7 +64,7 @@ export function useTrainingHost(): { hostId: string; sshHosts: ManagedHost[]; se
     setSelected(id)
   }, [])
 
-  const sshHosts = hosts.filter((host) => host.kind === 'ssh')
+  const sshHosts = trainingSshHosts(hosts)
   return { hostId: resolveTrainingHost(selected, sshHosts, remoteHostsEnabled), sshHosts, setHostId }
 }
 

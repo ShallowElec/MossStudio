@@ -372,7 +372,6 @@ function defaultHandlers(): Map<string, Handler> {
         const client = state.agents.clients.find((item) => item.id === clientId)
         if (!client || client.installMode === 'copy-only') throw new MockIpcError('E_MCP_CLIENT', `没有找到 ${clientId} 命令`)
         client.installed = channel === Ipc.mcpClientInstall
-        client.detail = client.installed ? '已连接' : '未连接'
         return { ...client }
       }),
     )
@@ -887,6 +886,8 @@ function defaultHandlers(): Map<string, Handler> {
   )
   h.set(Ipc.hostsSave, (payload, { state, emit }) => {
     const { password, ...config } = p<Partial<ManagedHost> & { password?: string }>(payload)
+    if (config.remoteBackend === 'worker-daemon' && !(state.settings.remoteHostsEnabled && state.settings.workerHostsEnabled))
+      throw new MockIpcError('E_FEATURE_OFF', 'Worker 远程主机还没有打开，请先在 设置 › 功能 里打开')
     const host = {
       status: 'unchecked',
       devices: [],

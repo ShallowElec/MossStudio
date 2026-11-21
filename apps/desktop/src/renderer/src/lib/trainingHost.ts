@@ -1,3 +1,4 @@
+import type { ManagedHost } from '@shared/types'
 /**
  * Where training runs: 'local' or the id of an SSH host. Remembered per person
  * in localStorage; views that show it hear about changes through TRAINING_HOST_EVENT.
@@ -5,6 +6,11 @@
 const KEY = 'mossstudio:training-host'
 
 export const TRAINING_HOST_EVENT = 'mossstudio:training-host-changed'
+
+/** The hosts a training can run on: SSH hosts, but never a Worker host, which only generates pictures. */
+export function trainingSshHosts<T extends Pick<ManagedHost, 'kind' | 'remoteBackend'>>(hosts: readonly T[]): T[] {
+  return hosts.filter((host) => host.kind === 'ssh' && host.remoteBackend !== 'worker-daemon')
+}
 
 export function getSelectedTrainingHost(): string {
   try {

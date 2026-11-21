@@ -57,6 +57,7 @@ import {
   trainingUpdate,
 } from '../services/training/run'
 import { assertDatasetEditable, getTrainingProject } from '../services/training/store'
+import { overrideLines } from '../services/training/commands'
 import { prepareAgentPaths } from './agentPaths'
 import { listCapabilityAudit } from './audit'
 import { createMainCapabilityDispatcher, type MainCapabilityDispatcher, type MainCapabilityHandler } from './dispatcher'
@@ -353,7 +354,9 @@ async function trainingRunDetail(id: string): Promise<string> {
     `batch ${recipe.batch}`,
     `${recipe.resolution}px`,
   ]
-  return `「${project.name}」在${host}上训练：${shape.filter(Boolean).join(' · ')}${recipe.overrides.trim() ? ' · 含自定义参数' : ''}`
+  // Custom settings go last on the trainer's command line and can change where it writes: they are shown in full.
+  const custom = overrideLines(recipe.overrides)
+  return `「${project.name}」在${host}上训练：${shape.filter(Boolean).join(' · ')}${custom.length ? `\n自定义参数：${custom.join(' ').slice(0, 600)}` : ''}`
 }
 
 export function createBuiltinMainDispatcher(): MainCapabilityDispatcher {

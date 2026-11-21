@@ -102,3 +102,9 @@ it('reads a LoRA file once per version, and never opens a network path', async (
   expect(await cachedSafetensorsTriggers('\\\\server\\share\\style.safetensors')).toEqual({})
   expect(await cachedSafetensorsTriggers('//server/share/style.safetensors')).toEqual({})
 })
+
+it('reads no profiles from a file that cannot be read, instead of failing the model list', async () => {
+  await mkdir(paths.loraProfiles(), { recursive: true })
+  await expect(listLoraProfiles()).resolves.toEqual([])
+  await expect(mergeLoraMeta({ id: 'style' })).resolves.toEqual({ id: 'style' })
+})

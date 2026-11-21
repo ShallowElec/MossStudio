@@ -74,7 +74,7 @@ describe('main/mcp/clientInstaller', () => {
     expect(CLIENT_TOOL_TIMEOUT_SEC * 1000).toBeGreaterThan(APPROVAL_WAIT_MS)
   })
 
-  it("registers with Claude Code through its CLI, with the person's node, a timeout, and no shell", async () => {
+  it("registers with Claude Code through its CLI, with the person's node and no shell (its own tool timeout is about 28 hours)", async () => {
     const env = setup()
     const status = await installMcpClient('claude-code', env.options)
     expect(status).toMatchObject({ id: 'claude-code', detected: true, installed: true, installMode: 'auto' })
@@ -88,7 +88,6 @@ describe('main/mcp/clientInstaller', () => {
       command: 'node',
       args: [env.options.stdioBridgePath],
       env: { MOSSSTUDIO_MCP_DISCOVERY: env.options.discoveryPath },
-      timeout: CLIENT_TOOL_TIMEOUT_SEC * 1000,
     })
     const removed = await uninstallMcpClient('claude-code', env.options)
     expect(removed.installed).toBe(false)

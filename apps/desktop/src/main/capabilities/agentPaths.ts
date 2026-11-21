@@ -2,7 +2,7 @@ import { realpath } from 'node:fs/promises'
 import { extname } from 'node:path'
 import type { ActionDescriptor } from '@shared/capabilities'
 import { codedError } from '../lib/codedError'
-import { isNetworkPath, linksToNetwork } from '../lib/localPath'
+import { isNetworkPath, pathLinksToNetwork } from '../lib/localPath'
 import { isInside } from '../lib/paths'
 import { galleryRoots } from '../services/gallery'
 import { projectsRootDir } from '../services/projects'
@@ -27,7 +27,7 @@ export const AGENT_PATH_ARGS: Readonly<Record<string, 'path' | 'files'>> = {
  * authenticate with the person's NTLM hash (lib/localPath.ts).
  */
 export async function agentPicturePath(path: string): Promise<string> {
-  if (isNetworkPath(path) || (await linksToNetwork(path))) throw codedError('E_AGENT_PATH', '不能读取网络位置上的文件')
+  if (isNetworkPath(path) || (await pathLinksToNetwork(path))) throw codedError('E_AGENT_PATH', '不能读取网络位置上的文件')
   const real = await realpath(path).catch(() => null)
   if (!real) throw codedError('E_AGENT_PATH', `找不到这个文件：${path}`)
   if (isNetworkPath(real)) throw codedError('E_AGENT_PATH', '不能读取网络位置上的文件')

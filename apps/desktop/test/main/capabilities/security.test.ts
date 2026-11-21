@@ -13,6 +13,7 @@ import {
   resetCapabilityAuditMemory,
 } from '@main/capabilities'
 import { agentPicturePath, prepareAgentPaths } from '@main/capabilities/agentPaths'
+import { pathLinksToNetwork } from '@main/lib/localPath'
 import { MAX_PENDING_PER_SOURCE, createCapabilityApprovalQueue } from '@main/agentHub/approvalQueue'
 import * as supervisor from '@main/services/supervisor'
 import * as trainingRun from '@main/services/training/run'
@@ -147,7 +148,7 @@ describe('the built-in dispatcher', () => {
     vi.spyOn(trainingRun, 'trainingGet').mockResolvedValue({
       name: '阿明',
       hostId: 'local',
-      recipe: { algo: 'lokr', dim: null, steps: 1200, batch: 2, resolution: 1024, overrides: '' },
+      recipe: { algo: 'lokr', dim: null, steps: 1200, batch: 2, resolution: 1024, overrides: 'OUTPUT_DIR=/tmp/elsewhere' },
     } as never)
     const start = vi.spyOn(trainingRun, 'trainingStart').mockResolvedValue({} as never)
     const dispatcher = createBuiltinMainDispatcher()
@@ -156,6 +157,8 @@ describe('the built-in dispatcher', () => {
     const result = await dispatcher.execute({ name: 'training.runs.start', arguments: { id: 'tp-aming' }, source: 'external-agent' })
     expect(result.ok).toBe(false)
     expect(approval.mock.calls[0]![0].summary).toContain('「阿明」在本机上训练：lokr · 1200 步 · batch 2 · 1024px')
+    // Custom settings can change where the trainer writes: the person sees them in full.
+    expect(approval.mock.calls[0]![0].summary).toContain('OUTPUT_DIR=/tmp/elsewhere')
     expect(start).not.toHaveBeenCalled()
     vi.restoreAllMocks()
   })
@@ -197,6 +200,15 @@ describe('files an external Agent names', () => {
       symlinkSync(join(outside(), 'secret.png'), join(outputs, 'link.png'))
       await expect(agentPicturePath(join(outputs, 'link.png'))).rejects.toThrow('作品库或项目')
     }
+  })
+
+  it.runIf(process.platform !== 'win32')('refuses a file below a folder that links to a network place, without following it', async () => {
+    const outputs = join(root(), 'outputs')
+    mkdirSync(outputs, { recursive: true })
+    symlinkSync('//attacker/share', join(outputs, 'nas'))
+    expect(await pathLinksToNetwork(join(outputs, 'nas', 'deep', 'x.png'))).toBe(true)
+    await expect(agentPicturePath(join(outputs, 'nas', 'deep', 'x.png'))).rejects.toThrow('网络位置')
+    expect(await pathLinksToNetwork(join(outputs, 'local.png'))).toBe(false)
   })
 
   it('checks every file of a GBC job before it starts, and the handler never sees an unchecked path', async () => {

@@ -16,8 +16,8 @@ Paths are relative to `apps/desktop/src/`.
 
 | Off | On |
 | --- | --- |
-| No MCP server, no `<dataRoot>/mcp-server.json`, no bridge copy in `<dataRoot>/mcp/` | The server listens and writes its discovery file; registered clients are pointed at this app version (`refreshMcpClientRegistrations`) |
-| Every `agent-hub:*`, `capabilities:*` and `mcp:*` channel answers `E_FEATURE_OFF` (`handleExternal`) | The channels answer |
+| No MCP server and no `<dataRoot>/mcp-server.json`; nothing is written to `<dataRoot>/mcp/` (a bridge copy and `clients.json` from an earlier time on stay) | The server listens and writes its discovery file; registered clients are pointed at this app version (`refreshMcpClientRegistrations`) |
+| Every `agent-hub:*`, `capabilities:*` and `mcp:*` channel answers `E_FEATURE_OFF` (`handleExternal`) | The channels answer; the profiles never include the ask cards (`studio.ask`, `MCP_EXCLUDED_PACKS`), which only the 助手's chat shows |
 | No 协同 button in the 助手, no approval overlay (`App.tsx`) | Both show |
 | Turning it off stops the server, deletes the discovery file, ends every ACP child and drops waiting approvals | |
 

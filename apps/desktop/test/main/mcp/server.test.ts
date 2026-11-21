@@ -5,7 +5,7 @@ import { request as httpRequest } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import { createBuiltinMainDispatcher, createBuiltinMainHandlers, createMainCapabilityDispatcher } from '../../../src/main/capabilities'
 import { sha256Text } from '@shared/capabilities'
-import { MCP_PROTOCOL_VERSION, createMcpServer } from '../../../src/main/mcp/server'
+import { MCP_PROTOCOL_VERSION, createMcpServer, getActiveMcpServer, startMcpServer, stopMcpServer } from '../../../src/main/mcp/server'
 
 it('never accepts client approval or reuses client ids, and hashes the returned guide', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'moss-mcp-security-'))
@@ -131,6 +131,26 @@ describe('MCP server: who may connect and what they may call', () => {
     })
   })
 
+  it('never offers the ask cards, which only the 助手 chat shows, whatever the profile', async () => {
+    await withServer(async (server) => {
+      for (const profile of ['compact', 'atomic'] as const) {
+        server.setProfile(profile)
+        const tools = (await rpc(server, 'tools/list')).result.tools as Array<{ name: string }>
+        expect(tools.some((tool) => tool.name.startsWith('studio__ask'))).toBe(false)
+        expect(tools.length).toBeGreaterThan(0)
+      }
+    })
+  })
+
+  it('serves the audit trail only to a profile that offers the tool that reads it', async () => {
+    await withServer(async (server) => {
+      server.setProfile('custom', ['models.catalog'])
+      expect(await rpc(server, 'resources/read', { uri: 'mossstudio://audit/recent' })).toHaveProperty('error')
+      server.setProfile('atomic')
+      expect(await rpc(server, 'resources/read', { uri: 'mossstudio://audit/recent' })).toHaveProperty('result')
+    })
+  })
+
   it('refuses a tool the active profile does not offer, even one the registry has', async () => {
     await withServer(async (server) => {
       server.setProfile('custom', ['models.catalog'])
@@ -164,4 +184,20 @@ describe('MCP server: who may connect and what they may call', () => {
       await vi.waitFor(() => expect(waiting!.aborted).toBe(true))
     })
   })
+})
+
+it('starts one server when two callers start it at the same time', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'moss-mcp-once-'))
+  const dispatcher = createMainCapabilityDispatcher({ mainHandlers: {}, readFlags: () => ({}) })
+  try {
+    const [a, b] = await Promise.all([
+      startMcpServer({ dispatcher, discoveryPath: join(dir, 'a.json') }),
+      startMcpServer({ dispatcher, discoveryPath: join(dir, 'b.json') }),
+    ])
+    expect(a).toBe(b)
+    expect(getActiveMcpServer()).toBe(a)
+  } finally {
+    await stopMcpServer()
+    await rm(dir, { recursive: true, force: true })
+  }
 })

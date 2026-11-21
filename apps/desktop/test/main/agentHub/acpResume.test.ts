@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentHubEvent } from '@shared/agentHub'
 import { childEnv, createAcpDriver } from '../../../src/main/agentHub/acpDriver'
 
@@ -10,7 +10,10 @@ const update = (sessionUpdate, text) => send({jsonrpc:'2.0',method:'session/upda
 readline.createInterface({input:process.stdin}).on('line', line => {
  const req = JSON.parse(line);
  if(req.method==='initialize') send({jsonrpc:'2.0',id:req.id,result:{protocolVersion:1,agentCapabilities:${capabilities}}});
- if(req.method==='session/list') send({jsonrpc:'2.0',id:req.id,result:{sessions:[{sessionId:'old-1',cwd:'/work/poster',title:'海报',updatedAt:'2026-11-20T10:00:00Z'}]}});
+ if(req.method==='session/list' && !(req.params&&req.params.cursor)) send({jsonrpc:'2.0',id:req.id,result:{sessions:[{sessionId:'old-1',cwd:'/work/poster',title:'海报',updatedAt:'2026-11-20T10:00:00Z'}],nextCursor:'p2'}});
+ if(req.method==='session/list' && req.params && req.params.cursor==='p2') send({jsonrpc:'2.0',id:req.id,result:{sessions:[{sessionId:'old-2',cwd:'/work/comic',title:'漫画'}]}});
+ if(req.method==='session/cancel') send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'old-1',update:{sessionUpdate:'cancel_seen'}}});
+ if(req.method==='session/prompt') update('user_message_chunk','再画一张');
  if(req.method==='session/load') {
   if(req.params.cwd!=='/work/poster') process.exit(4);
   update('user_message_chunk','画一张'); update('user_message_chunk','海报');
@@ -34,6 +37,7 @@ describe('ACP conversations after a restart', () => {
       expect(info.resumable).toBe(true)
       expect(await driver.listSessions()).toEqual([
         { id: 'old-1', title: '海报', cwd: '/work/poster', updatedAt: Date.parse('2026-11-20T10:00:00Z') },
+        { id: 'old-2', title: '漫画', cwd: '/work/comic' },
       ])
       const page = await driver.readMessages('old-1')
       expect(page.messages.map((message) => [message.role, message.text])).toEqual([
@@ -79,6 +83,13 @@ describe('ACP conversations after a restart', () => {
       while (!events.some((event) => event.type === 'error') && Date.now() < deadline)
         await new Promise((resolve) => setTimeout(resolve, 20))
       expect(events.find((event) => event.type === 'error')?.message).toContain('很久没有回应')
+      // The Agent was told to stop the turn.
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'status' && event.text === 'cancel_seen')).toBe(true))
+      // A live turn's echo of the person's message is not added a second time.
+      expect((await driver.readMessages('old-1')).messages.filter((message) => message.role === 'user').map((m) => m.text)).toEqual([
+        '画一张海报',
+        '再画一张',
+      ])
     } finally {
       await driver.disconnect()
     }

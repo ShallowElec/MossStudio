@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Events, Ipc } from '@shared/channels'
 import type { TrainerVersion, TrainingHost } from '@shared/types'
 import { call, onEvent } from '../../lib/api'
-import { TRAINING_HOST_EVENT, announceTrainingHost, getSelectedTrainingHost, resolveTrainingHost } from '../../lib/trainingHost'
+import {
+  TRAINING_HOST_EVENT,
+  announceTrainingHost,
+  getSelectedTrainingHost,
+  resolveTrainingHost,
+  trainingSshHosts,
+} from '../../lib/trainingHost'
 import { useApp } from '../../store'
 
 export interface TrainerData {
@@ -64,7 +70,7 @@ export function useTrainerData(): TrainerData {
 
   return {
     hosts,
-    sshHosts: hosts.filter((host) => host.kind === 'ssh'),
+    sshHosts: trainingSshHosts(hosts),
     versions,
     loading,
     hostId: resolveTrainingHost(selected, hosts, remoteHostsEnabled),

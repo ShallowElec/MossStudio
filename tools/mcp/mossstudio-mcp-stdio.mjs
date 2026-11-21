@@ -75,6 +75,19 @@ async function resolveTarget(env = process.env) {
   return fallback
 }
 
+/** A signal aborted by any of `signals`; AbortSignal.any needs Node 20.3, and the bridge runs on the person's own node. */
+export function anySignal(signals) {
+  const controller = new AbortController()
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason)
+      break
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+  }
+  return controller.signal
+}
+
 function writeOut(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`)
 }
@@ -112,7 +125,7 @@ export async function forwardJsonRpcLine(line, env = process.env, fetchImpl = fe
         authorization: `Bearer ${target.token}`,
       },
       body: JSON.stringify(parsed),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000),
+      signal: signal ? anySignal([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000),
     })
     if (response.status === 202 || response.status === 204) return null
     const text = await response.text()
@@ -166,7 +179,7 @@ export function createBridge({ env = process.env, fetchImpl = fetch, write = wri
     if (key !== null) requests.set(key, controller)
     const run = async () => {
       try {
-        const reply = await forwardJsonRpcLine(line, env, fetchImpl, AbortSignal.any([shutdown.signal, controller.signal]))
+        const reply = await forwardJsonRpcLine(line, env, fetchImpl, anySignal([shutdown.signal, controller.signal]))
         // A cancelled request gets no reply: the client has already moved on.
         if (reply !== null && !controller.signal.aborted) write(reply)
       } finally {
