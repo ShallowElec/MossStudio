@@ -417,13 +417,21 @@ export async function recordJobOutputs(job: JobRecord): Promise<boolean> {
   return true
 }
 
+/**
+ * A picture in a gallery folder as base64. The check runs on the resolved path,
+ * which is then read, so a link placed in a gallery folder cannot hand out a
+ * file from elsewhere, and only picture files are served.
+ */
 export async function readGalleryFile(file: string): Promise<{ base64: string; mime: string }> {
-  const roots = await galleryRoots()
-  if (!roots.some((root) => isInside(root, file))) throw new Error('文件不在画廊目录中')
-  const info = await stat(file)
+  const real = await realpath(file).catch(() => null)
+  const roots = await Promise.all((await galleryRoots()).map((root) => realpath(root).catch(() => null)))
+  if (!real || !roots.some((root) => root && isInside(root, real))) throw new Error('文件不在画廊目录中')
+  const ext = extname(real).toLowerCase()
+  if (!STUDIO_PICTURE_EXT.has(ext)) throw new Error('只能读取图片文件')
+  const info = await stat(real)
   if (info.size > 32 * 1024 * 1024) throw new Error('图片超过 32 MB')
-  const mime = extname(file).toLowerCase() === '.png' ? 'image/png' : extname(file).toLowerCase() === '.webp' ? 'image/webp' : 'image/jpeg'
-  return { base64: (await readFile(file)).toString('base64'), mime }
+  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+  return { base64: (await readFile(real)).toString('base64'), mime }
 }
 
 export async function revealInFolder(file: string): Promise<void> {

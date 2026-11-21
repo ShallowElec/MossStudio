@@ -1,5 +1,14 @@
 import type { AgentMode, AiToolDefinition } from '../ai'
-import type { ActionDescriptor, ActionEffect, ActionTarget, CapabilityId, CapabilitySurface, PolicyGate, SkillAudience } from './protocol'
+import {
+  MUTATING_EFFECTS,
+  type ActionDescriptor,
+  type ActionEffect,
+  type ActionTarget,
+  type CapabilityId,
+  type CapabilitySurface,
+  type PolicyGate,
+  type SkillAudience,
+} from './protocol'
 import type { CapabilityRegistry, SynthesizedSkill } from './registry'
 
 /**
@@ -43,8 +52,6 @@ export const COMPACT_PROFILE_PACKS: readonly CapabilityId[] = [
   'system.runtime',
   'remote.hosts',
 ]
-
-const MUTATING_EFFECTS: readonly ActionEffect[] = ['write', 'run', 'delete', 'export', 'install', 'configure']
 
 /** Project actions, provider tool schemas and synchronized Skill markdown for a Tool Profile. */
 export function projectCapabilities(registry: CapabilityRegistry, options: ToolProfileOptions): ProjectedToolset {
@@ -92,6 +99,8 @@ export interface CapabilityAuditEntry {
 
 export interface CapabilityAuditQuery {
   limit?: number
+  /** Only calls from this kind of caller (an Agent reading the trail sees external Agents' calls only). */
+  source?: CapabilityCallSource
   conversationId?: string
   packId?: string
   actionId?: string

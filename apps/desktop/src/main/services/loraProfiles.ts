@@ -1,9 +1,10 @@
-import { mkdir, open, readFile } from 'node:fs/promises'
+import { copyFile, mkdir, open, readFile, stat } from 'node:fs/promises'
 import { dirname, extname } from 'node:path'
 import type { LoraMetadata, LoraProfile } from '@shared/types'
 import { schemas } from '@shared/schemas'
 import { paths } from '../lib/paths'
 import { writeFileAtomic } from '../lib/atomicWrite'
+import { isNetworkPath, linksToNetwork } from '../lib/localPath'
 
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
@@ -106,17 +107,39 @@ export async function extractSafetensorsTriggers(filePath: string): Promise<Lora
       .map(([tag]) => tag),
   }
 }
-export async function listLoraProfiles(): Promise<LoraProfile[]> {
+/**
+ * The saved profiles. Each row is checked on its own: a bad row is skipped, the
+ * others stay. `damaged` says the file could not be read as it was written, so
+ * the next save backs it up before replacing it.
+ */
+async function readProfiles(): Promise<{ rows: LoraProfile[]; damaged: boolean }> {
+  let raw: string
   try {
-    const rows: unknown = JSON.parse(await readFile(paths.loraProfiles(), 'utf8'))
-    const parsed = schemas.loraProfilesSave.array().safeParse(rows)
-    return parsed.success ? parsed.data : []
+    raw = await readFile(paths.loraProfiles(), 'utf8')
   } catch (error) {
-    // Optional metadata must not make the model inventory unavailable.
-    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { rows: [], damaged: false }
     throw error
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    // Optional metadata must not make the model inventory unavailable.
+    return { rows: [], damaged: true }
+  }
+  if (!Array.isArray(parsed)) return { rows: [], damaged: true }
+  const rows: LoraProfile[] = []
+  for (const row of parsed) {
+    const checked = schemas.loraProfilesSave.safeParse(row)
+    if (checked.success) rows.push(checked.data)
+  }
+  return { rows, damaged: rows.length !== parsed.length }
 }
+
+export async function listLoraProfiles(): Promise<LoraProfile[]> {
+  return (await readProfiles()).rows
+}
+
 export async function getLoraProfile(loraId: string): Promise<LoraProfile | undefined> {
   return (await listLoraProfiles()).find((row) => row.loraId === loraId)
 }
@@ -124,21 +147,37 @@ let writeQueue: Promise<unknown> = Promise.resolve()
 export function saveLoraProfile(input: LoraProfile): Promise<LoraProfile> {
   const profile = schemas.loraProfilesSave.parse(input)
   const task = writeQueue.then(async () => {
-    const rows = await listLoraProfiles()
+    const { rows, damaged } = await readProfiles()
     const existing = rows.find((row) => row.loraId === profile.loraId)
     const merged = { ...existing, ...profile }
     await mkdir(dirname(paths.loraProfiles()), { recursive: true })
+    // Rows that could not be read are kept in a copy instead of being lost with this write.
+    if (damaged) await copyFile(paths.loraProfiles(), `${paths.loraProfiles()}.damaged-${Date.now()}`)
     await writeFileAtomic(paths.loraProfiles(), JSON.stringify([...rows.filter((row) => row.loraId !== profile.loraId), merged], null, 2))
     return merged
   })
   writeQueue = task.catch(() => undefined)
   return task
 }
+/** Trigger words read from a LoRA file, by path; reused while its size and modification time stay the same. */
+const triggerCache = new Map<string, { size: number; mtimeMs: number; metadata: LoraMetadata }>()
+
+/** The file's trigger words, read once per version of the file. A network path is never opened. */
+export async function cachedSafetensorsTriggers(filePath: string): Promise<LoraMetadata> {
+  if (isNetworkPath(filePath) || (await linksToNetwork(filePath))) return {}
+  const info = await stat(filePath)
+  const cached = triggerCache.get(filePath)
+  if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) return cached.metadata
+  const metadata = await extractSafetensorsTriggers(filePath)
+  triggerCache.set(filePath, { size: info.size, mtimeMs: info.mtimeMs, metadata })
+  return metadata
+}
+
 export async function mergeLoraMeta<T extends { id: string }>(item: T, filePath?: string): Promise<T & LoraMetadata> {
   let extracted: LoraMetadata = {}
   if (filePath) {
     try {
-      extracted = await extractSafetensorsTriggers(filePath)
+      extracted = await cachedSafetensorsTriggers(filePath)
     } catch {
       /* Inventory remains usable for legacy or malformed files. */
     }

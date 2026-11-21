@@ -1,4 +1,11 @@
-export { getMcpClientsStatus, installMcpClient, uninstallMcpClient, type McpClientId, type McpClientStatus } from './clientInstaller'
+export {
+  getMcpClientsStatus,
+  installMcpClient,
+  refreshMcpClientRegistrations,
+  uninstallMcpClient,
+  type McpClientId,
+  type McpClientStatus,
+} from './clientInstaller'
 export {
   MCP_PROTOCOL_VERSION,
   MCP_RESOURCE_URIS,

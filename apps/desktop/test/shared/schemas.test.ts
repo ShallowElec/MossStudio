@@ -100,7 +100,10 @@ const cases = {
   },
   agentHubResolveApproval: { valid: { id: 'a', decision: 'approve' }, rejects: { missing: {} } },
   capabilitiesList: { valid: {}, rejects: { profile: { profile: 'unknown' } } },
-  capabilitiesExecute: { valid: { name: 'models.catalog.installed' }, rejects: { missing: {} } },
+  capabilitiesExecute: {
+    valid: { name: 'models.catalog.installed' },
+    rejects: { missing: {}, 'a claimed approval': { name: 'x', approved: true }, 'a claimed source': { name: 'x', source: 'assistant' } },
+  },
   capabilitiesAudit: { valid: {}, rejects: { limit: { limit: 0 } } },
   mcpInfo: { valid: {}, rejects: { token: { includeToken: 'true' } } },
   mcpSetProfile: { valid: { profile: 'compact' }, rejects: { profile: { profile: 'unknown' } } },
@@ -1149,6 +1152,7 @@ const STRICT = new Set<keyof Schemas>([
   'agentHubSession',
   'agentHubSend',
   'agentHubResolveApproval',
+  'capabilitiesExecute',
 ])
 
 describe('schemas table', () => {

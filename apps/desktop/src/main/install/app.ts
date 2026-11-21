@@ -365,21 +365,13 @@ async function startUninstall(context: RunContext, removeData: boolean): Promise
   if (context.mode === 'uninstall' && !context.silent && otherInstanceRunning('uninstall')) {
     throw codedError('E_APP_RUNNING', 'MossStudio 正在运行。请在它弹出的对话框里关闭它（或手动退出），然后再卸载。')
   }
-  if (process.env['MOSSSTUDIO_DISABLE_MCP'] !== '1') {
-    try {
-      const { uninstallMcpClient } = await import('../mcp/clientInstaller')
-      for (const client of ['codex', 'claude-code'] as const) {
-        try {
-          uninstallMcpClient(client)
-        } catch (error) {
-          // A locked or malformed external config must not prevent uninstalling the app.
-          log(`could not unregister MCP client ${client}: ${error instanceof Error ? error.message : String(error)}`)
-        }
-      }
-    } catch (error) {
-      // Minimal installer builds may not contain the optional integration modules.
-      log(`could not load MCP cleanup: ${error instanceof Error ? error.message : String(error)}`)
-    }
+  // Only what MossStudio registered with Codex or Claude Code (recorded under the data root) is removed.
+  try {
+    const { uninstallRecordedMcpClients } = await import('../mcp/clientInstaller')
+    await uninstallRecordedMcpClients(target.dataRoot)
+  } catch (error) {
+    // A missing CLI or a locked client config must not prevent uninstalling the app.
+    log(`could not unregister MCP clients: ${error instanceof Error ? error.message : String(error)}`)
   }
   log(`uninstall ${target.root} (data ${removeData ? 'removed' : 'kept'}: ${target.dataRoot})`)
   if (context.platform === 'darwin') {

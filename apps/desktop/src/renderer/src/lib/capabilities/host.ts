@@ -2,6 +2,7 @@ import type { AgentMode, AiToolCall, AiToolResult } from '@shared/ai'
 import type { PlanStep } from '@shared/agent/cards'
 import {
   BUILTIN_CAPABILITY_REGISTRY,
+  isMutatingEffects,
   type ActionDescriptor,
   type CapabilityId,
   type CapabilityQuery,
@@ -96,7 +97,7 @@ function fail(error: string, fix?: { tool: string; args?: Record<string, unknown
 }
 
 export function isMutatingAction(descriptor: ActionDescriptor): boolean {
-  return descriptor.effects.some((effect) => ['write', 'run', 'delete', 'configure', 'install'].includes(effect))
+  return isMutatingEffects(descriptor.effects)
 }
 
 function precheck(descriptor: ActionDescriptor, checkState?: () => HostSelectionState): AiToolResult | null {

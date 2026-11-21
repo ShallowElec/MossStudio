@@ -26,7 +26,7 @@ export async function ensureProjectFolder(cwd: string): Promise<string> {
 
 export function createAgentHub(
   drivers: readonly AgentDriver[],
-  metrics: () => { activeMcpTools: number; recentToolCalls: number } = () => ({ activeMcpTools: 0, recentToolCalls: 0 }),
+  metrics: () => Promise<{ activeMcpTools: number; recentToolCalls: number }> = async () => ({ activeMcpTools: 0, recentToolCalls: 0 }),
 ) {
   const registry = new Map(drivers.map((driver) => [driver.id, driver]))
   const get = (id: string): AgentDriver => {
@@ -40,10 +40,11 @@ export function createAgentHub(
     setModel: (input: AgentSetModelInput) => get(input.backendId).setModel(input),
     async sessionStats(backendId: string, sessionId: string): Promise<AgentSessionStats> {
       const driver = get(backendId)
-      const [page, sessions, telemetry] = await Promise.all([
+      const [page, sessions, telemetry, counts] = await Promise.all([
         driver.readMessages(sessionId),
         driver.listSessions(),
         driver.telemetry?.(sessionId),
+        metrics(),
       ])
       const session = sessions.find((item) => item.id === sessionId)
       return {
@@ -51,7 +52,7 @@ export function createAgentHub(
         userTurns: page.messages.filter((item) => item.role === 'user').length,
         assistantTurns: page.messages.filter((item) => item.role === 'assistant').length,
         estimatedChars: page.messages.reduce((sum, item) => sum + item.text.length, 0),
-        ...metrics(),
+        ...counts,
         model: session?.model,
         provider: session?.provider,
         cwd: session?.cwd,

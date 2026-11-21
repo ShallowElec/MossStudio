@@ -6,6 +6,8 @@ export {
   descriptorFromContribution,
   externalToolManifestSchema,
   isCapabilityId,
+  isMutatingEffects,
+  MUTATING_EFFECTS,
   packDescriptorFromBuiltin,
   packFromExternalManifest,
   schemaDigest,

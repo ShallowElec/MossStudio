@@ -1,4 +1,4 @@
-import { mkdirSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Settings } from '@shared/types'
@@ -181,6 +181,18 @@ describe('readGalleryFile / revealInFolder', () => {
     const outside = put(join(external(), 'x.png'), 'x')
     await expect(gallery.readGalleryFile(outside)).rejects.toThrow('文件不在画廊目录中')
     await expect(gallery.revealInFolder(outside)).rejects.toThrow('文件不在画廊目录中')
+  })
+
+  it.runIf(process.platform !== 'win32')('refuses a link in a gallery folder that points outside it', async () => {
+    mkdirSync(outputs(), { recursive: true })
+    const secret = put(join(external(), 'secret.png'), 'x')
+    symlinkSync(secret, join(outputs(), 'link.png'))
+    await expect(gallery.readGalleryFile(join(outputs(), 'link.png'))).rejects.toThrow('文件不在画廊目录中')
+  })
+
+  it('serves only picture files from a gallery folder', async () => {
+    const notes = put(join(outputs(), 'notes.json'), '{}')
+    await expect(gallery.readGalleryFile(notes)).rejects.toThrow('只能读取图片文件')
   })
 
   it('reveals a gallery file through the file manager', async () => {

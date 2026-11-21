@@ -131,44 +131,68 @@ export async function forwardJsonRpcLine(line, env = process.env, fetchImpl = fe
   }
 }
 
-const isCliEntry = Boolean(process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url)
-if (isCliEntry) {
-  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
+/**
+ * The bridge's line handling, without stdin and stdout: requests run
+ * concurrently once `initialize` is through, and `notifications/cancelled`
+ * (sent by a client whose tool call timed out) aborts the matching request, so
+ * MossStudio drops an approval nobody is waiting for any more.
+ */
+export function createBridge({ env = process.env, fetchImpl = fetch, write = writeOut } = {}) {
   const shutdown = new AbortController()
-  let initBarrier = Promise.resolve()
+  const requests = new Map()
   const inflight = new Set()
+  let initBarrier = Promise.resolve()
 
-  const runLine = async (line) => {
-    const reply = await forwardJsonRpcLine(line, process.env, fetch, shutdown.signal)
-    if (reply !== null) writeOut(reply)
+  const track = (promise) => {
+    inflight.add(promise)
+    void promise.finally(() => inflight.delete(promise))
+    return promise
   }
 
-  rl.on('line', (line) => {
-    let method = ''
+  const handleLine = (line) => {
+    let parsed = null
     try {
-      const parsed = JSON.parse(line.trim())
-      if (parsed && typeof parsed.method === 'string') method = parsed.method
+      parsed = JSON.parse(line.trim())
     } catch {
       // Malformed JSON still gets a -32700 error reply.
     }
-
-    if (method === 'initialize') {
-      const prev = initBarrier
-      const p = prev.then(() => runLine(line)).catch(() => undefined)
-      initBarrier = p
-      inflight.add(p)
-      p.finally(() => inflight.delete(p))
-    } else {
-      // Wait for any in-flight initialize, then forward independent requests concurrently so slow tools never starve ping/control traffic.
-      const barrier = initBarrier
-      const p = barrier.then(() => runLine(line)).catch(() => undefined)
-      inflight.add(p)
-      p.finally(() => inflight.delete(p))
+    const method = parsed && typeof parsed.method === 'string' ? parsed.method : ''
+    if (method === 'notifications/cancelled') {
+      const requestId = parsed.params?.requestId
+      requests.get(JSON.stringify(requestId ?? null))?.abort()
     }
-  })
+    const key = parsed && 'id' in parsed ? JSON.stringify(parsed.id) : null
+    const controller = new AbortController()
+    if (key !== null) requests.set(key, controller)
+    const run = async () => {
+      try {
+        const reply = await forwardJsonRpcLine(line, env, fetchImpl, AbortSignal.any([shutdown.signal, controller.signal]))
+        // A cancelled request gets no reply: the client has already moved on.
+        if (reply !== null && !controller.signal.aborted) write(reply)
+      } finally {
+        if (key !== null && requests.get(key) === controller) requests.delete(key)
+      }
+    }
+    if (method === 'initialize') {
+      initBarrier = initBarrier.then(run).catch(() => undefined)
+      return track(initBarrier)
+    }
+    // Independent requests run side by side, so a slow tool never starves ping or control traffic.
+    return track(initBarrier.then(run).catch(() => undefined))
+  }
 
-  rl.on('close', () => {
+  const close = () => {
     shutdown.abort()
-    void Promise.allSettled([...inflight])
-  })
+    return Promise.allSettled([...inflight])
+  }
+
+  return { handleLine, close }
+}
+
+const isCliEntry = Boolean(process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url)
+if (isCliEntry) {
+  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
+  const bridge = createBridge()
+  rl.on('line', (line) => void bridge.handleLine(line))
+  rl.on('close', () => void bridge.close())
 }

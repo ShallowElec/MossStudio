@@ -44,10 +44,11 @@ describe('shared/capabilities protocol and registry', () => {
       effects: ['write'],
       policyFloor: 'approval',
     })
+    // Switching where every later run goes is the person's call (S4).
     expect(actions.find((action) => action.id === 'remote.hosts.select')).toMatchObject({
       target: 'renderer',
       effects: ['write'],
-      policyFloor: 'auto',
+      policyFloor: 'approval',
     })
     expect(projected.skill.markdown).toContain('remote.hosts.test')
   })

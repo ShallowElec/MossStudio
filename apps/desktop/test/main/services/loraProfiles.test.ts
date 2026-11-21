@@ -1,12 +1,18 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { paths } from '@main/lib/paths'
 import { useTempDataRoot } from '@test/helpers/tempDir'
-import { extractSafetensorsTriggers, saveLoraProfile, mergeLoraMeta, listLoraProfiles } from '@main/services/loraProfiles'
+import {
+  cachedSafetensorsTriggers,
+  extractSafetensorsTriggers,
+  saveLoraProfile,
+  mergeLoraMeta,
+  listLoraProfiles,
+} from '@main/services/loraProfiles'
 
 useTempDataRoot()
-it.each(['{broken', '{}', '[{"loraId":4}]'])('ignores corrupt optional profiles: %s', async (contents) => {
+it.each(['{broken', '{}', '[{"loraId":4}]'])('reads no profile from a damaged file: %s', async (contents) => {
   await mkdir(paths.root(), { recursive: true })
   await writeFile(paths.loraProfiles(), contents)
   await expect(listLoraProfiles()).resolves.toEqual([])
@@ -57,4 +63,42 @@ it('uses sidecars in priority order when the header has no triggers', async () =
   await writeFile(file.replace('.safetensors', '.civitai.info'), JSON.stringify({ trainedWords: ['Civitai'] }))
   await writeFile(file.replace('.safetensors', '.json'), JSON.stringify({ triggers: ['json'] }))
   expect((await extractSafetensorsTriggers(file)).triggers).toEqual(['Civitai'])
+})
+
+it('keeps the good rows when one row is bad, and backs the file up before the next save replaces it', async () => {
+  await mkdir(paths.root(), { recursive: true })
+  const original = JSON.stringify([{ loraId: 'kept', triggers: ['ink'] }, { loraId: 4 }, { loraId: 'also', autoInsert: 'prefix' }])
+  await writeFile(paths.loraProfiles(), original)
+  expect((await listLoraProfiles()).map((row) => row.loraId)).toEqual(['kept', 'also'])
+  await saveLoraProfile({ loraId: 'new', triggers: ['sks'] })
+  expect((await listLoraProfiles()).map((row) => row.loraId)).toEqual(['kept', 'also', 'new'])
+  const backups = (await readdir(paths.root())).filter((name) => name.startsWith('lora-profiles.json.damaged-'))
+  expect(backups).toHaveLength(1)
+  expect(await readFile(join(paths.root(), backups[0]!), 'utf8')).toBe(original)
+})
+
+it('never loses saved profiles to a file that is not JSON: it is kept aside first', async () => {
+  await mkdir(paths.root(), { recursive: true })
+  await writeFile(paths.loraProfiles(), '[{"loraId":"kept"')
+  await saveLoraProfile({ loraId: 'new' })
+  const backups = (await readdir(paths.root())).filter((name) => name.startsWith('lora-profiles.json.damaged-'))
+  expect(await readFile(join(paths.root(), backups[0]!), 'utf8')).toBe('[{"loraId":"kept"')
+})
+
+it('reads a LoRA file once per version, and never opens a network path', async () => {
+  await mkdir(paths.root(), { recursive: true })
+  const file = join(paths.root(), 'cached.safetensors')
+  const write = async (word: string) => {
+    const header = Buffer.from(JSON.stringify({ __metadata__: { trigger_word: word } }))
+    const length = Buffer.alloc(8)
+    length.writeBigUInt64LE(BigInt(header.length))
+    await writeFile(file, Buffer.concat([length, header]))
+  }
+  await write('one')
+  expect((await cachedSafetensorsTriggers(file)).triggers).toEqual(['one'])
+  await write('twoo')
+  await utimes(file, new Date(), new Date(Date.now() + 5000))
+  expect((await cachedSafetensorsTriggers(file)).triggers).toEqual(['twoo'])
+  expect(await cachedSafetensorsTriggers('\\\\server\\share\\style.safetensors')).toEqual({})
+  expect(await cachedSafetensorsTriggers('//server/share/style.safetensors')).toEqual({})
 })

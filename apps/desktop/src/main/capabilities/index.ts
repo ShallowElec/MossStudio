@@ -1,4 +1,4 @@
-export { listCapabilityAudit, recordCapabilityAudit, resetCapabilityAuditMemory } from './audit'
+export { flushCapabilityAudit, listCapabilityAudit, recordCapabilityAudit, resetCapabilityAuditMemory } from './audit'
 export { createBuiltinMainDispatcher, createBuiltinMainHandlers } from './builtinHandlers'
 export {
   createMainCapabilityDispatcher,

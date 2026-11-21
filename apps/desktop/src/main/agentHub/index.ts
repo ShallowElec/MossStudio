@@ -16,12 +16,15 @@ export const agentHub = createAgentHub(
     createAcpDriver({ id: 'codex-acp', label: 'Codex ACP', command: 'codex-acp', emit: agentEvent }),
     createAcpDriver({ id: 'custom-acp', label: '自定义 ACP', emit: agentEvent }),
   ],
-  () => ({ activeMcpTools: getMcpServerState().toolCount, recentToolCalls: listCapabilityAudit({ limit: 50 }).length }),
+  async () => ({
+    activeMcpTools: getMcpServerState().toolCount,
+    recentToolCalls: (await listCapabilityAudit({ limit: 50, source: 'external-agent' })).length,
+  }),
 )
 export function attachCapabilityApproval(dispatcher: MainCapabilityDispatcher): void {
-  dispatcher.requestApproval = (request) => {
+  dispatcher.requestApproval = (request, signal) => {
     const open = BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && !window.webContents.isDestroyed())
-    return open ? capabilityApprovalQueue.requestApproval(request) : Promise.resolve(false)
+    return open ? capabilityApprovalQueue.requestApproval(request, signal) : Promise.resolve(false)
   }
 }
 export async function stopAgentHub(): Promise<void> {

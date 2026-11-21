@@ -1,16 +1,33 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
+import { APPROVAL_WAIT_MS } from '../agentHub/approvalQueue'
+import { resolveAcpLaunch } from '../agentHub/acpDriver'
+import { paths } from '../lib/paths'
+import { run, type RunResult } from '../lib/run'
 import { getMcpServerState } from './server'
 
 /**
- * Universal MCP client installer shipped inside MossStudio.
+ * Registers MossStudio's stdio MCP bridge (`tools/mcp/mossstudio-mcp-stdio.mjs`,
+ * copied to `<dataRoot>/mcp/`) with Codex and Claude Code through their own
+ * CLIs (`codex mcp add/remove`, `claude mcp add-json/remove`), run without a
+ * shell. MossStudio never rewrites their config files, except one line Codex's
+ * CLI cannot set: the tool timeout, which must outlast an approval.
  *
- * Registers MossStudio's own zero-dependency stdio MCP bridge
- * (`tools/mcp/mossstudio-mcp-stdio.mjs`) into external Agent clients
- * (Codex CLI, Claude Code) without requiring any
- * agent-specific standalone plugin. Always writes timestamped backups
- * before mutating any existing user configuration file.
+ * What was registered is remembered in `<dataRoot>/mcp/clients.json`, so a new
+ * app version (another `app-<version>` folder) registers again with its own
+ * path, and uninstalling removes exactly what MossStudio added.
  */
 
 export type McpClientId = 'codex' | 'claude-code'
@@ -18,52 +35,83 @@ export type McpClientId = 'codex' | 'claude-code'
 export interface McpClientStatus {
   id: McpClientId
   label: string
+  /** The client's config file, for reference; MossStudio changes it only through the client's CLI. */
   configPath: string
+  /** The client's CLI was found. */
   detected: boolean
   installed: boolean
+  /** `copy-only`: no CLI here, so the person copies the MCP settings into the client by hand. */
   installMode: 'auto' | 'copy-only'
   detail: string
-  backupPath?: string
 }
+
+/** MCP server name MossStudio registers under in each client. */
+export const MCP_SERVER_NAME = 'mossstudio'
+/** Seconds a client waits for one tool call: longer than an approval waits, so a late approval never runs an abandoned call. */
+export const CLIENT_TOOL_TIMEOUT_SEC = Math.ceil(APPROVAL_WAIT_MS / 1000) + 60
+const CLI_TIMEOUT_MS = 20_000
 
 export interface McpClientInstallerOptions {
   homeDir?: string
   env?: NodeJS.ProcessEnv
+  platform?: NodeJS.Platform
   stdioBridgePath?: string
   discoveryPath?: string
-  fallbackExecPath?: string
-  platform?: NodeJS.Platform
+  execPath?: string
+  /** Where registrations are remembered; defaults to `<dataRoot>/mcp/clients.json`. */
+  recordPath?: string
+  /** Runs a CLI without a shell (tests replace it). */
+  runCli?: (command: string, args: string[]) => Promise<RunResult>
 }
 
-interface ResolvedPaths {
+interface Resolved {
   home: string
   env: NodeJS.ProcessEnv
+  platform: NodeJS.Platform
   stdioBridgePath: string
   discoveryPath: string
-  fallbackExecPath: string
-  platform: NodeJS.Platform
+  execPath: string
+  recordPath: string
+  runCli: (command: string, args: string[]) => Promise<RunResult>
 }
 
-function resolvePaths(options: McpClientInstallerOptions = {}): ResolvedPaths {
-  const state = getMcpServerState(false)
+/** How a client starts the bridge: the person's own node when there is one, else this app running as node. */
+export interface BridgeLaunch {
+  command: string
+  args: string[]
+  env: Record<string, string>
+}
+
+type Records = Partial<Record<McpClientId, BridgeLaunch>>
+
+function resolve(options: McpClientInstallerOptions = {}): Resolved {
+  const state = options.stdioBridgePath !== undefined && options.discoveryPath !== undefined ? null : getMcpServerState(false)
+  const env = options.env ?? process.env
+  const platform = options.platform ?? process.platform
   return {
     home: options.homeDir ?? homedir(),
-    env: options.env ?? process.env,
-    stdioBridgePath: options.stdioBridgePath ?? state.stdioBridgePath,
-    discoveryPath: options.discoveryPath ?? state.discoveryPath,
-    fallbackExecPath: options.fallbackExecPath ?? process.execPath,
-    platform: options.platform ?? process.platform,
+    env,
+    platform,
+    stdioBridgePath: options.stdioBridgePath ?? state!.stdioBridgePath,
+    discoveryPath: options.discoveryPath ?? state!.discoveryPath,
+    execPath: options.execPath ?? process.execPath,
+    recordPath: options.recordPath ?? join(paths.mcpDir(), 'clients.json'),
+    runCli:
+      options.runCli ??
+      (async (command, args) => {
+        const launch = await resolveAcpLaunch(command, args, platform)
+        return run(launch.command, launch.args, { timeoutMs: CLI_TIMEOUT_MS, env })
+      }),
   }
 }
 
-/** Pure-FS PATH scan (no child process) so freshly installed CLIs are detected even before first run. */
+/** Pure-FS PATH scan (no child process), so a freshly installed CLI is found before it ever ran. */
 export function findExecutableOnPath(
   names: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string | null {
-  const hasExplicitPath = 'PATH' in env || 'Path' in env
-  const rawPath = hasExplicitPath ? (env.PATH ?? env.Path ?? '') : (process.env.PATH ?? process.env.Path ?? '')
+  const rawPath = env.PATH ?? env.Path ?? ''
   if (!rawPath) return null
   const sep = platform === 'win32' ? ';' : delimiter
   const dirs = rawPath
@@ -72,393 +120,265 @@ export function findExecutableOnPath(
     .filter(Boolean)
   const exts =
     platform === 'win32'
-      ? (env.PATHEXT ?? process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM')
+      ? (env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM')
           .split(';')
           .map((ext) => ext.trim())
           .filter(Boolean)
       : ['']
   for (const dir of dirs) {
     for (const name of names) {
-      const hasExt = platform === 'win32' && /\.[a-z0-9]+$/i.test(name)
-      const candidates = hasExt ? [name] : exts.map((ext) => `${name}${ext}`)
-      for (const candidate of candidates) {
-        const full = join(dir, candidate)
-        if (existsSync(full)) return full
-      }
-      if (platform === 'win32') {
-        const bare = join(dir, name)
-        if (existsSync(bare)) return bare
+      for (const ext of exts) {
+        const full = join(dir, `${name}${ext}`)
+        if (existsSync(full) && statSync(full).isFile()) return full
       }
     }
   }
   return null
 }
 
-function resolveBridgeRuntime(resolved: ResolvedPaths): { command: string; env: Record<string, string> } {
-  if (findExecutableOnPath(['node'], resolved.env, resolved.platform)) {
-    return { command: 'node', env: { MOSSSTUDIO_MCP_DISCOVERY: resolved.discoveryPath } }
+export function bridgeLaunch(options: McpClientInstallerOptions = {}): BridgeLaunch {
+  const resolved = resolve(options)
+  return launchOf(resolved)
+}
+
+function launchOf(resolved: Resolved): BridgeLaunch {
+  const env = { MOSSSTUDIO_MCP_DISCOVERY: resolved.discoveryPath }
+  // Electron runs a script as node only with this variable, and only this app's binary needs it.
+  if (findExecutableOnPath(['node'], resolved.env, resolved.platform)) return { command: 'node', args: [resolved.stdioBridgePath], env }
+  return { command: resolved.execPath, args: [resolved.stdioBridgePath], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } }
+}
+
+function readRecords(path: string): Records {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Records) : {}
+  } catch {
+    // None yet, or unreadable: nothing is known to be registered.
+    return {}
   }
+}
+
+function writeRecords(path: string, records: Records): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const tmp = `${path}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify(records, null, 2), 'utf8')
+  renameSync(tmp, path)
+}
+
+const CLIENTS: Record<McpClientId, { label: string; cli: string }> = {
+  codex: { label: 'Codex', cli: 'codex' },
+  'claude-code': { label: 'Claude Code', cli: 'claude' },
+}
+
+function codexConfigPath(resolved: Resolved): string {
+  return join(resolved.env.CODEX_HOME?.trim() || join(resolved.home, '.codex'), 'config.toml')
+}
+
+function claudeConfigPath(resolved: Resolved): string {
+  return join(resolved.home, '.claude.json')
+}
+
+/** Whether Claude Code has a user-scope `mossstudio` server: read, never written, by MossStudio. */
+function claudeHasServer(resolved: Resolved): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(claudeConfigPath(resolved), 'utf8')) as { mcpServers?: Record<string, unknown> }
+    return Boolean(parsed.mcpServers && typeof parsed.mcpServers === 'object' && MCP_SERVER_NAME in parsed.mcpServers)
+  } catch {
+    // Missing or unreadable: not registered as far as can be told.
+    return false
+  }
+}
+
+async function codexHasServer(resolved: Resolved, cli: string): Promise<boolean> {
+  const result = await resolved.runCli(cli, ['mcp', 'get', MCP_SERVER_NAME, '--json'])
+  return result.code === 0
+}
+
+async function statusOf(id: McpClientId, resolved: Resolved): Promise<McpClientStatus> {
+  const client = CLIENTS[id]
+  const cli = findExecutableOnPath([client.cli], resolved.env, resolved.platform)
+  const configPath = id === 'codex' ? codexConfigPath(resolved) : claudeConfigPath(resolved)
+  const installed = cli ? (id === 'codex' ? await codexHasServer(resolved, cli) : claudeHasServer(resolved)) : false
   return {
-    command: resolved.fallbackExecPath,
-    env: {
-      ELECTRON_RUN_AS_NODE: '1',
-      MOSSSTUDIO_MCP_DISCOVERY: resolved.discoveryPath,
-    },
+    id,
+    label: client.label,
+    configPath,
+    detected: Boolean(cli),
+    installed,
+    installMode: cli ? 'auto' : 'copy-only',
+    detail: !cli ? `没有找到 ${client.cli} 命令，可以复制 MCP 配置手动添加` : installed ? '已连接' : '未连接',
   }
 }
 
-function writeAtomicSync(filePath: string, content: string): void {
-  mkdirSync(dirname(filePath), { recursive: true })
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
-  writeFileSync(tmpPath, content, 'utf8')
-  renameSync(tmpPath, filePath)
+export async function getMcpClientsStatus(options: McpClientInstallerOptions = {}): Promise<McpClientStatus[]> {
+  const resolved = resolve(options)
+  return Promise.all((['codex', 'claude-code'] as const).map((id) => statusOf(id, resolved)))
 }
 
-function backupIfExists(filePath: string): string | undefined {
-  if (!existsSync(filePath)) return undefined
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backupPath = `${filePath}.bak-${stamp}`
-  copyFileSync(filePath, backupPath)
-  return backupPath
+function failure(client: string, result: RunResult): Error {
+  const reason = (result.stderr || result.stdout).trim().split('\n').at(-1)?.slice(0, 200)
+  return new Error(`${client} 没有完成，请在终端里查看 ${client} 是否可用${reason ? `（${reason}）` : ''}`)
 }
 
-function codexConfigPath(home: string): string {
-  return join(home, '.codex', 'config.toml')
+async function register(id: McpClientId, resolved: Resolved, launch: BridgeLaunch): Promise<void> {
+  const cli = findExecutableOnPath([CLIENTS[id].cli], resolved.env, resolved.platform)
+  if (!cli) throw new Error(`没有找到 ${CLIENTS[id].cli} 命令，请先安装 ${CLIENTS[id].label}`)
+  if (id === 'claude-code') {
+    // Removed first so a changed path replaces the old entry; a missing entry is not an error here.
+    await resolved.runCli(cli, ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME])
+    const config = { type: 'stdio', command: launch.command, args: launch.args, env: launch.env, timeout: CLIENT_TOOL_TIMEOUT_SEC * 1000 }
+    const result = await resolved.runCli(cli, ['mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(config)])
+    if (result.code !== 0) throw failure('claude mcp add-json', result)
+    return
+  }
+  await resolved.runCli(cli, ['mcp', 'remove', MCP_SERVER_NAME])
+  const env = Object.entries(launch.env).flatMap(([key, value]) => ['--env', `${key}=${value}`])
+  const result = await resolved.runCli(cli, ['mcp', 'add', MCP_SERVER_NAME, ...env, '--', launch.command, ...launch.args])
+  if (result.code !== 0) throw failure('codex mcp add', result)
+  setCodexToolTimeout(codexConfigPath(resolved), CLIENT_TOOL_TIMEOUT_SEC)
 }
 
-function claudeConfigPath(home: string): string {
-  return join(home, '.claude.json')
+export async function installMcpClient(id: McpClientId, options: McpClientInstallerOptions = {}): Promise<McpClientStatus> {
+  const resolved = resolve(options)
+  const launch = launchOf(resolved)
+  await register(id, resolved, launch)
+  writeRecords(resolved.recordPath, { ...readRecords(resolved.recordPath), [id]: launch })
+  return statusOf(id, resolved)
+}
+
+export async function uninstallMcpClient(id: McpClientId, options: McpClientInstallerOptions = {}): Promise<McpClientStatus> {
+  const resolved = resolve(options)
+  const cli = findExecutableOnPath([CLIENTS[id].cli], resolved.env, resolved.platform)
+  if (cli) {
+    const args = id === 'claude-code' ? ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME] : ['mcp', 'remove', MCP_SERVER_NAME]
+    const result = await resolved.runCli(cli, args)
+    // Removing what is not there is fine; anything else is reported.
+    if (result.code !== 0 && (id === 'codex' ? await codexHasServer(resolved, cli) : claudeHasServer(resolved))) {
+      throw failure(`${CLIENTS[id].cli} mcp remove`, result)
+    }
+  }
+  const records = readRecords(resolved.recordPath)
+  delete records[id]
+  writeRecords(resolved.recordPath, records)
+  return statusOf(id, resolved)
 }
 
 /**
- * Parse a TOML table header segment list from a standalone header line
- * (outside of any multiline string), handling quoted keys and trailing `#` comments.
- * Returns null if the line is not a TOML table header (e.g. array items like `["x"],`).
+ * Registers again every client MossStudio registered whose launch changed: a
+ * new app version runs from another folder, or node appeared or went away.
  */
-function parseTomlTableHeader(line: string): string[] | null {
-  const trimmed = line.trim()
-  if (!trimmed.startsWith('[')) return null
-  const isArrayTable = trimmed.startsWith('[[')
-  const start = isArrayTable ? 2 : 1
-  const closeToken = isArrayTable ? ']]' : ']'
-  let i = start
-  let quote: '"' | "'" | null = null
-  let escaped = false
-  let closeIdx = -1
-  while (i < trimmed.length) {
-    const ch = trimmed[i]!
-    if (quote) {
-      if (quote === '"' && ch === '\\' && !escaped) {
-        escaped = true
-        i++
-        continue
-      }
-      if (ch === quote && !escaped) quote = null
-      escaped = false
-      i++
-      continue
+export async function refreshMcpClientRegistrations(options: McpClientInstallerOptions = {}): Promise<void> {
+  const resolved = resolve(options)
+  const records = readRecords(resolved.recordPath)
+  const launch = launchOf(resolved)
+  for (const id of Object.keys(records) as McpClientId[]) {
+    if (!(id in CLIENTS) || JSON.stringify(records[id]) === JSON.stringify(launch)) continue
+    try {
+      await register(id, resolved, launch)
+      records[id] = launch
+    } catch (error) {
+      console.warn('[mcp] could not register again', id, error instanceof Error ? error.message : String(error))
     }
-    if (ch === '"' || ch === "'") {
-      quote = ch
-      i++
-      continue
-    }
-    if (ch === '#') return null
-    if (trimmed.slice(i, i + closeToken.length) === closeToken) {
-      closeIdx = i
-      break
-    }
-    i++
   }
-  if (closeIdx < 0) return null
-  const trailing = trimmed.slice(closeIdx + closeToken.length).trim()
-  if (trailing && !trailing.startsWith('#')) return null
-  const inner = trimmed.slice(start, closeIdx).trim()
-  if (!inner) return null
+  writeRecords(resolved.recordPath, records)
+}
+
+/** Removes only the registrations MossStudio recorded under `dataRoot` (used while uninstalling). */
+export async function uninstallRecordedMcpClients(dataRoot: string, options: McpClientInstallerOptions = {}): Promise<void> {
+  const recordPath = join(dataRoot, 'mcp', 'clients.json')
+  for (const id of Object.keys(readRecords(recordPath)) as McpClientId[]) {
+    if (id in CLIENTS) await uninstallMcpClient(id, { ...options, recordPath, stdioBridgePath: '', discoveryPath: '' })
+  }
+}
+
+/* Codex: the tool timeout. `codex mcp add` has no option for it, so one line is added to the table Codex just wrote. */
+
+/**
+ * A TOML table header (`[a.b]`, quoted keys allowed) as its key path, or null
+ * for any other line (array items, inline tables, comments).
+ */
+export function parseTomlTableHeader(line: string): string[] | null {
+  const match = /^\s*\[(?!\[)(.+?)\]\s*(?:#.*)?$/.exec(line)
+  if (!match) return null
   const parts: string[] = []
-  let cur = ''
-  let q: '"' | "'" | null = null
-  let esc = false
-  for (let k = 0; k < inner.length; k++) {
-    const ch = inner[k]!
-    if (q) {
-      if (q === '"' && ch === '\\' && !esc) {
-        esc = true
-        continue
+  const pattern = /\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(\.|$)/y
+  const inner = match[1]!
+  let index = 0
+  while (index < inner.length) {
+    pattern.lastIndex = index
+    const part = pattern.exec(inner)
+    if (!part) return null
+    parts.push(part[1] ?? part[2] ?? part[3]!)
+    index = pattern.lastIndex
+    if (part[4] === '') break
+  }
+  return index === inner.length ? parts : null
+}
+
+/** Whether a line defines `mossstudio` some way other than its own `[mcp_servers.mossstudio]` table. */
+function otherMossDefinition(line: string, table: string[] | null): boolean {
+  const key = /^\s*([A-Za-z0-9_."'-]+)\s*=/.exec(line)?.[1]?.replace(/["']/g, '')
+  if (!key) return false
+  const full = [...(table ?? []), ...key.split('.')]
+  if (full.length === 1 && full[0] === 'mcp_servers') return line.includes(MCP_SERVER_NAME)
+  return full[0] === 'mcp_servers' && full.length >= 2 && full[1] === MCP_SERVER_NAME && (table ?? []).length < 2
+}
+
+/**
+ * Sets `tool_timeout_sec` in `[mcp_servers.mossstudio]`, through a symlink to
+ * the real file, keeping its permissions, with one backup next to it. Does
+ * nothing and returns false when the file does not have exactly one such table
+ * in the plain form Codex writes (an inline or dotted definition, say).
+ */
+export function setCodexToolTimeout(configPath: string, seconds: number): boolean {
+  let real: string
+  let text: string
+  try {
+    real = realpathSync(configPath)
+    text = readFileSync(real, 'utf8')
+  } catch {
+    // Codex did not write a file where expected: nothing to adjust.
+    return false
+  }
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  let table: string[] | null = null
+  let header = -1
+  let headers = 0
+  let existing = -1
+  for (const [index, line] of lines.entries()) {
+    const parsed = parseTomlTableHeader(line)
+    if (parsed) {
+      table = parsed
+      if (parsed.length === 2 && parsed[0] === 'mcp_servers' && parsed[1] === MCP_SERVER_NAME) {
+        header = index
+        headers += 1
       }
-      if (ch === q && !esc) {
-        q = null
-        continue
-      }
-      esc = false
-      cur += ch
       continue
     }
-    if (ch === '"' || ch === "'") {
-      q = ch
-      continue
-    }
-    if (ch === '.') {
-      parts.push(cur.trim())
-      cur = ''
-      continue
-    }
-    cur += ch
+    if (otherMossDefinition(line, table)) return false
+    const inOurs = table?.length === 2 && table[0] === 'mcp_servers' && table[1] === MCP_SERVER_NAME
+    if (inOurs && /^\s*tool_timeout_sec\s*=/.test(line)) existing = index
   }
-  parts.push(cur.trim())
-  return parts.every(Boolean) ? parts : null
-}
-
-function isMossStudioCodexTable(parts: string[]): boolean {
-  return parts.length >= 2 && parts[0] === 'mcp_servers' && parts[1] === 'mossstudio'
-}
-
-/** Update multiline TOML string state (`"""` or `'''`) across a single line. */
-function advanceTomlMultilineState(line: string, state: '"""' | "'''" | null): '"""' | "'''" | null {
-  let active = state
-  let inlineQuote: '"' | "'" | null = null
-  let escaped = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!
-    if (active) {
-      if (active === '"""' && ch === '\\' && !escaped) {
-        escaped = true
-        continue
-      }
-      if (!escaped && line.slice(i, i + 3) === active) {
-        active = null
-        i += 2
-      }
-      escaped = false
-      continue
-    }
-    if (inlineQuote) {
-      if (inlineQuote === '"' && ch === '\\' && !escaped) {
-        escaped = true
-        continue
-      }
-      if (!escaped && ch === inlineQuote) inlineQuote = null
-      escaped = false
-      continue
-    }
-    if (ch === '#') break
-    if (line.slice(i, i + 3) === '"""') {
-      active = '"""'
-      i += 2
-      continue
-    }
-    if (line.slice(i, i + 3) === "'''") {
-      active = "'''"
-      i += 2
-      continue
-    }
-    if (ch === '"' || ch === "'") inlineQuote = ch
+  if (headers !== 1) return false
+  const setting = `tool_timeout_sec = ${seconds}`
+  if (existing >= 0) {
+    if (lines[existing]!.trim() === setting) return true
+    lines[existing] = setting
+  } else {
+    lines.splice(header + 1, 0, setting)
   }
-  return active
-}
-
-/** Remove `[mcp_servers.mossstudio]` (bare or quoted) and nested sub-tables without mutating unrelated lines or multiline strings. */
-function stripCodexMossSection(toml: string): { content: string; removed: boolean } {
-  const eol = toml.includes('\r\n') ? '\r\n' : '\n'
-  const lines = toml.split(/\r?\n/)
-  const out: string[] = []
-  let multiline: '"""' | "'''" | null = null
-  let skipping = false
-  let removed = false
-
-  for (const line of lines) {
-    if (!multiline) {
-      const header = parseTomlTableHeader(line)
-      if (header) {
-        if (isMossStudioCodexTable(header)) {
-          skipping = true
-          removed = true
-          continue
-        }
-        skipping = false
-      }
-    }
-    if (!skipping) out.push(line)
-    multiline = advanceTomlMultilineState(line, multiline)
+  const mode = statSync(real).mode & 0o777
+  const backup = `${real}.mossstudio-backup`
+  copyFileSync(real, backup)
+  chmodSync(backup, mode)
+  const tmp = `${real}.${process.pid}.tmp`
+  try {
+    writeFileSync(tmp, lines.join(eol), { encoding: 'utf8', mode })
+    chmodSync(tmp, mode)
+    renameSync(tmp, real)
+  } finally {
+    rmSync(tmp, { force: true })
   }
-
-  while (out.length && out[out.length - 1] === '') out.pop()
-  return { content: out.length ? `${out.join(eol)}${eol}` : '', removed }
-}
-
-function hasCodexMossSection(toml: string): boolean {
-  let multiline: '"""' | "'''" | null = null
-  for (const line of toml.split(/\r?\n/)) {
-    if (!multiline) {
-      const header = parseTomlTableHeader(line)
-      if (header && isMossStudioCodexTable(header)) return true
-    }
-    multiline = advanceTomlMultilineState(line, multiline)
-  }
-  return false
-}
-
-function buildCodexMossSection(resolved: ResolvedPaths): string {
-  const runtime = resolveBridgeRuntime(resolved)
-  return [
-    '[mcp_servers.mossstudio]',
-    `command = ${JSON.stringify(runtime.command)}`,
-    `args = [${JSON.stringify(resolved.stdioBridgePath)}]`,
-    '',
-    '[mcp_servers.mossstudio.env]',
-    ...Object.entries(runtime.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`),
-  ].join('\n')
-}
-
-function readCodexStatus(resolved: ResolvedPaths, backupPath?: string): McpClientStatus {
-  const configPath = codexConfigPath(resolved.home)
-  const dirExists = existsSync(dirname(configPath))
-  const fileExists = existsSync(configPath)
-  const binaryPath = findExecutableOnPath(['codex'], resolved.env, resolved.platform)
-  let installed = false
-  if (fileExists) {
-    try {
-      installed = hasCodexMossSection(readFileSync(configPath, 'utf8'))
-    } catch {
-      installed = false
-    }
-  }
-  return {
-    id: 'codex',
-    label: 'Codex CLI',
-    configPath,
-    detected: fileExists || dirExists || Boolean(binaryPath),
-    installed,
-    installMode: 'auto',
-    detail: installed
-      ? '已注册 [mcp_servers.mossstudio]，可直接调用全部画板工具与官方 Skill'
-      : fileExists || dirExists
-        ? '已检测到 Codex 配置目录，可一键写入 MossStudio MCP'
-        : binaryPath
-          ? '已检测到 Codex CLI 可执行程序（尚未生成配置文件），可一键写入 MossStudio MCP'
-          : '尚未检测到 ~/.codex，点击一键安装将自动创建配置文件',
-    ...(backupPath ? { backupPath } : {}),
-  }
-}
-
-function readClaudeStatus(resolved: ResolvedPaths, backupPath?: string): McpClientStatus {
-  const configPath = claudeConfigPath(resolved.home)
-  const fileExists = existsSync(configPath)
-  const dirExists = existsSync(join(resolved.home, '.claude'))
-  const binaryPath = findExecutableOnPath(['claude'], resolved.env, resolved.platform)
-  let installed = false
-  let parseError = false
-  if (fileExists) {
-    try {
-      const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as { mcpServers?: Record<string, unknown> }
-      installed = Boolean(parsed?.mcpServers && typeof parsed.mcpServers === 'object' && parsed.mcpServers.mossstudio)
-    } catch {
-      parseError = true
-    }
-  }
-  return {
-    id: 'claude-code',
-    label: 'Claude Code',
-    configPath,
-    detected: fileExists || dirExists || Boolean(binaryPath),
-    installed,
-    installMode: 'auto',
-    detail: parseError
-      ? '检测到 ~/.claude.json 但 JSON 格式无法解析，请先手动检查文件后再安装'
-      : installed
-        ? '已注册 mcpServers.mossstudio，可直接读取画板工具与 MOSS 官方 Skill'
-        : fileExists || dirExists
-          ? '已检测到 Claude Code 配置，可一键写入 MossStudio MCP'
-          : binaryPath
-            ? '已检测到 Claude Code 可执行程序（尚未生成配置文件），可一键写入 MossStudio MCP'
-            : '尚未检测到 Claude Code，点击一键安装将创建 ~/.claude.json',
-    ...(backupPath ? { backupPath } : {}),
-  }
-}
-
-export function getMcpClientsStatus(options: McpClientInstallerOptions = {}): McpClientStatus[] {
-  const resolved = resolvePaths(options)
-  return [readCodexStatus(resolved), readClaudeStatus(resolved)]
-}
-
-export function installMcpClient(clientId: McpClientId, options: McpClientInstallerOptions = {}): McpClientStatus {
-  const resolved = resolvePaths(options)
-
-  if (clientId === 'codex') {
-    const configPath = codexConfigPath(resolved.home)
-    const backupPath = backupIfExists(configPath)
-    const existing = existsSync(configPath) ? readFileSync(configPath, 'utf8') : ''
-    const { content: cleaned } = stripCodexMossSection(existing)
-    const block = buildCodexMossSection(resolved)
-    const next = cleaned ? `${cleaned.trimEnd()}\n\n${block}\n` : `${block}\n`
-    writeAtomicSync(configPath, next)
-    return readCodexStatus(resolved, backupPath)
-  }
-
-  if (clientId === 'claude-code') {
-    const configPath = claudeConfigPath(resolved.home)
-    const backupPath = backupIfExists(configPath)
-    let parsed: Record<string, unknown> = {}
-    if (existsSync(configPath)) {
-      const raw = JSON.parse(readFileSync(configPath, 'utf8')) as unknown
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-        throw new Error('~/.claude.json 根节点不是有效的 JSON 对象，已中止写入以保护原有配置')
-      }
-      parsed = raw as Record<string, unknown>
-    }
-    const existingServers =
-      parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers)
-        ? (parsed.mcpServers as Record<string, unknown>)
-        : {}
-    const runtime = resolveBridgeRuntime(resolved)
-    parsed.mcpServers = {
-      ...existingServers,
-      mossstudio: {
-        command: runtime.command,
-        args: [resolved.stdioBridgePath],
-        env: runtime.env,
-      },
-    }
-    writeAtomicSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`)
-    return readClaudeStatus(resolved, backupPath)
-  }
-
-  throw new Error('不支持的客户端')
-}
-
-export function uninstallMcpClient(clientId: McpClientId, options: McpClientInstallerOptions = {}): McpClientStatus {
-  const resolved = resolvePaths(options)
-
-  if (clientId === 'codex') {
-    const configPath = codexConfigPath(resolved.home)
-    if (!existsSync(configPath)) return readCodexStatus(resolved)
-    const existing = readFileSync(configPath, 'utf8')
-    const { content, removed } = stripCodexMossSection(existing)
-    if (!removed) return readCodexStatus(resolved)
-    const backupPath = backupIfExists(configPath)
-    writeAtomicSync(configPath, content)
-    return readCodexStatus(resolved, backupPath)
-  }
-
-  if (clientId === 'claude-code') {
-    const configPath = claudeConfigPath(resolved.home)
-    if (!existsSync(configPath)) return readClaudeStatus(resolved)
-    const raw = JSON.parse(readFileSync(configPath, 'utf8')) as unknown
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw new Error('~/.claude.json 根节点不是有效的 JSON 对象，已中止卸载')
-    }
-    const parsed = raw as Record<string, unknown>
-    const servers =
-      parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers)
-        ? ({ ...(parsed.mcpServers as Record<string, unknown>) } as Record<string, unknown>)
-        : null
-    if (!servers || !('mossstudio' in servers)) return readClaudeStatus(resolved)
-    const backupPath = backupIfExists(configPath)
-    delete servers.mossstudio
-    parsed.mcpServers = servers
-    writeAtomicSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`)
-    return readClaudeStatus(resolved, backupPath)
-  }
-
-  throw new Error('不支持的客户端')
+  return true
 }

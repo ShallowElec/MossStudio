@@ -57,6 +57,7 @@ import {
   trainingUpdate,
 } from '../services/training/run'
 import { assertDatasetEditable, getTrainingProject } from '../services/training/store'
+import { prepareAgentPaths } from './agentPaths'
 import { listCapabilityAudit } from './audit'
 import { createMainCapabilityDispatcher, type MainCapabilityDispatcher, type MainCapabilityHandler } from './dispatcher'
 
@@ -177,7 +178,7 @@ export function createBuiltinMainHandlers(): Record<string, MainCapabilityHandle
     'library.assets.trash': typed<'library.assets.trash'>(({ path }) => trashGalleryItem(path)),
 
     // ---- models.catalog ----
-    'models.catalog.get': typed<'models.catalog.get'>(({ refresh }) => getCatalog(getSettings(), refresh ?? true)),
+    'models.catalog.get': typed<'models.catalog.get'>(({ refresh }) => getCatalog(getSettings(), refresh === true)),
     'models.catalog.installed': async () => {
       const catalog = await getCatalog(getSettings())
       const installedModels = catalog.models.filter((model) => model.installed)
@@ -254,9 +255,9 @@ export function createBuiltinMainHandlers(): Record<string, MainCapabilityHandle
     'system.engine.features': typed<'system.engine.features'>((target) => getEngineFeatures(target)),
     'system.gpu.inventory': () => getGpuInventory(),
     'system.jobs.list': async () => ({ jobs: await listJobs() }),
-    'system.jobs.get': typed<'system.jobs.get'>(({ id }) => getJob(id)),
-    'system.jobs.logs': typed<'system.jobs.logs'>(({ id }) => getJobLogs(id)),
-    'system.jobs.cancel': typed<'system.jobs.cancel'>(({ id }) => cancelJob(id)),
+    'system.jobs.get': typed<'system.jobs.get'>(({ id }) => knownJob(id)),
+    'system.jobs.logs': typed<'system.jobs.logs'>(async ({ id }) => getJobLogs((await knownJob(id)).id)),
+    'system.jobs.cancel': typed<'system.jobs.cancel'>(async ({ id }) => cancelJob((await knownJob(id)).id)),
     'system.diagnostics.list': () => ({ diagnostics: listDiagnostics() }),
     'system.context.get': async () => {
       const settings = getSettings()
@@ -288,8 +289,7 @@ export function createBuiltinMainHandlers(): Record<string, MainCapabilityHandle
       return { focused: true, ...(route ? { route } : {}) }
     }),
     'system.reviews.record': typed<'system.reviews.record'>(async ({ jobId, observations, issues, nextChange }) => {
-      const job = await getJob(jobId)
-      if (!job) throw new Error(`任务不存在：${jobId}`)
+      await knownJob(jobId)
       const review = {
         jobId,
         observations,
@@ -307,7 +307,9 @@ export function createBuiltinMainHandlers(): Record<string, MainCapabilityHandle
       if (!existsSync(file)) return null
       return JSON.parse(readFileSync(file, 'utf8')) as unknown
     }),
-    'system.audit.recent': typed<'system.audit.recent'>((query) => ({ entries: listCapabilityAudit(query) })),
+    'system.audit.recent': typed<'system.audit.recent'>(async (query) => ({
+      entries: await listCapabilityAudit({ ...query, source: 'external-agent' }),
+    })),
     'system.guide.read': typed<'system.guide.read'>(({ topic, profile, enabledPacks }) => {
       const settings = getSettings()
       const projected = projectCapabilities(BUILTIN_CAPABILITY_REGISTRY, {
@@ -329,12 +331,37 @@ export function createBuiltinMainHandlers(): Record<string, MainCapabilityHandle
   }
 }
 
+/** Job ids as the supervisor makes them; anything else never reaches a file name. */
+const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/
+
+/** A job the supervisor knows, by an id that is safe in a file name. */
+async function knownJob(id: string) {
+  const job = JOB_ID.test(id) ? await getJob(id) : null
+  if (!job) throw new Error(`任务不存在：${id}`)
+  return job
+}
+
+/** The recipe and computer a training run would use, shown in its approval. */
+async function trainingRunDetail(id: string): Promise<string> {
+  const project = await trainingGet(id)
+  const { recipe } = project
+  const host = project.hostId === 'local' ? '本机' : (getTrainingHost(getSettings(), project.hostId)?.name ?? project.hostId)
+  const shape = [
+    recipe.algo,
+    recipe.dim !== null ? `dim ${recipe.dim}` : '',
+    `${recipe.steps} 步`,
+    `batch ${recipe.batch}`,
+    `${recipe.resolution}px`,
+  ]
+  return `「${project.name}」在${host}上训练：${shape.filter(Boolean).join(' · ')}${recipe.overrides.trim() ? ' · 含自定义参数' : ''}`
+}
+
 export function createBuiltinMainDispatcher(): MainCapabilityDispatcher {
   return createMainCapabilityDispatcher({
     mainHandlers: createBuiltinMainHandlers(),
-    readFlags: () => {
-      const settings = getSettings()
-      return capabilityFlags(settings)
-    },
+    readFlags: () => capabilityFlags(getSettings()),
+    prepareArgs: (action, args) => prepareAgentPaths(action, args),
+    approvalDetail: async (action, args) =>
+      action.id === 'training.runs.start' && typeof args.id === 'string' ? trainingRunDetail(args.id) : undefined,
   })
 }

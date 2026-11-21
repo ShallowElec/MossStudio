@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net'
 import type { AgentMode, AiToolCall, AiToolResult } from '@shared/ai'
 import {
   composeOfficialGuide,
+  isMutatingEffects,
   sha256Text,
   MOSS_PROMPTCRAFT_SKILL_MD,
   MOSS_LAYOUT_DESIGN_SKILL_MD,
@@ -36,6 +37,8 @@ import { attachCapabilityApproval } from '../agentHub'
  */
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
+/** Versions this server speaks; `initialize` answers with the client's when listed, else with ours. */
+export const MCP_SUPPORTED_VERSIONS: readonly string[] = ['2024-11-05', MCP_PROTOCOL_VERSION, '2025-06-18']
 const MAX_BODY_BYTES = 4 * 1024 * 1024
 
 export const MCP_RESOURCE_URIS = {
@@ -97,7 +100,7 @@ export function fromMcpToolName(name: string): string {
 }
 
 function mcpAnnotationsFor(action: ActionDescriptor): Record<string, boolean> {
-  const mutating = action.effects.some((effect) => ['write', 'run', 'delete', 'export', 'install', 'configure'].includes(effect))
+  const mutating = isMutatingEffects(action.effects)
   const destructive = action.effects.includes('delete')
   return {
     readOnlyHint: !mutating,
@@ -133,6 +136,11 @@ function constantTimeBearerMatch(header: string | undefined, expectedToken: stri
   const received = Buffer.from(header.slice('Bearer '.length).trim(), 'utf8')
   const expected = Buffer.from(expectedToken, 'utf8')
   return received.length === expected.length && timingSafeEqual(received, expected)
+}
+
+/** Whether a Host header names this server on loopback (`127.0.0.1:<port>` or `localhost:<port>`). */
+export function isLoopbackHost(host: string | undefined, port: number): boolean {
+  return host === `127.0.0.1:${port}` || host === `localhost:${port}`
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -274,7 +282,7 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
     }
   }
 
-  async function handleRpc(raw: JsonRpcRequest): Promise<{ status: number; body?: unknown }> {
+  async function handleRpc(raw: JsonRpcRequest, signal?: AbortSignal): Promise<{ status: number; body?: unknown }> {
     const id = raw.id === undefined ? null : (raw.id as string | number | null)
     const method = typeof raw.method === 'string' ? raw.method : ''
     const params = raw.params && typeof raw.params === 'object' && !Array.isArray(raw.params) ? (raw.params as Record<string, unknown>) : {}
@@ -293,12 +301,12 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
     }
 
     if (method === 'initialize') {
-      const requested = typeof params.protocolVersion === 'string' ? params.protocolVersion : MCP_PROTOCOL_VERSION
+      const requested = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
       const projected = activeProjected()
       return {
         status: 200,
         body: rpcOk(id, {
-          protocolVersion: requested || MCP_PROTOCOL_VERSION,
+          protocolVersion: MCP_SUPPORTED_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSION,
           capabilities: {
             tools: { listChanged: true },
             resources: { listChanged: true },
@@ -347,7 +355,8 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
       const meta =
         params._meta && typeof params._meta === 'object' && !Array.isArray(params._meta) ? (params._meta as Record<string, unknown>) : {}
       const mode: AgentMode = profile === 'proposal-only' || meta.mode === 'advanced' ? 'advanced' : 'auto'
-      const approved = false
+      // Only what tools/list offered can be called: the profile is a boundary, not a menu.
+      const allowed = new Set(activeProjected().actions.map((action) => action.id))
       const conversationId = typeof meta.conversationId === 'string' ? meta.conversationId : undefined
 
       if (canonicalOrAlias === 'system.guide.read' && args.profile === undefined) {
@@ -362,7 +371,8 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
           mode,
           source: 'external-agent',
           conversationId,
-          approved,
+          allowed,
+          signal,
           runInRenderer: options.runInRenderer,
         })
         if (!audited.ok) return { status: 200, body: rpcOk(id, formatToolCallResult(canonicalOrAlias, audited)) }
@@ -394,7 +404,8 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
         mode,
         source: 'external-agent',
         conversationId,
-        approved,
+        allowed,
+        signal,
         runInRenderer: options.runInRenderer,
       })
 
@@ -482,7 +493,7 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
         }
       }
       if (uri === MCP_RESOURCE_URIS.recentAudit) {
-        const entries = listCapabilityAudit({ limit: 50 })
+        const entries = await listCapabilityAudit({ limit: 50, source: 'external-agent' })
         return {
           status: 200,
           body: rpcOk(id, {
@@ -554,9 +565,26 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
     return { status: 200, body: rpcError(id, -32601, `Method not found: ${method}`) }
   }
 
+  let listeningPort = 0
   const server: Server = createServer((req, res) => {
     void (async () => {
       const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
+
+      // A web page can reach a loopback port: browsers send Origin, MCP clients do not, and a rebound name fails the Host check.
+      if (req.headers.origin !== undefined || !isLoopbackHost(req.headers.host, listeningPort)) {
+        sendJson(res, 403, { error: 'Forbidden' })
+        return
+      }
+
+      if (path !== '/mcp' && path !== '/health') {
+        sendJson(res, 404, { error: 'Not found' })
+        return
+      }
+
+      if (!constantTimeBearerMatch(req.headers.authorization, token)) {
+        sendJson(res, 401, { error: 'Unauthorized: valid Bearer token required' })
+        return
+      }
 
       if (req.method === 'GET' && path === '/health') {
         const projected = activeProjected()
@@ -571,16 +599,6 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
         return
       }
 
-      if (path !== '/mcp') {
-        sendJson(res, 404, { error: 'Not found' })
-        return
-      }
-
-      if (!constantTimeBearerMatch(req.headers.authorization, token)) {
-        sendJson(res, 401, { error: 'Unauthorized: valid Bearer token required' })
-        return
-      }
-
       if (req.method === 'DELETE') {
         res.writeHead(204)
         res.end()
@@ -591,6 +609,12 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
         sendJson(res, 405, { error: 'Method not allowed; send JSON-RPC 2.0 via POST /mcp' })
         return
       }
+
+      // The Agent gave up (its tool timeout) or went away: a call still waiting for approval is dropped.
+      const gone = new AbortController()
+      res.once('close', () => {
+        if (!res.writableFinished) gone.abort()
+      })
 
       let body: unknown
       try {
@@ -603,7 +627,7 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
       if (Array.isArray(body)) {
         const responses: unknown[] = []
         for (const item of body) {
-          const outcome = await handleRpc(item as JsonRpcRequest)
+          const outcome = await handleRpc(item as JsonRpcRequest, gone.signal)
           if (outcome.body !== undefined) responses.push(outcome.body)
         }
         if (responses.length === 0) {
@@ -615,7 +639,7 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
         return
       }
 
-      const outcome = await handleRpc(body as JsonRpcRequest)
+      const outcome = await handleRpc(body as JsonRpcRequest, gone.signal)
       if (outcome.body === undefined) {
         res.writeHead(outcome.status)
         res.end()
@@ -636,6 +660,7 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
   })
 
   const address = server.address() as AddressInfo
+  listeningPort = address.port
   const url = `http://127.0.0.1:${address.port}/mcp`
   writeDiscovery(url)
 

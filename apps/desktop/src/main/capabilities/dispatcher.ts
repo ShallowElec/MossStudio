@@ -4,6 +4,7 @@ import type { AgentMode, AiToolCall, AiToolResult } from '@shared/ai'
 import type { PlanStep } from '@shared/agent/cards'
 import {
   BUILTIN_CAPABILITY_REGISTRY,
+  isMutatingEffects,
   projectCapabilities,
   type ActionDescriptor,
   type CapabilityAuditEntry,
@@ -19,11 +20,11 @@ import {
 import { recordCapabilityAudit } from './audit'
 
 /**
- * Unified Main-process capability dispatcher.
- *
- * Routes `target: 'main'` capabilities directly to main services (headless safe)
- * and `target: 'renderer'` capabilities to the active Studio window, enforcing
- * feature flags, Zod input validation, policy floors and append-only audit logs.
+ * Main-process capability dispatcher, used by external Agents over MCP (the
+ * built-in 助手 keeps its own tools). It routes `target: 'main'` actions to
+ * main services and `target: 'renderer'` ones to the Studio window, and
+ * enforces, in this order: the caller's allowlist, feature flags, read-only
+ * callers, input validation, path rules, plans, approval, then audit.
  */
 
 export type MainCapabilityHandler = (
@@ -43,7 +44,12 @@ export interface DispatchRequest {
   mode?: AgentMode
   source?: CapabilityCallSource
   conversationId?: string
-  approved?: boolean
+  /** Canonical ids this caller may run (the MCP profile's toolset); anything else is refused. Absent: every registered action. */
+  allowed?: ReadonlySet<string>
+  /** Only actions that change nothing and need no approval. */
+  readOnly?: boolean
+  /** Aborted when the caller went away: a pending approval is dropped and nothing runs. */
+  signal?: AbortSignal
   runInRenderer?: (call: AiToolCall, mode: AgentMode, conversationId?: string) => Promise<AiToolResult>
 }
 
@@ -57,8 +63,10 @@ export interface ListCapabilitiesInput {
   nameStyle?: 'legacy-or-id' | 'canonical'
 }
 
+export type ApprovalHandler = (request: CapabilityApprovalRequest, signal?: AbortSignal) => Promise<boolean>
+
 export interface MainCapabilityDispatcher {
-  requestApproval?: (request: CapabilityApprovalRequest) => Promise<boolean>
+  requestApproval?: ApprovalHandler
   readonly registry: CapabilityRegistry
   list(input?: ListCapabilitiesInput): ProjectedToolset
   skill(input?: ListCapabilitiesInput): SynthesizedSkill
@@ -71,7 +79,14 @@ export interface MainCapabilityDispatcherOptions {
   readFlags?: () => Readonly<Record<string, boolean>>
   runInRenderer?: (call: AiToolCall, mode: AgentMode, conversationId?: string) => Promise<AiToolResult>
   audit?: (entry: CapabilityAuditEntry) => void
+  /** Checks and rewrites validated arguments before anything runs (paths an Agent names); throws to refuse. */
+  prepareArgs?: (action: ActionDescriptor, args: Record<string, unknown>, source: CapabilityCallSource) => Promise<Record<string, unknown>>
+  /** What the person sees in an approval beyond the arguments (the recipe and host a training run resolves to). */
+  approvalDetail?: (action: ActionDescriptor, args: Record<string, unknown>) => Promise<string | undefined>
 }
+
+/** Audit summaries and errors are capped: they are read back by Agents and must not carry whole prompts or files. */
+const AUDIT_TEXT_MAX = 200
 
 function parseRawArgs(raw: Record<string, unknown> | string | undefined): Record<string, unknown> {
   if (!raw) return {}
@@ -97,18 +112,35 @@ function fail(error: string, extra?: Record<string, unknown>): AiToolResult {
   return { ok: false, content: JSON.stringify({ error, ...extra }) }
 }
 
-function isMutating(descriptor: ActionDescriptor): boolean {
-  return descriptor.effects.some((effect) => ['write', 'run', 'delete', 'export', 'install', 'configure'].includes(effect))
+function capped(text: string): string {
+  return text.length > AUDIT_TEXT_MAX ? `${text.slice(0, AUDIT_TEXT_MAX - 1)}…` : text
 }
 
 function extractError(result: AiToolResult): string | undefined {
   if (result.ok) return undefined
   try {
     const body = JSON.parse(result.content) as { error?: unknown }
-    return typeof body.error === 'string' ? body.error : result.content.slice(0, 200)
+    return capped(typeof body.error === 'string' ? body.error : result.content)
   } catch {
-    return result.content.slice(0, 200)
+    return capped(result.content)
   }
+}
+
+/** An unknown tool is still audited, under its own (capped) name. */
+function unknownAction(name: string): ActionDescriptor {
+  return {
+    id: capped(name) as CapabilityId,
+    packId: 'unknown.tool',
+    title: name,
+    description: '',
+    input: {},
+    target: 'main',
+    scope: 'session',
+    effects: [],
+    policyFloor: 'auto',
+    requires: [],
+    headless: 'supported',
+  } as unknown as ActionDescriptor
 }
 
 export function createMainCapabilityDispatcher(options: MainCapabilityDispatcherOptions): MainCapabilityDispatcher {
@@ -138,11 +170,17 @@ export function createMainCapabilityDispatcher(options: MainCapabilityDispatcher
     const callId = request.callId ?? `cap-${randomUUID().slice(0, 8)}`
     const mode: AgentMode = request.mode ?? 'auto'
     const source: CapabilityCallSource = request.source ?? 'ipc'
-    let approved = request.approved === true
-    const rawArgs = parseRawArgs(request.arguments)
+    let approved = false
+    let args = parseRawArgs(request.arguments)
     const registered = registry.getAction(request.name)
 
     const record = (descriptor: ActionDescriptor, result: AiToolResult): AiToolResult => {
+      let summary = descriptor.title
+      try {
+        if (registered) summary = registry.summarizeAction(descriptor.id, args)
+      } catch {
+        // A summary of malformed arguments falls back to the title.
+      }
       audit({
         id: callId,
         timestamp: new Date().toISOString(),
@@ -155,7 +193,7 @@ export function createMainCapabilityDispatcher(options: MainCapabilityDispatcher
         policyFloor: descriptor.policyFloor,
         mode,
         approved,
-        summary: registry.summarizeAction(descriptor.id, rawArgs),
+        summary: capped(summary),
         ok: result.ok,
         durationMs: Math.max(0, Date.now() - startedAt),
         ...(result.ok ? {} : { error: extractError(result) }),
@@ -163,90 +201,86 @@ export function createMainCapabilityDispatcher(options: MainCapabilityDispatcher
       return result
     }
 
-    if (!registered) {
-      return fail(`未知工具 ${request.name}`)
-    }
+    if (!registered) return record(unknownAction(request.name), fail(`未知工具 ${request.name}`))
 
     const { descriptor } = registered
-    const pack = registry.getPack(descriptor.packId)
-    if (pack?.featureFlag) {
-      const flags = readFlags()
-      if (flags[pack.featureFlag] !== true) {
-        return record(descriptor, fail(`功能「${pack.title}」未开启，请先在设置 › 功能中启用`))
-      }
+    if (request.allowed && !request.allowed.has(descriptor.id)) {
+      return record(descriptor, fail(`工具「${descriptor.title}」不在当前开放的工具里`))
     }
-
+    const pack = registry.getPack(descriptor.packId)
+    if (pack?.featureFlag && readFlags()[pack.featureFlag] !== true) {
+      return record(descriptor, fail(`功能「${pack.title}」未开启，请先在设置 › 功能中启用`))
+    }
     if (descriptor.policyFloor === 'human-only') {
       return record(descriptor, fail(`操作「${descriptor.title}」需要你在界面中手动完成`))
     }
+    const mutating = isMutatingEffects(descriptor.effects)
+    if (request.readOnly && (mutating || descriptor.policyFloor !== 'auto')) {
+      return record(descriptor, fail(`这里只能读取，不能执行「${descriptor.title}」`))
+    }
 
-    const approvalHandler = dispatcher.requestApproval
-    if (descriptor.policyFloor === 'approval' && !approved && mode !== 'advanced' && approvalHandler) {
-      const input = registry.validateInput(descriptor.id, rawArgs)
-      if (!input.ok) return record(descriptor, fail(input.error))
+    const validated = registry.validateInput(descriptor.id, args)
+    if (!validated.ok) return record(descriptor, fail(validated.error))
+    args = validated.data
+    if (options.prepareArgs) {
       try {
-        approved = await approvalHandler({
-          actionId: descriptor.id,
-          packId: descriptor.packId,
-          title: descriptor.title,
-          summary: registry.summarizeAction(descriptor.id, input.data),
-          argsPreview: JSON.stringify(input.data).slice(0, 2000),
-          source,
-        })
+        args = await options.prepareArgs(descriptor, args, source)
+      } catch (error) {
+        return record(descriptor, fail(error instanceof Error ? error.message : String(error)))
+      }
+    }
+
+    const summary = registry.summarizeAction(descriptor.id, args)
+    // A plan (审批 / proposal-only) changes nothing, so it needs no approval; it is never applied for an external caller.
+    if (mode === 'advanced' && mutating) {
+      const proposed: PlanStep = { tool: request.name, args, label: summary }
+      return record(descriptor, serializeResult({ proposed }))
+    }
+
+    if (descriptor.policyFloor === 'approval') {
+      const approvalHandler = dispatcher.requestApproval
+      if (!approvalHandler || request.signal?.aborted) {
+        return record(descriptor, fail(`操作「${descriptor.title}」需要你的确认后才能执行`, { requiresApproval: true }))
+      }
+      try {
+        const detail = await options.approvalDetail?.(descriptor, args).catch(() => undefined)
+        approved = await approvalHandler(
+          {
+            actionId: descriptor.id,
+            packId: descriptor.packId,
+            title: descriptor.title,
+            summary: detail ? `${summary}\n${detail}` : summary,
+            argsPreview: JSON.stringify(args).slice(0, 2000),
+            source,
+          },
+          request.signal,
+        )
       } catch {
         // Approval failures must never authorize an operation.
         approved = false
       }
-      if (!approved) return record(descriptor, fail('操作未获批准', { requiresApproval: true }))
+      if (!approved || request.signal?.aborted) {
+        approved = false
+        return record(descriptor, fail('操作未获批准', { requiresApproval: true }))
+      }
     }
 
-    // Renderer-targeted actions delegate to the live RendererCapabilityHost (which owns Studio prechecks and plan deferral).
     if (descriptor.target === 'renderer') {
-      if (descriptor.policyFloor === 'approval' && mode === 'auto' && !approved) {
-        return record(descriptor, fail(`操作「${descriptor.title}」需要你的确认后才能执行`, { requiresApproval: true }))
-      }
       const runner = request.runInRenderer ?? options.runInRenderer
-      if (!runner) {
-        return record(descriptor, fail('Studio 窗口尚未就绪，请先打开创作页'))
-      }
-      const rawText = typeof request.arguments === 'string' ? request.arguments : JSON.stringify(rawArgs)
+      if (!runner) return record(descriptor, fail('Studio 窗口尚未就绪，请先打开创作页'))
       try {
-        const result = await runner({ id: callId, name: request.name, arguments: rawText }, mode, request.conversationId)
+        const result = await runner({ id: callId, name: request.name, arguments: JSON.stringify(args) }, mode, request.conversationId)
         return record(descriptor, result)
       } catch (error) {
         return record(descriptor, fail(error instanceof Error ? error.message : String(error)))
       }
     }
 
-    // Main-targeted actions validate, enforce policy gates and execute directly in the main process.
-    const validated = registry.validateInput(descriptor.id, rawArgs)
-    if (!validated.ok) {
-      return record(descriptor, fail(validated.error))
-    }
-
-    const summary = registry.summarizeAction(descriptor.id, validated.data)
-    if (mode === 'advanced' && isMutating(descriptor)) {
-      const proposed: PlanStep = { tool: request.name, args: validated.data, label: summary }
-      return record(descriptor, serializeResult({ proposed }))
-    }
-    if (descriptor.policyFloor === 'approval' && !approved) {
-      return record(descriptor, fail(`操作「${descriptor.title}」需要你的确认后才能执行`, { requiresApproval: true }))
-    }
-
     const handler = options.mainHandlers[descriptor.id]
-    if (!handler) {
-      return record(descriptor, fail(`能力 ${descriptor.title} 尚未绑定主进程处理器`))
-    }
-
+    if (!handler) return record(descriptor, fail(`能力 ${descriptor.title} 尚未绑定主进程处理器`))
     try {
-      const data = await handler(validated.data, {
-        callId,
-        action: descriptor,
-        source,
-        conversationId: request.conversationId,
-      })
-      if (!isMutating(descriptor)) return record(descriptor, serializeResult(data))
-      return record(descriptor, serializeResult(data, { summary }))
+      const data = await handler(args, { callId, action: descriptor, source, conversationId: request.conversationId })
+      return record(descriptor, mutating ? serializeResult(data, { summary }) : serializeResult(data))
     } catch (error) {
       return record(descriptor, fail(error instanceof Error ? error.message : String(error)))
     }

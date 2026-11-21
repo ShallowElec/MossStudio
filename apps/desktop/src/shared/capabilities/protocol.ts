@@ -21,6 +21,14 @@ export type CapabilityId = `${string}.${string}`
 export type ActionTarget = 'main' | 'renderer' | 'hybrid'
 export type ActionScope = 'session' | 'project' | 'application'
 export type ActionEffect = 'read' | 'select' | 'write' | 'run' | 'delete' | 'export' | 'install' | 'configure' | 'interact'
+
+/** Effects that change something: held as a plan in 审批/proposal-only, never run by a read-only caller. One list for main, renderer and MCP. */
+export const MUTATING_EFFECTS: readonly ActionEffect[] = ['write', 'run', 'delete', 'export', 'install', 'configure']
+
+/** Whether an action with these effects changes anything. */
+export function isMutatingEffects(effects: readonly ActionEffect[]): boolean {
+  return effects.some((effect) => MUTATING_EFFECTS.includes(effect))
+}
 export type PolicyGate = 'auto' | 'approval' | 'human-only'
 export type ActionRequirement = 'selection' | 'editable' | 'editable-or-style' | 'surface' | 'engine'
 export type CapabilitySurface = '/studio' | '/manga' | '/library' | '/models' | '/training'

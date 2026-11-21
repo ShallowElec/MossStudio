@@ -18,9 +18,11 @@ import {
   stopMcpServer,
   getMcpClientsStatus,
   installMcpClient,
+  refreshMcpClientRegistrations,
   uninstallMcpClient,
 } from './mcp'
-import { listLoraProfiles, saveLoraProfile, extractSafetensorsTriggers } from './services/loraProfiles'
+import { listLoraProfiles, saveLoraProfile, cachedSafetensorsTriggers } from './services/loraProfiles'
+import { isNetworkPath } from './lib/localPath'
 import { agentHub, attachCapabilityApproval, capabilityApprovalQueue, stopAgentHub } from './agentHub'
 import { assertExternalAgentsOn, externalAgentsOn } from './externalAgents'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
@@ -292,6 +294,8 @@ export async function runToolInStudioWindow(call: AiToolCall, mode: AgentMode, c
 export async function syncExternalAgents(settings: Settings): Promise<void> {
   if (externalAgentsOn(settings)) {
     await startMcpServer({ runInRenderer: runToolInStudioWindow })
+    // A new app version runs from another folder: clients registered earlier are pointed at it.
+    void refreshMcpClientRegistrations().catch((error: unknown) => console.warn('[mcp]', error))
     return
   }
   await Promise.all([stopMcpServer(), stopAgentHub()])
@@ -383,13 +387,8 @@ export function registerIpc(): void {
     capabilities.skill(input ? { ...input, enabledPacks: input.enabledPacks as CapabilityId[] | undefined } : undefined),
   )
   // The 协同 panel only reads through this (the guide); a change always comes from an Agent over MCP, behind approval.
-  handleExternal(Ipc.capabilitiesExecute, schemas.capabilitiesExecute, (input, event) =>
-    capabilities.execute({
-      ...input,
-      source: 'ipc',
-      readOnly: true,
-      runInRenderer: (call, mode, conversationId) => runToolInRenderer(event, call, mode, conversationId ?? ''),
-    }),
+  handleExternal(Ipc.capabilitiesExecute, schemas.capabilitiesExecute, ({ name, arguments: args }) =>
+    capabilities.execute({ name, arguments: args, source: 'ipc', readOnly: true }),
   )
   handleExternal(Ipc.capabilitiesAudit, schemas.capabilitiesAudit, (input) => listCapabilityAudit(input ?? {}))
 
@@ -429,12 +428,14 @@ export function registerIpc(): void {
     return result
   })
   handle(Ipc.loraProfilesInspect, schemas.loraProfilesInspect, async ({ filePath, loraId }) => {
+    // A file on a network share is never opened for its trigger words (lib/localPath.ts).
+    if (filePath && isNetworkPath(filePath)) throw new Error('不能读取网络位置上的文件，请手动填写触发词')
     const resolved =
       filePath && existsSync(filePath) ? filePath : loraId ? await resolveAdapterFile(getSettings(), loraId).catch(() => null) : null
     if (!resolved || !existsSync(resolved)) {
       throw new Error('本机找不到该 LoRA 的权重文件，请手动填写触发词或确认权重路径')
     }
-    return extractSafetensorsTriggers(resolved)
+    return cachedSafetensorsTriggers(resolved)
   })
 
   handle(Ipc.aiProvidersList, null, () => listProviders())
