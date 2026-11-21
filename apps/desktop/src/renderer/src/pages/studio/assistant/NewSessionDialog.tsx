@@ -185,7 +185,7 @@ export function NewSessionDialog({
     <Modal
       open={open}
       onClose={onClose}
-      title="新建对话"
+      title={`新建 ${backendLabel} 对话`}
       width="max-w-md"
       footer={
         <>
