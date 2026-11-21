@@ -63,7 +63,7 @@ describe('optional features are off by default', () => {
     const page = await app.open({ scenario: 'ready', route: '/settings/features' })
     await page.getByRole('switch', { name: '外部 Agent' }).click()
     await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ externalAgentsEnabled: true })
-    await page.getByRole('switch', { name: '远程主机' }).click()
+    await page.getByRole('switch', { name: '远程主机', exact: true }).click()
     await expect.poll(() => page.getByRole('switch', { name: 'Worker 远程主机' }).count()).toBe(1)
     await page.evaluate(() => {
       window.location.hash = '#/studio'

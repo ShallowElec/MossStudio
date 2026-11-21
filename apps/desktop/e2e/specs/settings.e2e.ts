@@ -99,7 +99,7 @@ describe('settings', () => {
     await page.getByRole('button', { name: '在功能中开启' }).click()
     await expect.poll(() => hash(page)).toBe('#/settings/features')
 
-    await page.getByRole('switch', { name: '远程主机' }).click()
+    await page.getByRole('switch', { name: '远程主机', exact: true }).click()
     await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ remoteHostsEnabled: true })
     await page.getByRole('navigation', { name: '设置分区' }).getByRole('button', { name: '设备与引擎' }).click()
     await expect.poll(() => page.getByText('Linux GPU').first().isVisible()).toBe(true)
@@ -112,7 +112,7 @@ describe('settings', () => {
     await page.evaluate(() => {
       window.location.hash = '#/settings/features'
     })
-    await page.getByRole('switch', { name: '远程主机' }).click()
+    await page.getByRole('switch', { name: '远程主机', exact: true }).click()
     await expect.poll(() => app.calls('settings:update').then((calls) => calls.at(-1))).toEqual({ remoteHostsEnabled: false })
     await page.evaluate(() => {
       window.location.hash = '#/models'
