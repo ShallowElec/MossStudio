@@ -1,4 +1,5 @@
 import type {
+  CanvasAdapter,
   AdapterEntry,
   Catalog,
   EngineFeatures,
@@ -13,7 +14,7 @@ import { bundleGpusProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle
 import { adapterStatuses, normalizeCanvasAdapters } from '@shared/adapters'
 import { CLI_ENGINE_LABEL, cliBundleProblem } from '@shared/cliEngine'
 import { lostFile, lostFileText } from '@shared/modelImport'
-import { compileCanvasPrompt, type CompiledPrompt } from './prompt'
+import { compileCanvasPrompt, type CompiledPrompt, type LoraTriggerProfiles } from './prompt'
 import { isWorkerDaemonHost, missingWorkerAdapters, type WorkerAdapterEntry } from './remoteWorkerLoras'
 
 /** Problems with a canvas's pictures and sampling choices (see jobInputs.ts). */
@@ -106,6 +107,10 @@ export interface ReadinessInput {
   cliGpus?: ReadonlySet<string>
   /** The LoRA the picked Worker host has (`Ipc.remoteWorkerLoras`); null or absent while unknown. */
   workerAdapters?: readonly WorkerAdapterEntry[] | null
+  /** Remembered LoRA profiles: automatic trigger words go into the compiled prompt. */
+  loraProfiles?: LoraTriggerProfiles
+  /** The canvas's LoRA with those of its 风格, for the trigger words; the canvas's own when absent. */
+  promptAdapters?: readonly CanvasAdapter[]
 }
 
 /** Bundle ids of the models a connected Worker daemon serves (see models.ts in main). */
@@ -252,7 +257,9 @@ export function deriveReadiness(input: ReadinessInput): Readiness {
 
   if (input.canvas) blockers.push(...(input.inputBlockers ?? []))
 
-  const prompt = input.canvas ? compileCanvasPrompt(input.canvas) : null
+  const prompt = input.canvas
+    ? compileCanvasPrompt({ ...input.canvas, adapters: [...(input.promptAdapters ?? input.canvas.adapters ?? [])] }, input.loraProfiles)
+    : null
   if (prompt && !prompt.ok) blockers.push({ id: 'prompt', message: prompt.errors[0] ?? '描述还不完整' })
 
   return { blockers, prompt }

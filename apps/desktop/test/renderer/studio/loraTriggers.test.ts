@@ -1,7 +1,9 @@
 import { act, createElement, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import type { CanvasAdapter } from '@shared/types'
+import type { CanvasAdapter, ProjectCanvas } from '@shared/types'
+import { adaptersWithStyles } from '@renderer/pages/studio/nodes'
+import { deriveReadiness } from '@renderer/pages/studio/readiness'
 import { createMockBackend } from '@test/mocks/backend'
 import { ToastProvider } from '@renderer/components/ui'
 import { LoraProfileHint, LoraTriggerBar, toggleTriggerInDescription } from '@renderer/components/studio/LoraTriggerBar'
@@ -14,14 +16,7 @@ import {
   type LoraProfile,
   type LoraProfileStore,
 } from '@renderer/components/studio/loraProfilesClient'
-import {
-  addTrigger,
-  applyLoraAutoTriggers,
-  compileCanvasPrompt,
-  promptHasTrigger,
-  removeTrigger,
-  setActiveLoraProfiles,
-} from '@renderer/pages/studio/prompt'
+import { addTrigger, applyLoraAutoTriggers, compileCanvasPrompt, promptHasTrigger, removeTrigger } from '@renderer/pages/studio/prompt'
 import { canvas, layer } from './fixtures'
 
 beforeAll(() => {
@@ -34,7 +29,6 @@ afterEach(() => {
   act(() => root?.unmount())
   element?.remove()
   root = undefined
-  setActiveLoraProfiles({})
 })
 
 describe('trigger words in the description', () => {
@@ -103,20 +97,36 @@ describe('applyLoraAutoTriggers', () => {
     )
   })
 
-  it('is what compileCanvasPrompt sends, for plain and layout canvases, but never for an empty description', () => {
-    setActiveLoraProfiles(profiles)
+  it('is what compileCanvasPrompt sends with the profiles it is given, for plain and layout canvases, never for an empty description', () => {
     const plain = canvas({ prompt: 'harbor', adapters: [{ id: 'wash', strength: 0.8 }] })
-    expect(compileCanvasPrompt(plain).prompt).toBe('harbor, watercolor, lineart')
-    expect(compileCanvasPrompt(plain, {}).prompt).toBe('harbor')
-    expect(compileCanvasPrompt(canvas({ prompt: '  ', adapters: [{ id: 'wash', strength: 1 }] })).ok).toBe(false)
+    expect(compileCanvasPrompt(plain, profiles).prompt).toBe('harbor, watercolor, lineart')
+    expect(compileCanvasPrompt(plain).prompt).toBe('harbor')
+    expect(compileCanvasPrompt(canvas({ prompt: '  ', adapters: [{ id: 'wash', strength: 1 }] }), profiles).ok).toBe(false)
     const layout = canvas({
       summary: { caption: 'harbor', meta: [], canvas: 'single' },
       layers: [layer()],
       adapters: [{ id: 'ink', strength: 1 }],
     })
-    const compiled = compileCanvasPrompt(layout)
+    const compiled = compileCanvasPrompt(layout, profiles)
     expect(compiled.ok).toBe(true)
     expect(compiled.prompt).toContain('ink style, lineart, harbor')
+  })
+
+  it('adds the trigger words of a LoRA that comes from a 风格, in the prompt readiness shows', () => {
+    const style = canvas({ id: 'st', kind: 'style', prompt: '', adapters: [{ id: 'wash', strength: 1 }] })
+    const own = canvas({ id: 'a', prompt: 'harbor', inputs: { styles: { links: [{ canvasId: 'st' }] } } } as Partial<ProjectCanvas>)
+    expect(adaptersWithStyles(own, [own, style]).map((adapter) => adapter.id)).toEqual(['wash'])
+    const readiness = deriveReadiness({
+      catalog: null,
+      bundle: { bundle: null, installed: false, unavailable: false },
+      canvas: own,
+      engine: null,
+      setupDone: true,
+      remote: null,
+      loraProfiles: profiles,
+      promptAdapters: adaptersWithStyles(own, [own, style]),
+    })
+    expect(readiness.prompt?.prompt).toBe('harbor, watercolor, lineart')
   })
 })
 

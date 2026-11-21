@@ -244,64 +244,156 @@ function defaultHandlers(): Map<string, Handler> {
     emit(Events.loraProfilesChanged, { loraId: profile.loraId })
     return profile
   })
-  h.set(Ipc.loraProfilesInspect, () => ({ triggerWords: [], metadata: {} }))
-  for (const channel of [
-    Ipc.remoteWorkerLoras,
+  // As main: what the file's header and sidecars name (LoraMetadata).
+  h.set(Ipc.loraProfilesInspect, () => ({ triggers: [], suggestedTriggers: [] }))
+
+  // Worker hosts: the LoRA the daemon has (main merges remembered trigger words into each).
+  h.set(Ipc.remoteWorkerLoras, (payload, { state }) => {
+    const { candidates } = p<{ candidates?: boolean }>(payload)
+    return state.agents.workerLoras.filter((item) => candidates || item.registered)
+  })
+  h.set(Ipc.remoteWorkerLoraRegister, (payload, { state }) => {
+    const { id, action } = p<{ id: string; action: 'register' | 'unregister' }>(payload)
+    const item = state.agents.workerLoras.find((entry) => entry.id === id)
+    if (item) item.registered = action === 'register'
+    return { id, registered: action === 'register' }
+  })
+
+  // 外部 Agent: every channel answers E_FEATURE_OFF while the switch is off, as main does.
+  const external =
+    (handler: Handler): Handler =>
+    (payload, context) => {
+      if (!context.state.settings.externalAgentsEnabled)
+        throw new MockIpcError('E_FEATURE_OFF', '外部 Agent 还没有打开，请先在 设置 › 功能 里打开')
+      return handler(payload, context)
+    }
+  const approvalsChanged = (state: MockBackendState, emit: HandlerContext['emit']) =>
+    emit(Events.capabilityApproval, { pending: state.agents.approvals })
+  h.set(
     Ipc.agentHubBackends,
+    external((_, { state }) => state.agents.backends),
+  )
+  h.set(
     Ipc.agentHubSessions,
+    external((_, { state }) => state.agents.sessions),
+  )
+  h.set(
+    Ipc.agentHubMessages,
+    external(
+      (payload, { state }) =>
+        state.agents.messages[p<{ sessionId: string }>(payload).sessionId] ?? { messages: [], hasMore: false, asOfSeq: 0 },
+    ),
+  )
+  h.set(
     Ipc.agentHubApprovals,
+    external((_, { state }) => state.agents.approvals),
+  )
+  h.set(
+    Ipc.agentHubResolveApproval,
+    external((payload, { state, emit }) => {
+      const { id } = p<{ id: string }>(payload)
+      const before = state.agents.approvals.length
+      state.agents.approvals = state.agents.approvals.filter((item) => item.id !== id)
+      approvalsChanged(state, emit)
+      return state.agents.approvals.length < before
+    }),
+  )
+  h.set(
+    Ipc.agentHubModels,
+    external(() => ({ models: [] })),
+  )
+  h.set(
+    Ipc.agentHubSessionStats,
+    external(() => ({
+      messageCount: 0,
+      userTurns: 0,
+      assistantTurns: 0,
+      estimatedChars: 0,
+      activeMcpTools: 0,
+      recentToolCalls: 0,
+      running: false,
+    })),
+  )
+  h.set(
+    Ipc.agentHubCreateSession,
+    external(() => ({ sessionId: 'fixture-agent-session' })),
+  )
+  h.set(
+    Ipc.agentHubSetModel,
+    external((payload) => ({ ok: true, model: p<{ model: string }>(payload).model })),
+  )
+  h.set(
+    Ipc.agentHubConnect,
+    external((payload, { state }) => {
+      const id = p<{ backendId: string }>(payload).backendId
+      const known = state.agents.backends.find((backend) => backend.id === id)
+      const backend = { id, label: known?.label ?? 'Fixture agent', kind: 'acp' as const, available: true, connected: true }
+      state.agents.backends = [...state.agents.backends.filter((item) => item.id !== id), backend]
+      return backend
+    }),
+  )
+  for (const channel of [Ipc.agentHubDisconnect, Ipc.agentHubSend, Ipc.agentHubStop])
+    h.set(
+      channel,
+      external(() => true),
+    )
+  h.set(
     Ipc.capabilitiesList,
+    external(() => ({ profile: 'compact', actions: [], tools: [], skill: { markdown: '', digest: '', fragmentIds: [] } })),
+  )
+  h.set(
+    Ipc.capabilitiesSkill,
+    external(() => ({ markdown: '', digest: '', fragmentIds: [] })),
+  )
+  // As main: an AiToolResult whose content is the action's JSON.
+  h.set(
+    Ipc.capabilitiesExecute,
+    external((payload) => {
+      const { name } = p<{ name: string }>(payload)
+      if (name !== 'system.guide.read') return { ok: false, content: JSON.stringify({ error: `这里只能读取，不能执行「${name}」` }) }
+      return { ok: true, content: JSON.stringify({ topic: 'all', markdown: '# MossStudio\n', digest: 'fixture' }) }
+    }),
+  )
+  h.set(
     Ipc.capabilitiesAudit,
+    external(() => []),
+  )
+  h.set(
     Ipc.mcpClientsStatus,
-  ])
-    h.set(channel, () => [])
-  h.set(Ipc.remoteWorkerLoraRegister, (payload) => p(payload))
-  h.set(Ipc.agentHubModels, () => ({ models: [] }))
-  h.set(Ipc.agentHubMessages, () => ({ messages: [], hasMore: false, asOfSeq: 0 }))
-  h.set(Ipc.agentHubSessionStats, () => ({
-    messageCount: 0,
-    userTurns: 0,
-    assistantTurns: 0,
-    estimatedChars: 0,
-    activeMcpTools: 0,
-    recentToolCalls: 0,
-    running: false,
-  }))
-  h.set(Ipc.agentHubCreateSession, () => ({ sessionId: 'fixture-agent-session' }))
-  h.set(Ipc.agentHubSetModel, (payload) => ({ ok: true, ...p<object>(payload) }))
-  h.set(Ipc.agentHubConnect, (payload) => ({
-    id: p<{ backendId: string }>(payload).backendId,
-    label: 'Fixture agent',
-    kind: 'acp',
-    available: true,
-    connected: true,
-  }))
-  for (const channel of [Ipc.agentHubDisconnect, Ipc.agentHubSend, Ipc.agentHubStop, Ipc.agentHubResolveApproval])
-    h.set(channel, () => true)
-  h.set(Ipc.capabilitiesSkill, () => ({ markdown: '', digest: '' }))
-  h.set(Ipc.capabilitiesExecute, () => ({ ok: true, data: null }))
-  const mcpState = {
-    running: false,
-    host: '127.0.0.1',
-    port: 0,
-    url: '',
-    profile: 'studio-core',
-    enabledPacks: [],
-    discoveryPath: '',
-    stdioBridgePath: '',
-  }
-  h.set(Ipc.mcpInfo, () => ({ ...mcpState }))
-  h.set(Ipc.mcpSetProfile, (payload) => Object.assign(mcpState, p<object>(payload)))
+    external((_, { state }) => state.agents.clients),
+  )
   for (const channel of [Ipc.mcpClientInstall, Ipc.mcpClientUninstall])
-    h.set(channel, (payload) => ({
-      id: p<{ clientId: string }>(payload).clientId,
-      label: 'Fixture client',
-      configPath: '',
-      detected: false,
-      installed: channel === Ipc.mcpClientInstall,
-      installMode: 'copy-only',
-      detail: '',
-    }))
+    h.set(
+      channel,
+      external((payload, { state }) => {
+        const { clientId } = p<{ clientId: string }>(payload)
+        const client = state.agents.clients.find((item) => item.id === clientId)
+        if (!client || client.installMode === 'copy-only') throw new MockIpcError('E_MCP_CLIENT', `没有找到 ${clientId} 命令`)
+        client.installed = channel === Ipc.mcpClientInstall
+        client.detail = client.installed ? '已连接' : '未连接'
+        return { ...client }
+      }),
+    )
+  // As main's McpServerState.
+  const mcpState = {
+    running: true,
+    url: 'http://127.0.0.1:47321/mcp',
+    token: null as string | null,
+    profile: 'compact',
+    toolCount: 42,
+    packCount: 9,
+    discoveryPath: '/fixture/data/mcp-server.json',
+    stdioBridgePath: '/fixture/data/mcp/mossstudio-mcp-stdio.mjs',
+    protocolVersion: '2025-03-26',
+  }
+  h.set(
+    Ipc.mcpInfo,
+    external((payload) => ({ ...mcpState, token: p<{ includeToken?: boolean }>(payload).includeToken ? 'fixture-token' : null })),
+  )
+  h.set(
+    Ipc.mcpSetProfile,
+    external((payload) => Object.assign(mcpState, p<{ profile: string; enabledPacks?: string[] }>(payload))),
+  )
 
   h.set(Ipc.appInfo, (_, { state }) => {
     // Like main: the models folder follows settings.

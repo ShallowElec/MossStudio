@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { JobRecord, ProjectDocument, ProjectSummary } from '@shared/types'
 import type { StudioClient, StudioProjectInput } from '@renderer/lib/studioClient'
-import { useStudioProject, type StepOutcome, type StudioProject } from '@renderer/pages/studio/useStudioProject'
+import { createExternalSteps, useStudioProject, type StepOutcome, type StudioProject } from '@renderer/pages/studio/useStudioProject'
 import { canvas } from './fixtures'
 
 beforeAll(() => {
@@ -270,6 +270,30 @@ describe('useStudioProject history', () => {
     })
     expect(label).toBe('移动 2 张卡片')
     expect(get().canvases.map((item) => item.x)).toEqual([50, 450])
+  })
+
+  it("makes an external Agent's call one step, also the edits it makes after an await", async () => {
+    const { get } = await mount(fakeClient([two()]).client)
+    const steps = createExternalSteps((group, run) => get().history.within(group, run))
+    const update = steps.wrap((id: string, patch: { prompt?: string; x?: number }) => get().updateCanvas(id, patch))
+    await act(async () => {
+      await steps.follow('call-1', async () => {
+        update('a-c', { prompt: '海边' })
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        update('b-c', { x: 900 })
+      })
+    })
+    await nextTask()
+    let label: string | null = null
+    await act(async () => {
+      label = labelOf(get().history.undo())
+    })
+    expect(label).toBe('外部 Agent 的修改')
+    expect(get().canvases.map((item) => [item.prompt, item.x])).toEqual([
+      ['', 0],
+      ['', 400],
+    ])
+    expect(get().history.canUndo).toBe(false)
   })
 
   it('typing in a field is one step for as long as the field keeps focus', async () => {

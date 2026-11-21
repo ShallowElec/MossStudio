@@ -13,13 +13,6 @@ export interface LoraTriggerProfile {
 
 export type LoraTriggerProfiles = Readonly<Record<string, LoraTriggerProfile>>
 
-let activeProfiles: LoraTriggerProfiles = {}
-
-/** The LoRA profile store publishes here, so every compile path adds the same automatic trigger words. */
-export function setActiveLoraProfiles(profiles: LoraTriggerProfiles): void {
-  activeProfiles = profiles
-}
-
 function profileFor(profiles: LoraTriggerProfiles, adapter: Pick<CanvasAdapter, 'id' | 'path'>): LoraTriggerProfile | undefined {
   return profiles[adapter.path ?? adapter.id] ?? profiles[adapter.id]
 }
@@ -95,10 +88,11 @@ export const EMPTY_PROMPT_ERROR = '先写一句描述'
 type CompileSource = PromptSource & Pick<ProjectCanvas, 'width' | 'height'> & Partial<Pick<ProjectCanvas, 'adapters'>>
 
 /**
- * `profiles` defaults to what the LoRA profile store last published, so every
- * compile path (readiness, generate, the Agent) adds the same trigger words.
+ * The prompt the engine receives. `profiles` are the remembered LoRA profiles:
+ * a LoRA set to 自动前置 / 自动后置 adds its trigger words for every adapter in
+ * `canvas.adapters`, so a caller passes the 风格's adapters in there too.
  */
-export function compileCanvasPrompt(canvas: CompileSource, profiles: LoraTriggerProfiles = activeProfiles): CompiledPrompt {
+export function compileCanvasPrompt(canvas: CompileSource, profiles: LoraTriggerProfiles = {}): CompiledPrompt {
   const written = canvasDescription(canvas).trim()
   const regions = visibleLayers(canvas.layers).length
   // An empty description stays an error: trigger words alone are not a picture.

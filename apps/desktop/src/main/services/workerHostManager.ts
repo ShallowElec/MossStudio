@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import type { RemoteWorkerProfile } from '@shared/remoteWorker'
-import type { ComputeDevice, RemoteEngineInfo, Settings, TrainingHost } from '@shared/types'
+import type { ComputeDevice, EngineFeatures, RemoteEngineInfo, Settings, TrainingHost } from '@shared/types'
 import { codedError } from '../lib/codedError'
 import { run } from '../lib/run'
 import { requestWorkerDaemon, setMemoryWorkerToken } from './remoteWorker'
@@ -35,6 +35,10 @@ export interface WorkerHostDeps {
 interface Capabilities {
   engineVersion?: string
   devices: Array<{ index: number; name: string; totalBytes?: number }>
+  /** What the daemon says it does (`features` in `/v1/capabilities`); anything it does not name is off. */
+  features: { lora: boolean; samplers: boolean }
+  /** Accepted names per enum parameter (`values`), as the engine's own `hello` gives them. */
+  values: Record<string, string[]>
 }
 interface Session {
   profile: RemoteWorkerProfile
@@ -158,7 +162,20 @@ function parseCapabilities(raw: unknown): Capabilities {
     throw codedError('E_WORKER_RESPONSE', '远端能力信息无效')
   const engine = raw.engine as Record<string, unknown>
   const devices = Array.isArray(engine.devices) ? engine.devices : []
+  const features = 'features' in raw && raw.features && typeof raw.features === 'object' ? (raw.features as Record<string, unknown>) : {}
+  const rawValues = 'values' in raw && raw.values && typeof raw.values === 'object' ? (raw.values as Record<string, unknown>) : {}
+  const values = Object.fromEntries(
+    Object.entries(rawValues)
+      .slice(0, 16)
+      .flatMap(([key, list]) =>
+        /^[a-z_]{1,32}$/.test(key) && Array.isArray(list)
+          ? [[key, list.filter((item): item is string => typeof item === 'string' && item.length <= 64).slice(0, 64)]]
+          : [],
+      ),
+  )
   return {
+    features: { lora: features.lora === true, samplers: features.samplers === true },
+    values,
     engineVersion: typeof engine.version === 'string' ? engine.version.slice(0, 128) : undefined,
     devices: devices.slice(0, 64).flatMap((row: unknown, index) => {
       if (!row || typeof row !== 'object' || !('name' in row) || typeof row.name !== 'string') return []
@@ -384,5 +401,32 @@ export async function probeWorkerHost(host: WorkerHostConfig, refresh = false, d
       error: '远端连接失败，请检查主机配置和服务状态',
       checkedAt: new Date().toISOString(),
     }
+  }
+}
+
+/**
+ * What a run on a Worker host can use, as its daemon reports it. This app sends
+ * a Worker text-to-image jobs only, so picture inputs, control, references,
+ * 高清修复 and live previews stay off whatever the daemon says.
+ */
+export async function workerEngineFeatures(host: WorkerHostConfig): Promise<EngineFeatures | null> {
+  try {
+    await connectWorkerHost(host)
+  } catch {
+    // Not reachable now: nothing is known about it.
+    return null
+  }
+  const session = sessions.get(host.id)
+  if (!session) return null
+  const { features, values } = session.capabilities
+  return {
+    preview: false,
+    imageInput: false,
+    control: false,
+    references: false,
+    hires: false,
+    samplers: features.samplers,
+    lora: features.lora,
+    values: features.samplers ? values : {},
   }
 }

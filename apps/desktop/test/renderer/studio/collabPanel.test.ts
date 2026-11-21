@@ -2,8 +2,13 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { Ipc } from '@shared/channels'
-import { canvasFixture } from '@test/mocks/backend/fixtures'
+import { canvasFixture, settingsFixture } from '@test/mocks/backend/fixtures'
 import { createMockBackend } from '@test/mocks/backend'
+import { scenario } from '@test/mocks/backend/scenarios'
+
+/** The 协同 panel exists only while 设置 › 功能 › 外部 Agent is on. */
+const withExternalAgents = () =>
+  scenario('ready', { settings: settingsFixture({ onboardingState: 'completed', externalAgentsEnabled: true }) })
 import { ToastProvider } from '@renderer/components/ui'
 import { ApiError } from '@renderer/lib/api'
 import { prettyArgs } from '@renderer/pages/studio/assistant/ApprovalDock'
@@ -326,7 +331,7 @@ describe('CollabPanel', () => {
   }
 
   it('shows the compact header, connects an ACP Agent and switches to the built-in assistant', async () => {
-    const backend = createMockBackend('ready')
+    const backend = createMockBackend(withExternalAgents())
     backend.install()
     backend.handle(Ipc.agentHubBackends, () => [
       { id: 'codex-acp', label: 'Codex ACP', kind: 'acp', available: true, connected: false },
@@ -370,7 +375,7 @@ describe('CollabPanel', () => {
   })
 
   it('shows only this project conversations and imports another one by working folder first', async () => {
-    const backend = createMockBackend('ready')
+    const backend = createMockBackend(withExternalAgents())
     backend.install()
     backend.handle(Ipc.agentHubBackends, () => [{ id: 'codex-acp', label: 'Codex ACP', kind: 'acp', available: true, connected: true }])
     backend.handle(Ipc.agentHubSessions, () => [
@@ -416,7 +421,7 @@ describe('CollabPanel', () => {
   })
 
   function mountWithFolders(onCreateProject?: (name: string) => Promise<string | null>) {
-    const backend = createMockBackend('ready')
+    const backend = createMockBackend(withExternalAgents())
     backend.install()
     backend.handle(Ipc.agentHubBackends, () => [{ id: 'codex-acp', label: 'Codex ACP', kind: 'acp', available: true, connected: true }])
     backend.handle(Ipc.agentHubSessions, () => [
@@ -503,7 +508,7 @@ describe('CollabPanel', () => {
   })
 
   it('does not pick a conversation of another folder for a project that has none', async () => {
-    const backend = createMockBackend('ready')
+    const backend = createMockBackend(withExternalAgents())
     backend.install()
     backend.handle(Ipc.agentHubBackends, () => [{ id: 'codex-acp', label: 'Codex ACP', kind: 'acp', available: true, connected: true }])
     backend.handle(Ipc.agentHubSessions, () => [{ id: 'other', title: '别处', cwd: 'F:\\elsewhere', updatedAt: 5, running: true }])
@@ -522,7 +527,7 @@ describe('CollabPanel', () => {
   })
 
   it('answers an external request from the app-wide overlay while no panel shows it inline', async () => {
-    const backend = createMockBackend('ready')
+    const backend = createMockBackend(withExternalAgents())
     backend.install()
     backend.handle(Ipc.agentHubApprovals, () => ({
       pending: [

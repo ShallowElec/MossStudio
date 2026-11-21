@@ -6,6 +6,7 @@
  */
 import type { MangaSeries } from '@shared/manga/model'
 import type { AiConversationInfo, AiProviderInfo, AiToolCall } from '@shared/ai'
+import type { PendingCapabilityApproval } from '@shared/agentHub'
 import type { GbcJobSnapshot, GbcParseResult, GbcStatus } from '@shared/gbc'
 import type { UpdaterState } from '@shared/update'
 import { cliEngineFeatures } from '@shared/cliEngine'
@@ -78,6 +79,31 @@ import {
   type MockTrainingState,
 } from './training'
 
+/** What main's agent hub, MCP client installer and Worker daemon answer. */
+export interface MockAgentsState {
+  backends: Array<{ id: string; label: string; kind: 'acp'; available: boolean; connected: boolean; resumable?: boolean }>
+  sessions: Array<{ id: string; title: string; cwd?: string; projectId?: string; updatedAt?: number; running?: boolean }>
+  messages: Record<
+    string,
+    { messages: Array<{ seq: number; role: 'user' | 'assistant'; text: string }>; hasMore: boolean; asOfSeq: number }
+  >
+  approvals: PendingCapabilityApproval[]
+  clients: Array<{
+    id: 'codex' | 'claude-code'
+    label: string
+    configPath: string
+    detected: boolean
+    installed: boolean
+    installMode: 'auto' | 'copy-only'
+    detail: string
+  }>
+  workerLoras: Array<{ id: string; name: string; sizeBytes: number; registered: boolean; triggers?: string[] }>
+}
+
+export function agentsStateFixture(patch: Partial<MockAgentsState> = {}): MockAgentsState {
+  return { backends: [], sessions: [], messages: {}, approvals: [], clients: [], workerLoras: [], ...patch }
+}
+
 export interface MockBackendState {
   /** Shared model folders (ComfyUI and others): whether their files can be read, and whether 自动扫描 fails. */
   sharedModelDirectory?: { available: boolean; failRefresh?: boolean }
@@ -138,6 +164,8 @@ export interface MockBackendState {
   diskFree: Record<string, number>
   /** 训练: readiness, the trainings and their pictures and samples (see ./training.ts). */
   training: MockTrainingState
+  /** 外部 Agent (协同 panel, MCP clients, approvals) and the LoRA of a Worker host. */
+  agents: MockAgentsState
   /** 看图拆区域: whether GBC runs, its versions, and what reading a picture finds. */
   gbc: {
     status: GbcStatus
@@ -170,6 +198,8 @@ export type ScenarioName =
   | 'trainingNotPrepared'
   | 'trainingBlocked'
   | 'trainings'
+  | 'externalAgents'
+  | 'workerHost'
 
 /**
  * First runs on the machines of ./machines.ts (old NVIDIA driver, Turing, Volta, AMD with/without ROCm, Intel, several GPUs, macOS,
@@ -236,6 +266,7 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     diskFree: {},
     // Ready to train on 本机 (RTX 4070, 12 GB), no trainings yet.
     training: trainingStateFixture(),
+    agents: agentsStateFixture(),
   }
 
   const firstRun = (): Partial<MockBackendState> => ({
@@ -378,6 +409,78 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
         training: trainingStateFixture(rest),
       }
     },
+    /** 外部 Agent on: Codex connected with one conversation, Codex registered, Claude Code without its CLI, one request waiting. */
+    externalAgents: () => ({
+      settings: settingsFixture({ onboardingState: 'completed', externalAgentsEnabled: true }),
+      agents: agentsStateFixture({
+        backends: [
+          { id: 'codex-acp', label: 'Codex ACP', kind: 'acp', available: true, connected: true, resumable: true },
+          { id: 'custom-acp', label: '自定义 ACP', kind: 'acp', available: true, connected: false },
+        ],
+        sessions: [{ id: 'session-1', title: '海报', cwd: 'F:\\work\\poster', updatedAt: Date.parse(FIXTURE_NOW) }],
+        messages: {
+          'session-1': {
+            messages: [
+              { seq: 1, role: 'user', text: '画一张海边的海报' },
+              { seq: 2, role: 'assistant', text: '好的，已经新建画面并开始生成。' },
+            ],
+            hasMore: false,
+            asOfSeq: 2,
+          },
+        },
+        approvals: [
+          {
+            id: 'approval-1',
+            actionId: 'studio.projects.delete',
+            packId: 'studio.projects',
+            title: '删除项目',
+            summary: '删除项目 旧海报',
+            argsPreview: '{"id":"p-old"}',
+            source: 'external-agent',
+            createdAt: FIXTURE_NOW,
+          },
+        ],
+        clients: [
+          {
+            id: 'codex',
+            label: 'Codex',
+            configPath: '/home/moss/.codex/config.toml',
+            detected: true,
+            installed: true,
+            installMode: 'auto',
+            detail: '已连接',
+          },
+          {
+            id: 'claude-code',
+            label: 'Claude Code',
+            configPath: '/home/moss/.claude.json',
+            detected: false,
+            installed: false,
+            installMode: 'copy-only',
+            detail: '没有找到 claude 命令，可以复制 MCP 配置手动添加',
+          },
+        ],
+      }),
+    }),
+    /** 远程主机 and Worker 远程主机 on, with one Worker host that has two LoRA (one registered, with a trigger word). */
+    workerHost: () => ({
+      settings: settingsFixture({ onboardingState: 'completed', remoteHostsEnabled: true, workerHostsEnabled: true }),
+      hosts: [
+        sshHostFixture({
+          id: 'worker-1',
+          name: 'GPU Worker',
+          host: 'worker.example.test',
+          remoteBackend: 'worker-daemon',
+          workerDiscoveryPath: '/srv/worker/discovery.json',
+        }),
+      ],
+      agents: agentsStateFixture({
+        workerLoras: [
+          { id: 'styles/ink.safetensors', name: 'ink.safetensors', sizeBytes: 151_000_000, registered: true, triggers: ['ink style'] },
+          { id: 'styles/wash.safetensors', name: 'wash.safetensors', sizeBytes: 98_000_000, registered: false },
+        ],
+      }),
+    }),
   }
 
   /** First run on each kind of machine the engine chooser knows. */

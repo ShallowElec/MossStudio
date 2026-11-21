@@ -3,7 +3,6 @@ import { ADAPTER_STRENGTH_DEFAULT, clampAdapterStrength } from '@shared/adapters
 import { Events, Ipc } from '@shared/channels'
 import type { CanvasAdapter } from '@shared/types'
 import { ApiError, call, onEvent } from '../../lib/api'
-import { setActiveLoraProfiles } from '../../pages/studio/prompt'
 
 /**
  * Trigger words and defaults remembered per LoRA (`lora-profiles:*`). Every
@@ -305,7 +304,7 @@ export function createLoraProfileStore(
 export type LoraProfileStore = ReturnType<typeof createLoraProfileStore>
 
 /** The app's store; it also feeds prompt compilation so 自动前置 / 自动后置 apply on every run. */
-export const loraProfileStore: LoraProfileStore = createLoraProfileStore(createLoraProfilesClient(), setActiveLoraProfiles)
+export const loraProfileStore: LoraProfileStore = createLoraProfileStore(createLoraProfilesClient())
 
 let subscribedExternalRefresh = false
 function ensureExternalRefreshSubscription(): void {

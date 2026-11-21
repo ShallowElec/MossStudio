@@ -9,7 +9,7 @@ import { ScanLine, Sparkles } from 'lucide-react'
 import { Button, useToast } from '../../components/ui'
 import { TitlebarPortal } from '../../components/shell/Titlebar'
 import { AdapterPicker } from '../../components/studio/AdapterPicker'
-import { loraProfileStore, recommendedStrength } from '../../components/studio/loraProfilesClient'
+import { loraProfileStore, recommendedStrength, useLoraProfiles } from '../../components/studio/loraProfilesClient'
 import { StudioSidebar } from '../../components/studio/StudioSidebar'
 import { installStudioToolBridge, registerStudioTools, type AddedLayer, type LayerBox, type StudioToolApi } from '../../lib/agentTools'
 import { call, onEvent } from '../../lib/api'
@@ -60,6 +60,7 @@ import {
   nodeBlockers,
   seriesFromStyle,
   STYLE_CARD,
+  adaptersWithStyles,
   styleLoraNote,
   tryLoraOnBoard,
   upscaleFromPicture,
@@ -83,7 +84,7 @@ import { resolveJobInputs } from './jobInputs'
 import { useGenerate } from './useGenerate'
 import { useInputImport } from './useInputImport'
 import { droppedPaths, useModelImport } from '../../lib/modelImport'
-import { externalFocusMessage, externalFocusOf, useStudioProject, type StepOutcome } from './useStudioProject'
+import { createExternalSteps, externalFocusMessage, externalFocusOf, useStudioProject, type StepOutcome } from './useStudioProject'
 import { LOCAL_HOST_ID, registerStudioCapabilities, type StudioCapabilityDeps } from './studioCapabilities'
 import { ownsUndoKey } from './history'
 import { usePictureRegions } from './usePictureRegions'
@@ -246,6 +247,7 @@ export function StudioPage(): React.JSX.Element {
     [selected?.deviceUuid, gpuInventory, settings],
   )
   const cliGpus = useMemo(() => cliGpuUuids(engineReadiness), [engineReadiness])
+  const loraProfiles = useLoraProfiles()
   const derived = deriveReadiness({
     canvas: generating,
     catalog,
@@ -260,6 +262,8 @@ export function StudioPage(): React.JSX.Element {
     gpus,
     cliGpus,
     workerAdapters,
+    loraProfiles,
+    promptAdapters: selected ? adaptersWithStyles(selected, project.canvases) : undefined,
   })
   // A LoRA blocker says when some of the LoRA come from a 风格 (the 画面's own list does not show them).
   const loraNote = selected?.kind === 'layout' ? styleLoraNote(selected, project.canvases) : ''
@@ -670,8 +674,16 @@ export function StudioPage(): React.JSX.Element {
   live.current = { project, generate, notify: toast.push }
   // Capabilities with no built-in tool (cards, wires, runs, projects) for external Agents over MCP.
   const capabilityDeps = useRef<StudioCapabilityDeps | null>(null)
+  // An external Agent's call is one undo step, also what it changes after an await.
+  const externalSteps = useMemo(() => createExternalSteps((group, run) => live.current.project.history.within(group, run)), [])
   capabilityDeps.current = {
-    project,
+    project: {
+      ...project,
+      setCanvases: externalSteps.wrap(project.setCanvases),
+      updateCanvas: externalSteps.wrap(project.updateCanvas),
+      removeCanvas: externalSteps.wrap(project.removeCanvas),
+      select: externalSteps.wrap(project.select),
+    },
     cancelJob,
     catalog,
     preferredBundleId,
@@ -897,7 +909,7 @@ export function StudioPage(): React.JSX.Element {
       followExternal: async (call, run) => {
         const { project: p } = live.current
         const before = { canvases: p.canvasesRef.current, selectedId: p.selectedRef.current, session: p.sessionKey }
-        const result = await p.history.within({ key: `external:${call}`, label: '外部 Agent 的修改', call }, run)
+        const result = await externalSteps.follow(call, run)
         const after = live.current.project
         // Opening or creating a project is not the Agent adding every card in it: a new session reports nothing.
         const focus = externalFocusOf(before, {
@@ -914,7 +926,7 @@ export function StudioPage(): React.JSX.Element {
     }
     registerStudioTools(api)
     return () => registerStudioTools(null)
-  }, [])
+  }, [externalSteps])
 
   /**
    * Say what an undo or redo did, with the way back tied to that very step: the

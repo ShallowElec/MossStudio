@@ -16,6 +16,7 @@ import {
   listActiveWorkerProfiles,
   stopAllWorkerHostTunnels,
   validateWorkerRemotePath,
+  workerEngineFeatures,
   type WorkerHostConfig,
   type WorkerHostDeps,
 } from '../../../src/main/services/workerHostManager'
@@ -132,6 +133,31 @@ describe('remote worker', () => {
     expect(getMemoryWorkerToken('worker-test')).toBeUndefined()
     expect(listActiveWorkerProfiles()).toEqual([])
   })
+  it('asks the daemon what a run can use instead of assuming it, and keeps picture inputs off', async () => {
+    const dependencies = deps()
+    dependencies.fetchImpl = vi.fn(async () =>
+      json({
+        engine: { version: '1', devices: [] },
+        features: { lora: true, samplers: true, image_input: true },
+        values: { sampler: ['euler'] },
+      }),
+    )
+    await connectWorkerHost(host, { deps: dependencies })
+    expect(await workerEngineFeatures(host)).toEqual({
+      preview: false,
+      imageInput: false,
+      control: false,
+      references: false,
+      hires: false,
+      samplers: true,
+      lora: true,
+      values: { sampler: ['euler'] },
+    })
+    await disconnectWorkerHost(host.id)
+    await connectWorkerHost(host, { deps: deps() })
+    expect(await workerEngineFeatures(host)).toMatchObject({ lora: false, samplers: false, values: {} })
+  })
+
   it('rejects discovery redirects and token files outside the discovery directory', async () => {
     for (const discovery of [
       { url: 'http://worker.example:42000', token_file: '/srv/worker/daemon-token' },

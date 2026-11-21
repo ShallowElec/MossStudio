@@ -127,6 +127,38 @@ export function externalFocusOf(before: BoardState, after: BoardState): External
   return null
 }
 
+/** The label of the undo step an external Agent's call makes. */
+export const EXTERNAL_STEP_LABEL = '外部 Agent 的修改'
+
+/**
+ * One undo step per external Agent call, also for the edits it makes after an
+ * await: `within` groups only what happens synchronously, so the board methods
+ * an external call uses are wrapped to re-enter the step of the call in progress.
+ */
+export function createExternalSteps(within: StudioHistory['within']): {
+  follow: <T>(call: string, run: () => Promise<T>) => Promise<T>
+  wrap: <A extends unknown[], R>(fn: (...args: A) => R) => (...args: A) => R
+} {
+  const active: StepGroup[] = []
+  return {
+    async follow(call, run) {
+      const group: StepGroup = { key: `external:${call}`, label: EXTERNAL_STEP_LABEL, call }
+      active.push(group)
+      try {
+        return await within(group, run)
+      } finally {
+        active.splice(active.indexOf(group), 1)
+      }
+    },
+    wrap(fn) {
+      return (...args) => {
+        const group = active.at(-1)
+        return group ? within(group, () => fn(...args)) : fn(...args)
+      }
+    },
+  }
+}
+
 /** The toast line for what an external Agent just did on the board. */
 export function externalFocusMessage(focus: ExternalFocus): string {
   if (focus.change === 'added') return `外部 Agent 新建了「${focus.title}」`

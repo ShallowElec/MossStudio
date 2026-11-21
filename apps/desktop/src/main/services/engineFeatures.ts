@@ -9,6 +9,7 @@ import { runningEngineHello } from './mossInfer'
 import { deviceEngines, localServerPath, resolveDeviceEngine } from './engineInstalls'
 import { remoteEngineHello } from './remoteEngine'
 import { getSettings } from './settings'
+import { isWorkerDaemonHost, workerEngineFeatures } from './workerHostManager'
 import { getTrainingHost } from './trainingHosts'
 
 /**
@@ -77,10 +78,8 @@ export async function getEngineFeatures(target: { deviceUuid?: string; hostId?: 
   if (target.hostId) {
     const host = getTrainingHost(getSettings(), target.hostId)
     if (!host || host.kind !== 'ssh') return null
-    // Worker workflows own generation; they do not expose the MossInfer SSH protocol.
-    if (host.remoteBackend === 'worker-daemon') {
-      return { preview: false, imageInput: false, control: false, references: false, hires: false, samplers: false, lora: true, values: {} }
-    }
+    // A Worker daemon is asked what it supports; it does not speak the MossInfer protocol over SSH.
+    if (isWorkerDaemonHost(host)) return workerEngineFeatures(host)
     const hello = await remoteEngineHello(host)
     if (!hello || !protocolCompatible(hello)) return null
     // Input pictures are uploaded to the host; control adapters and live

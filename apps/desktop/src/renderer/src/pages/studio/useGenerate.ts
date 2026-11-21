@@ -150,7 +150,11 @@ export function useGenerate(options: {
           return { error: `LoRA ${missing.map((item) => `「${item.name}」`).join('')}找不到了，请移除或到模型库重新安装${fromStyles}` }
       }
       // Regions are laid out on the first-pass size.
-      const compiled = compileCanvasPrompt(generating.baseSize ? { ...generating, ...generating.baseSize } : generating)
+      // generationCanvas already holds the 风格's LoRA, so their trigger words are added too.
+      const compiled = compileCanvasPrompt(
+        generating.baseSize ? { ...generating, ...generating.baseSize } : generating,
+        loraProfileStore.getSnapshot(),
+      )
       if (!compiled.ok) return { error: compiled.errors[0] ?? '描述还不完整' }
       const node = nodeBlockers(generating, canvases)
       if (node.length) return { error: node[0]!.message }

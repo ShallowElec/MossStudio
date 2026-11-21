@@ -1,4 +1,4 @@
-import type { CanvasImageLink, ProjectCanvas, ProjectLayer } from '@shared/types'
+import type { CanvasAdapter, CanvasImageLink, ProjectCanvas, ProjectLayer } from '@shared/types'
 import { normalizeCanvasAdapters } from '@shared/adapters'
 import { nextFreeSpot } from './boardLayout'
 import { createLayoutCanvas, resizeCanvas, settingsFrom, type CanvasSettings } from './canvases'
@@ -39,6 +39,14 @@ export function stylesOf(canvas: Pick<ProjectCanvas, 'inputs'>, canvases: readon
     const style = canvases.find((item) => item.id === link.canvasId)
     return style?.kind === 'style' ? [style] : []
   })
+}
+
+/** A canvas's own LoRA followed by those its 风格 bring, each once: what a run of it uses. */
+export function adaptersWithStyles(canvas: ProjectCanvas, canvases: readonly ProjectCanvas[]): CanvasAdapter[] {
+  const merged = [...normalizeCanvasAdapters(canvas.adapters)]
+  for (const style of stylesOf(canvas, canvases))
+    for (const adapter of normalizeCanvasAdapters(style.adapters)) if (!merged.some((item) => item.id === adapter.id)) merged.push(adapter)
+  return normalizeCanvasAdapters(merged)
 }
 
 /** The canvases wired to a 风格. */
