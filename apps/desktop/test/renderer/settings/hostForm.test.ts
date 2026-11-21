@@ -149,8 +149,8 @@ describe('worker daemon hosts', () => {
   it('needs an absolute, plain discovery path and skips the engine folders', () => {
     expect(validateHostForm(worker())).toEqual({})
     expect(validateHostForm(worker({ workerDiscoveryPath: 'C:\\worker\\data\\discovery.json', trainerRoot: '' }))).toEqual({})
-    expect(validateHostForm(worker({ workerDiscoveryPath: '' })).workerDiscoveryPath).toContain('绝对路径')
-    expect(validateHostForm(worker({ workerDiscoveryPath: 'data/discovery.json' })).workerDiscoveryPath).toContain('绝对路径')
+    expect(validateHostForm(worker({ workerDiscoveryPath: '' })).workerDiscoveryPath).toContain('完整路径')
+    expect(validateHostForm(worker({ workerDiscoveryPath: 'data/discovery.json' })).workerDiscoveryPath).toContain('完整路径')
     expect(validateHostForm(worker({ workerDiscoveryPath: '/srv/../etc/discovery.json' })).workerDiscoveryPath).toContain('..')
     expect(validateHostForm(worker({ workerDiscoveryPath: '/srv/$HOME/discovery.json' })).workerDiscoveryPath).toContain('变量')
     expect(validateHostForm(worker({ workerDiscoveryPath: 'C:\\a:b\\discovery.json' })).workerDiscoveryPath).toContain('冒号')

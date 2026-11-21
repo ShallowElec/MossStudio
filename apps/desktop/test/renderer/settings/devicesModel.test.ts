@@ -318,9 +318,9 @@ describe('worker daemon host summary', () => {
   })
 
   it('names the worker engine, not an engine to install', () => {
-    expect(hostSummary(host, engine({ version: '1.2.0' })).detail).toContain('Worker 引擎 1.2.0 就绪')
+    expect(hostSummary(host, engine({ version: '1.2.0' })).detail).toContain('Worker 服务 1.2.0 就绪')
     expect(hostSummary(host, engine({ online: false, available: false })).detail).toContain('Worker 未连接')
-    expect(hostSummary(host, undefined).detail).toContain('Worker 守护进程')
+    expect(hostSummary(host, undefined).detail).toContain('Worker 服务')
     expect(hostSummary(host, engine({})).detail).not.toContain('引擎未安装')
   })
 })

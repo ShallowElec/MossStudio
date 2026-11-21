@@ -88,7 +88,7 @@ export function LoraTriggerBar({
               aria-pressed={present}
               data-trigger-chip={word}
               data-trigger-state={present ? 'in' : 'out'}
-              title={present ? `「${word}」已在描述中，点一下从描述中去掉` : `点一下把「${word}」加到描述末尾`}
+              title={present ? `从描述里去掉「${word}」` : `加到描述`}
               onClick={() => onDescriptionChange?.((current) => toggleTriggerInDescription(current, word))}
               className={cn(CHIP, present ? 'bg-accent-soft font-medium text-ink' : 'bg-well-strong text-ink-2 enabled:hover:text-ink')}
             >
@@ -104,7 +104,7 @@ export function LoraTriggerBar({
             disabled={!canWrite}
             data-trigger-chip={word}
             data-trigger-state="suggested"
-            title={`从文件识别到的「${word}」，点一下采纳为触发词并写入描述`}
+            title={`采用「${word}」`}
             onClick={() => void adopt(word)}
             className={cn(CHIP, 'bg-transparent text-ink-2 enabled:hover:bg-well-strong enabled:hover:text-ink')}
           >
@@ -112,9 +112,7 @@ export function LoraTriggerBar({
             <span className="truncate">{word}</span>
           </button>
         ))}
-        {!triggers.length && !suggested.length ? (
-          <span className="text-caption text-ink-3">{readOnly ? '没有触发词' : '还没有触发词，点右侧铅笔添加'}</span>
-        ) : null}
+        {!triggers.length && !suggested.length ? <span className="text-caption text-ink-3">没有触发词</span> : null}
       </div>
       {readOnly ? null : (
         <IconButton
@@ -267,7 +265,7 @@ export function LoraTriggerDialog({
       }
     >
       <div className="flex flex-col gap-4" data-lora-trigger-dialog={key}>
-        <Field label="触发词" hint="用逗号分隔。点左侧参数栏的胶囊就能加到描述或从描述里去掉。">
+        <Field label="触发词">
           <Textarea
             value={triggers}
             rows={2}
@@ -283,7 +281,7 @@ export function LoraTriggerDialog({
           <div className="flex flex-wrap items-center gap-2">
             <Button size="xs" disabled={inspecting} data-lora-trigger-inspect onClick={() => void inspect()}>
               {inspecting ? <Spinner className="size-3" /> : <ScanSearch className="size-3.5" aria-hidden="true" strokeWidth={1.6} />}
-              从文件头重新识别
+              从文件读取
             </Button>
             {inspectNote ? <span className="text-caption text-ink-2">{inspectNote}</span> : null}
           </div>
@@ -305,16 +303,11 @@ export function LoraTriggerDialog({
             </div>
           ) : null}
         </div>
-        <Field label="负向词备注" hint="供 Agent 与手动参考，用逗号分隔（当前生图引擎不单独下发负向提示词）。">
+        <Field label="负向词备注">
           <Input value={negative} maxLength={2000} spellCheck={false} onChange={(event) => setNegative(event.target.value)} />
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-[8rem_minmax(0,1fr)]">
-          <Field
-            label="推荐强度"
-            hint={
-              strengthValid ? `选用时默认 ${parsedStrength !== undefined ? formatAdapterStrength(parsedStrength) : '1'}` : '请填 0 到 2'
-            }
-          >
+          <Field label="推荐强度" hint={strengthValid ? undefined : '请填 0 到 2'}>
             <Input
               inputMode="decimal"
               className="tabular"
@@ -333,9 +326,6 @@ export function LoraTriggerDialog({
               onChange={setMode}
               options={AUTO_ORDER.map((item) => ({ value: item, label: AUTO_INSERT_LABELS[item] }))}
             />
-            <span className="text-caption text-ink-2">
-              {mode === 'manual' ? '只在点胶囊时写入描述。' : '生成时自动补上描述里还没有的触发词，不会重复。'}
-            </span>
           </div>
         </div>
         <Field label="备注">

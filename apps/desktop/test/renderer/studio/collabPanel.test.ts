@@ -231,8 +231,8 @@ describe('collab panel helpers', () => {
     expect(next.packs).not.toContain('studio.ask')
     expect(next.packs).toHaveLength(COMPACT_PACKS.length - 1)
     expect(togglePack({ mode: 'atomic', packs: [] }, 'training.jobs').packs).toHaveLength(14)
-    expect(toolProfileLine({ mode: 'custom', packs: ['studio.ask'] })).toBe('Tool Profile: custom (studio.ask)')
-    expect(toolProfileLine({ mode: 'atomic', packs: [] })).toBe('Tool Profile: atomic')
+    expect(toolProfileLine({ mode: 'custom', packs: ['studio.ask'] })).toBe('Tools allowed: studio.ask')
+    expect(toolProfileLine({ mode: 'atomic', packs: [] })).toBe('Tools allowed: the atomic set')
   })
 
   it('works out the new project folder and refuses names that would escape it', () => {
@@ -368,7 +368,7 @@ describe('CollabPanel', () => {
     await act(async () => (connect as HTMLButtonElement).click())
     await settle()
     expect(backend.callsTo(Ipc.agentHubConnect)).toEqual([{ backendId: 'codex-acp' }])
-    expect(view.textContent).toContain('还没有可用的对话')
+    expect(view.textContent).toContain('还没有对话')
 
     await act(async () => (view.querySelector('[data-standalone-assistant]') as HTMLButtonElement).click())
     expect(standalone).toBe(1)

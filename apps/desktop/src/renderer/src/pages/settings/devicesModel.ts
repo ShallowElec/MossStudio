@@ -219,9 +219,9 @@ export function hostSummary(host: ManagedHost, engine: RemoteEngineInfo | undefi
   const parts = [address]
   if (gpu) parts.push(gpu)
   if (host.remoteBackend === 'worker-daemon') {
-    if (engine?.online && engine.available) parts.push(engine.version ? `Worker 引擎 ${engine.version} 就绪` : 'Worker 引擎就绪')
+    if (engine?.online && engine.available) parts.push(engine.version ? `Worker 服务 ${engine.version} 就绪` : 'Worker 服务就绪')
     else if (engine) parts.push('Worker 未连接')
-    else parts.push('Worker 守护进程')
+    else parts.push('Worker 服务')
   } else if (engine?.online) {
     parts.push(engine.available ? (engine.version ? `引擎 ${engine.version} 已安装` : '引擎已安装') : '引擎未安装')
   }

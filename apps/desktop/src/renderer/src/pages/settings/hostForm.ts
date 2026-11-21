@@ -96,13 +96,13 @@ export type HostFormErrors = Partial<Record<keyof HostForm, string>>
 /** The same rules the main process applies before it reads the file over SSH. */
 export function workerDiscoveryProblem(raw: string): string | undefined {
   const value = raw.trim()
-  if (!value) return '请填写守护进程 discovery 文件的绝对路径'
+  if (!value) return '请填写服务信息文件的完整路径'
   if (value.length > 4096 || Array.from(value).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) return '路径太长或包含控制字符'
   if (/["'`$&|;<>()*?{}[\]!~%]/.test(value)) return '路径不能包含引号、变量或通配符'
   if (/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value)) return '路径不能包含上级目录 ..'
   if (/^[A-Za-z]:[\\/]/.test(value)) return value.slice(2).includes(':') ? '路径里只能有盘符后的一个冒号' : undefined
   if (value.startsWith('/')) return undefined
-  return '请填写绝对路径，例如 /path/to/worker/discovery.json 或 C:\\worker\\data\\discovery.json'
+  return '请填写完整路径，例如 /srv/worker/discovery.json 或 C:\\worker\\discovery.json'
 }
 
 /** Field-by-field problems, shown under each field. Empty means the form can be saved. */

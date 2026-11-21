@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, Download, RefreshCw, Trash2 } from 'lucide-react'
+import { Copy, Download, RefreshCw, X } from 'lucide-react'
 import { composeOfficialGuide, type GuideTopic } from '@shared/capabilities'
 import { Notice } from '../../../components/common/Notice'
 import { Button, FieldLabel, IconButton, LoadingRow, Modal, Pill, cn, useCopyText, useToast } from '../../../components/ui'
@@ -16,7 +16,7 @@ export function mcpClientState(status: McpClientStatus): ClientState {
   return status.detected ? 'detected' : 'missing'
 }
 
-const STATE_LABEL: Record<ClientState, string> = { installed: '已接入', detected: '已检测到配置', missing: '未配置' }
+const STATE_LABEL: Record<ClientState, string> = { installed: '已连接', detected: '未连接', missing: '没有找到' }
 const STATE_TONE = { installed: 'ok', detected: 'accent', missing: 'neutral' } as const
 
 interface SkillRow {
@@ -61,13 +61,7 @@ export function McpConnectDialog({
     try {
       const next = action === 'install' ? await client.installMcpClient(status.id) : await client.uninstallMcpClient(status.id)
       setClients((list) => list?.map((item) => (item.id === next.id ? next : item)) ?? list)
-      const backup = next.backupPath ? `，原配置已备份到 ${next.backupPath}` : ''
-      toast.push(
-        action === 'install'
-          ? `已把 MossStudio 接入 ${next.label}${backup}。重启它后生效。`
-          : `已从 ${next.label} 移除 MossStudio${backup}`,
-        'success',
-      )
+      toast.push(action === 'install' ? `已连接 ${next.label}，重启它后生效` : `已从 ${next.label} 移除 MossStudio`, 'success')
     } catch (error) {
       toast.push(error instanceof Error ? error.message : String(error), 'error')
     } finally {
@@ -112,7 +106,6 @@ export function McpConnectDialog({
       open={open}
       onClose={onClose}
       title="接入外部 Agent"
-      description="让 Codex、Claude Code 或任何支持 MCP 的 Agent 通过本机 MCP 操作画板，并读到 MossStudio 的 Skill。"
       width="max-w-2xl"
       footer={
         <Button tone="ghost" size="md" data-dialog-initial-focus onClick={onClose}>
@@ -136,9 +129,7 @@ export function McpConnectDialog({
             <LoadingRow label="正在检测本机 Agent…" />
           ) : (
             <>
-              {clients === null ? (
-                <Notice>这个版本还不能自动写入 Agent 配置。可以复制下面的 MCP 配置，粘贴到 Agent 的 MCP 设置里。</Notice>
-              ) : null}
+              {clients === null ? <Notice>没能检测本机的 Agent，可以复制下面的 MCP 配置手动添加。</Notice> : null}
               <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                 {(clients ?? normalizeMcpClients([])).map((status) => {
                   const state = mcpClientState(status)
@@ -177,18 +168,18 @@ export function McpConnectDialog({
                               onClick={() => void change(status, 'install')}
                             >
                               <Download className="size-3" aria-hidden="true" strokeWidth={1.6} />
-                              {working ? '处理中…' : status.installed ? '更新' : '一键安装'}
+                              {working ? '处理中…' : status.installed ? '重新连接' : '连接'}
                             </Button>
                             {status.installed ? (
                               <Button
-                                tone="ghost-danger"
+                                tone="ghost"
                                 size="xs"
                                 disabled={busy !== null}
                                 data-mcp-uninstall={status.id}
                                 onClick={() => void change(status, 'uninstall')}
                               >
-                                <Trash2 className="size-3" aria-hidden="true" strokeWidth={1.6} />
-                                卸载
+                                <X className="size-3" aria-hidden="true" strokeWidth={1.6} />
+                                移除
                               </Button>
                             ) : null}
                           </>
@@ -234,7 +225,7 @@ export function McpConnectDialog({
 
         <section className="flex min-w-0 flex-col gap-2">
           <FieldLabel as="h3">MCP 连接配置</FieldLabel>
-          <p className="text-caption text-ink-2">其他 Agent 可粘贴这段标准 mcpServers 配置。里面带本机访问令牌，请不要发给别人。</p>
+          <Notice tone="warn">复制的配置里带本机的连接密钥，不要发给别人。</Notice>
           <div className="flex flex-wrap gap-1.5">
             <Button size="xs" data-copy-mcp-kind="http" onClick={() => void copyConfig('http')}>
               <Copy className="size-3" aria-hidden="true" strokeWidth={1.6} />

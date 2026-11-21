@@ -87,7 +87,7 @@ export function HostDialog({
       title={form.id ? '编辑 SSH 主机' : '添加 SSH 主机'}
       description={
         isWorker
-          ? '连接一台运行 Worker 守护进程的 Windows 或 Linux 显卡电脑。MossStudio 通过 SSH 隧道连到它，访问令牌只留在内存里。'
+          ? '需要一台运行 Worker 服务的 Windows 或 Linux 电脑。保存后会马上测试连接。'
           : '需要一台装有 NVIDIA 显卡的 Linux 电脑。保存后会马上测试连接；第一次连接会记住主机的指纹。'
       }
       width="max-w-xl"
@@ -118,8 +118,8 @@ export function HostDialog({
               value={form.remoteBackend}
               onChange={(value) => set('remoteBackend', value)}
               options={[
-                { value: 'moss-ssh', label: 'MossStudio 引擎（Linux）' },
-                { value: 'worker-daemon', label: 'Worker 守护进程（Windows / Linux）' },
+                { value: 'moss-ssh', label: 'MossStudio 引擎' },
+                { value: 'worker-daemon', label: 'Worker 服务' },
               ]}
             />
           </div>
@@ -208,7 +208,7 @@ export function HostDialog({
         </div>
         {isWorker ? (
           <>
-            <Field label="discovery 文件路径" hint="Worker 守护进程启动时写下的 discovery.json 的绝对路径，它的访问令牌在同一目录。">
+            <Field label="服务信息文件">
               <Input
                 className="font-mono text-caption"
                 value={form.workerDiscoveryPath}
@@ -219,7 +219,7 @@ export function HostDialog({
               />
               <FieldError message={errors.workerDiscoveryPath} />
             </Field>
-            <Field label="工作流" hint="守护进程里的工作流名称。留空时用它的默认工作流。">
+            <Field label="工作流">
               <Input
                 className="font-mono text-caption"
                 value={form.workerWorkflow}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BarChart3, Loader2, Plug, Square } from 'lucide-react'
 import { Notice } from '../../../components/common/Notice'
-import { Button, cn, Field, FieldLabel, Input, LoadingRow, MarkdownBody, Textarea } from '../../../components/ui'
+import { Button, cn, EmptyState, Field, FieldLabel, Input, LoadingRow, MarkdownBody, Textarea } from '../../../components/ui'
 import { ApiError } from '../../../lib/api'
 import { AgentSessionBar, AgentSwitcher, type AgentAction } from './AgentBackendBar'
 import { ApprovalDock, useApprovals, useInlineApprovalDock } from './ApprovalDock'
@@ -276,7 +276,7 @@ export function CollabPanel({
             tone="ghost"
             size="xs"
             className="px-1.5"
-            title="一键接入 Codex CLI / Claude Code，复制 Skill 与 MCP 配置"
+            title="接入 Codex 或 Claude Code"
             data-mcp-wizard
             onClick={() => setWizardOpen(true)}
           >
@@ -399,15 +399,12 @@ function HubPane({
           <div className="flex flex-col gap-1">
             <span className="text-ui font-medium text-ink">{backend.label}</span>
             <span className="text-caption text-ink-2 [overflow-wrap:anywhere]">
-              {backend.detail ??
-                (ready
-                  ? '连接后即可在这里与它对话，它通过本机 MCP 工具操作画板。'
-                  : '没有在这台电脑上找到它，请先安装后点左上角重新检测。')}
+              {backend.detail ?? (ready ? '' : '没有在这台电脑上找到它，请先安装后点左上角重新检测。')}
             </span>
           </div>
           {custom ? (
             <div className="flex flex-col gap-2">
-              <Field label="启动命令" hint="支持 ACP 协议的 Agent 可执行文件，例如 npx 或完整路径。">
+              <Field label="启动命令">
                 <Input
                   value={command}
                   maxLength={1024}
@@ -416,7 +413,7 @@ function HubPane({
                   onChange={(event) => setCommand(event.target.value)}
                 />
               </Field>
-              <Field label="参数" hint="用空格分隔。">
+              <Field label="参数">
                 <Input
                   value={args}
                   maxLength={2048}
@@ -554,9 +551,9 @@ function ProjectChat({
           {!sessions ? (
             <LoadingRow label="正在读取会话…" />
           ) : sessions.length ? (
-            <Notice>这个项目还没有对话。点上方会话栏，从「按工作区 / 项目导入」选一段已有对话，或点「+」新建。</Notice>
+            <EmptyState size="section" title="这个项目还没有对话" />
           ) : (
-            <Notice>还没有可用的对话。点上方会话栏右侧的「+」开始一段新对话。</Notice>
+            <EmptyState size="section" title="还没有对话" />
           )}
           <span className="flex-1" />
           {dock}
@@ -830,7 +827,7 @@ function SessionChat({
         aria-label={`${chat.name} 消息`}
         aria-live="polite"
       >
-        {!shownMessages.length ? <p className="text-ui text-ink-2">这里会同步所选会话。发送时会附上下方勾选的画板信息。</p> : null}
+        {!shownMessages.length ? <EmptyState size="section" title="还没有消息" /> : null}
         {shownMessages.map((message) => (
           <div key={message.seq} className={message.role === 'user' ? 'rounded-lg bg-raised p-3' : 'rounded-lg bg-panel p-3'}>
             <FieldLabel>{message.role === 'user' ? '你' : chat.name}</FieldLabel>

@@ -186,7 +186,6 @@ export function NewSessionDialog({
       open={open}
       onClose={onClose}
       title="新建对话"
-      description={`在 ${backendLabel} 里开始一段新对话。画板能力通过 MCP 工具和 Skill 提供，不需要专门的预设。`}
       width="max-w-md"
       footer={
         <>
@@ -213,7 +212,7 @@ export function NewSessionDialog({
           void submit()
         }}
       >
-        <Field label="对话名称" hint="留空时由 Agent 自动命名。">
+        <Field label="对话名称">
           <Input value={title} maxLength={120} placeholder="例如：港口海报分镜" onChange={(event) => setTitle(event.target.value)} />
         </Field>
         <div className="flex flex-col gap-2" data-workspace-mode={mode}>
@@ -233,7 +232,7 @@ export function NewSessionDialog({
                   </Select>
                 </Field>
               ) : null}
-              <Field label="工作区目录" hint="Agent 读写文件时的起点，可留空。">
+              <Field label="工作区目录">
                 <div className="flex min-w-0 gap-1.5">
                   <Input
                     value={cwd}
@@ -303,7 +302,7 @@ export function NewSessionDialog({
           </Select>
         </Field>
         {project === NEW_PROJECT ? (
-          <Field label="新画布项目名称" hint="会新建一个空白的画布项目，当前打开的项目不受影响。">
+          <Field label="新画布项目名称">
             <Input
               value={newProjectName}
               maxLength={200}
@@ -313,10 +312,7 @@ export function NewSessionDialog({
             />
           </Field>
         ) : null}
-        <Field
-          label="初始模型"
-          hint={models.length ? undefined : '这个 Agent 没有给出模型列表，可以直接填写模型名，或留空用它的默认模型。'}
-        >
+        <Field label="初始模型">
           {models.length ? (
             <Select value={model} onValueChange={setModel}>
               <option value="">Agent 默认</option>
@@ -340,7 +336,7 @@ export function NewSessionDialog({
         <div className="rounded-lg bg-well">
           <Advanced summary="高级选项">
             <div className="px-3.5 pb-3">
-              <Field label="Agent 预设（可选）" hint="只有这个 Agent 本身支持预设时才需要填写；默认不使用任何预设。">
+              <Field label="Agent 预设（可选）">
                 <Input
                   value={preset}
                   maxLength={80}

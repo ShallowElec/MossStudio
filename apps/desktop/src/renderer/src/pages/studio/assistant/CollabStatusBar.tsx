@@ -37,7 +37,7 @@ export function CollabStatusBar({
     `${backendLabel} · ${connected ? '已连接' : '未连接'}`,
     cwd ? `工作区 ${cwd}` : '',
     model ? `模型 ${model}` : '',
-    mcpToolCount === null ? 'MCP 未启动' : `MCP 工具 ${mcpToolCount} 个`,
+    mcpToolCount === null ? 'MCP 没有运行' : `MCP 工具 ${mcpToolCount} 个`,
     ACTIVITY_LABELS[state],
   ].filter(Boolean)
   return (

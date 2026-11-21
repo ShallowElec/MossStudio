@@ -206,7 +206,8 @@ async function statusOf(id: McpClientId, resolved: Resolved): Promise<McpClientS
     detected: Boolean(cli),
     installed,
     installMode: cli ? 'auto' : 'copy-only',
-    detail: !cli ? `没有找到 ${client.cli} 命令，可以复制 MCP 配置手动添加` : installed ? '已连接' : '未连接',
+    // The state shows as a pill; only the way out of a missing CLI needs words.
+    detail: cli ? '' : `没有找到 ${client.cli} 命令，可以复制 MCP 配置手动添加`,
   }
 }
 

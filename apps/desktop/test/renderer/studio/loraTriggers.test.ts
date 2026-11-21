@@ -264,7 +264,7 @@ describe('LoraTriggerBar', () => {
       store,
       adapter: { id: 'remote-1', path: 'styles/ink.safetensors', strength: 1 },
     })
-    expect(container.textContent).toContain('还没有触发词')
+    expect(container.textContent).toContain('没有触发词')
     await click(container.querySelector('[data-lora-trigger-edit]'))
     const dialog = document.body.querySelector('[data-lora-trigger-dialog]')!
     await click(dialog.querySelector('[data-lora-trigger-inspect]'))

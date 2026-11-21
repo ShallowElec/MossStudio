@@ -218,7 +218,7 @@ export async function connectWorkerHost(
   host: WorkerHostConfig,
   options: { forceReconnect?: boolean; deps?: Partial<WorkerHostDeps> } = {},
 ): Promise<RemoteWorkerProfile> {
-  if (!isWorkerDaemonHost(host)) throw codedError('E_WORKER_CONFIG', '主机未配置为远端守护进程模式')
+  if (!isWorkerDaemonHost(host)) throw codedError('E_WORKER_CONFIG', '这台主机不是 Worker 服务')
   const signature = JSON.stringify([
     host.host,
     host.port,
@@ -278,7 +278,7 @@ export async function connectWorkerHost(
     if (tokenPath.platform !== path.platform || compare(tokenPath.path) !== compare(path.expectedTokenPath))
       throw codedError('E_WORKER_DISCOVERY', '令牌文件必须是发现文件同目录的 daemon-token')
     const token = (await deps.readRemoteFile(host, tokenPath.path)).trim()
-    if (token.length < 16 || token.length > 4096 || /[^\x21-\x7e]/.test(token)) throw codedError('E_WORKER_TOKEN', '远端访问令牌无效')
+    if (token.length < 16 || token.length > 4096 || /[^\x21-\x7e]/.test(token)) throw codedError('E_WORKER_TOKEN', 'Worker 服务的密钥无效')
     if ((epochs.get(host.id) ?? 0) !== epoch) throw codedError('E_WORKER_CANCELLED', '连接已取消')
     const localPort = await deps.allocateLocalPort()
     const tunnel = await deps.startTunnel(host, localPort, remotePort)

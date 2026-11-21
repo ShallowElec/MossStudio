@@ -177,10 +177,7 @@ export function RemoteHosts(): React.JSX.Element {
       <Group>
         {hosts === null ? <LoadingRow className="px-3.5" /> : null}
         {hosts?.length === 0 ? (
-          <Row
-            title="还没有远程主机"
-            description="添加一台装有 NVIDIA 显卡的 Linux 电脑，或运行 Worker 守护进程的 Windows / Linux 电脑，就可以在创作时选择在它上面运行。"
-          />
+          <Row title="还没有远程主机" description="添加一台装有 NVIDIA 显卡的 Linux 电脑，就可以在创作时选择在它上面运行。" />
         ) : null}
         {hosts?.map((host) => {
           const engine = engines[host.id]

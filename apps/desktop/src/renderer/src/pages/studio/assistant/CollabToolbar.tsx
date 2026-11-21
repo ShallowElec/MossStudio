@@ -109,7 +109,7 @@ function writeToolProfile(state: ToolProfileState): void {
 
 /** One line for the message context, so the Agent knows which tools the person allowed. */
 export function toolProfileLine(state: ToolProfileState): string {
-  return state.mode === 'custom' ? `Tool Profile: custom (${state.packs.join(', ') || 'no packs'})` : `Tool Profile: ${state.mode}`
+  return state.mode === 'custom' ? `Tools allowed: ${state.packs.join(', ') || 'none'}` : `Tools allowed: the ${state.mode} set`
 }
 
 /** The tool Skill matching a profile, built from the same registry the MCP server serves. */

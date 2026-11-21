@@ -97,14 +97,14 @@ export function SessionStatsPanel({
         <Figure label="后端" value={backendLabel} />
         <Figure label="模型" value={shownModel ? `${shownModel}${stats?.provider ? ` · ${stats.provider}` : ''}` : '未知'} />
         <Figure label="消息 / 轮次" value={`${formatCount(figures.messages)} / ${formatCount(figures.turns)}`} />
-        <Figure label="MCP 工具" value={mcpToolCount === null ? '未启动' : `${formatCount(mcpToolCount)} 个`} />
+        <Figure label="MCP 工具" value={mcpToolCount === null ? '没有运行' : `${formatCount(mcpToolCount)} 个`} />
       </div>
       <div className="flex flex-col gap-1" data-session-usage>
         <FieldLabel
           value={
             usage.estimated
               ? `约 ${formatCount(usage.used)} 字`
-              : `${formatCount(usage.used)}${usage.limit ? ` / ${formatCount(usage.limit)}` : ''} tokens`
+              : `${formatCount(usage.used)}${usage.limit ? ` / ${formatCount(usage.limit)}` : ''}`
           }
         >
           {usage.estimated ? '上下文（按字数估算）' : '上下文用量'}

@@ -526,14 +526,8 @@ export function Assistant({ board, onCollab }: { board?: AssistantBoardUndo; onC
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-1">
         {onCollab ? (
-          <Button
-            tone="ghost"
-            size="xs"
-            onClick={onCollab}
-            data-collab-toggle
-            title="切换到 Agent 协同：Codex 等外部 Agent 通过 MCP 操作画板"
-          >
-            Agent 协同
+          <Button tone="ghost" size="xs" onClick={onCollab} data-collab-toggle>
+            协同
           </Button>
         ) : null}
         {providers.length ? (
