@@ -2,6 +2,11 @@
 
 <!-- What changes for the user or the code, and why. Link the issue if there is one. -->
 
+## Scope
+
+- [ ] One change only: no unrelated refactors, renames, reformatting, dependency updates or fixes ([Size and scope](../CONTRIBUTING.md#size-and-scope))
+- [ ] Over 800 source lines? Say here why it cannot be smaller, or which slice of a larger plan this is (link the issue).
+
 ## How it was verified
 
 <!-- Commands run and their results; screenshots for UI changes (light and dark). -->

@@ -6,6 +6,9 @@ name: Build
 #     paths changed       when the PR touches what it tests (launcher, install, update, release)
 #   merge queue           the same as the pull request, on the PR merged onto the queue ahead of it
 #   push to main, manual  everything on all four platforms
+#   every pull request    `PR size`: fails a PR too big to review (.github/scripts/pr-size.sh); a
+#                         maintainer allows an agreed exception with the `large-change` label, then
+#                         re-runs the failed jobs
 # Run the full matrix for a pull request by hand: `gh workflow run build.yml --ref <branch>`.
 # `CI result` is the one check to require: it passes when every job that ran passed.
 #
@@ -46,6 +49,34 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+
+  size:
+    name: PR size
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # The label is read now, not from the event, so re-running the job after a maintainer adds it works.
+      - name: Read the large-change label
+        id: label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          large=$(gh api "repos/${{ github.repository }}/issues/$PR/labels" --jq 'any(.[]; .name == "large-change")')
+          echo "large=$large" >> "$GITHUB_OUTPUT"
+      - name: Measure the change
+        run: bash .github/scripts/pr-size.sh
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          LARGE: ${{ steps.label.outputs.large }}
 
   checks:
     name: Typecheck, unit tests, launcher tests, E2E (Linux)
@@ -193,18 +224,25 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [scope, checks, package]
+    needs: [scope, size, checks, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Every job that ran passed
         env:
-          RESULTS: ${{ needs.scope.result }} ${{ needs.checks.result }} ${{ needs.package.result }}
+          RESULTS: ${{ needs.scope.result }} ${{ needs.checks.result }} ${{ needs.package.result }} ${{ needs.size.result }}
           INSTALL: ${{ needs.scope.outputs.install }}
+          EVENT: ${{ github.event_name }}
         run: |
-          echo "scope checks package: $RESULTS (package matrix: ${INSTALL:-?})"
-          read -r scope checks package <<< "$RESULTS"
+          echo "scope checks package size: $RESULTS (package matrix: ${INSTALL:-?})"
+          read -r scope checks package size <<< "$RESULTS"
           [[ "$scope" == success && "$checks" == success ]] || { echo "::error::scope or checks did not pass"; exit 1; }
+          # The size check runs on pull requests only; the merge queue and main skip it.
+          case "$size" in
+            success) ;;
+            skipped) [[ "$EVENT" != pull_request ]] || { echo "::error::the PR size check was skipped on a pull request"; exit 1; } ;;
+            *) echo "::error::the PR is too big to review (see the PR size job)"; exit 1 ;;
+          esac
           case "$package" in
             success) ;;
             skipped) [[ "$INSTALL" == false ]] || { echo "::error::the package matrix was skipped although it was needed"; exit 1; } ;;

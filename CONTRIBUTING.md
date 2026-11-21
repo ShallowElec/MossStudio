@@ -52,6 +52,7 @@ Before opening a PR, run lint, format check, typecheck and unit tests, plus E2E 
 - `main` and manual runs add macOS Intel. To run the full matrix on a PR: `gh workflow run build.yml --ref <branch>`.
 - The merge queue runs the same jobs as the PR, on the PR merged onto `main` and the PRs ahead of it.
 - **`CI result`** and **`Conventional Commit title`** (`.github/workflows/pr-title.yml`) are the required checks. `CI result` passes only when every job that ran passed.
+- **`PR size`** measures every pull request (`.github/scripts/pr-size.sh`) and fails one that is too big to review; see [Size and scope](#size-and-scope).
 
 ## Branches, commits and pull requests
 
@@ -62,6 +63,39 @@ Before opening a PR, run lint, format check, typecheck and unit tests, plus E2E 
 - A PR says what changed and why, how it was verified, and which platforms it affects (the template asks).
 - Reformat-only commits go into `.git-blame-ignore-revs`. Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
 - Commit trailers name people only. No tool attribution lines (see [AI-assisted contributions](#ai-assisted-contributions)).
+
+### Size and scope
+
+A reviewer has to read and understand every line before it merges. A PR that cannot be reviewed in one sitting will not be merged, however good it is.
+
+**One PR, one change.** A PR is one fix, one feature slice, one refactor, one dependency update or one doc change. If its title needs "and" to join two unrelated things, it is two PRs. Keep these out of a feature PR and send them on their own:
+
+- refactors, renames and moves (with no behaviour change, so the diff is easy to check);
+- reformatting;
+- dependency updates;
+- fixes to unrelated bugs you noticed on the way.
+
+**Size limits.** `PR size` counts *source lines*: additions plus deletions, leaving out tests, docs, `*.md`, release notes, the lockfile and binary files.
+
+| Source lines | What happens |
+| --- | --- |
+| up to 400 | Typical for a fix. |
+| up to 800 | Typical for a feature slice. |
+| over 800 | CI warns. Say in the description why it cannot be smaller. |
+| over 1,500, or over 3,000 lines in all | CI fails. Split it. |
+
+A maintainer can allow an exception that was agreed **before** the work started (for example a generated file or a vendored asset) by adding the `large-change` label and re-running the failed jobs. The label is not a way to merge a PR that should have been split.
+
+**Big work lands in slices.** Before starting anything that will not fit in one PR:
+
+1. Open an issue that says what you want to build and how you plan to slice it, and wait for a maintainer to agree.
+2. A change to the architecture (a new process, protocol, service or storage format) needs an ADR first, in `docs/decisions/` with `status: proposed`. A visible change to the Studio or another screen needs a design the maintainer has seen.
+3. Land it in slices, each one working, tested and mergeable on its own: for example the data model and IPC with tests, then the UI behind a setting that is off by default, then turning it on. A slice may leave a feature unfinished, never broken.
+4. Do not stack PRs (see above): open the next slice after the previous one merges.
+
+**Make it easy to review.** Commits tell the story in order (each builds and passes tests). The description says what changed per area and where to start reading, lists what was left out on purpose, and has screenshots for UI. Answer review comments in the PR; don't open a new PR for the same change.
+
+A PR that ignores this is sent back to be split, however it was written. Splitting an existing branch: create one branch per slice from `main`, take the files of that slice with `git checkout <big-branch> -- <paths>` (or `git add -p`), and open the slices one after another.
 
 ## AI-assisted contributions
 
@@ -74,7 +108,7 @@ You are the author. That means:
 - You have the right to contribute it, and it meets the project's licence, like any other contribution.
 - Commits and PRs carry no tool attribution: no `Co-Authored-By`, `Assisted-by` or similar lines for tools.
 
-Review is done by people, and they will treat your PR as your own work. A PR that is too large to review, or that bundles unrelated changes, will be sent back to be split, however it was written.
+Review is done by people, and they will treat your PR as your own work. Tools make it easy to produce a lot of code at once; the [size and scope](#size-and-scope) rules apply all the same. A PR that is too large to review, or that bundles unrelated changes, will be sent back to be split, however it was written.
 
 ## Code standards
 
