@@ -55,6 +55,7 @@ import type {
   ProjectSummary,
   Settings,
   TrainingHost,
+  LoraProfile,
 } from '@shared/types'
 import {
   ENGINE_JOBS_CHANNEL,
@@ -236,13 +237,14 @@ function projectSummary(project: ProjectDocument): ProjectSummary {
 function defaultHandlers(): Map<string, Handler> {
   const h = new Map<string, Handler>()
   const p = <T>(payload: unknown) => (payload ?? {}) as T
-  const loraProfiles = new Map<string, Record<string, unknown>>()
-  h.set(Ipc.loraProfilesList, () => [...loraProfiles.values()])
-  h.set(Ipc.loraProfilesSave, (payload, { emit }) => {
-    const profile = p<Record<string, unknown> & { loraId: string }>(payload)
-    loraProfiles.set(profile.loraId, { ...profile })
+  h.set(Ipc.loraProfilesList, (_, { state }) => state.loraProfiles)
+  h.set(Ipc.loraProfilesSave, (payload, { state, emit }) => {
+    const profile = p<LoraProfile>(payload)
+    // As main: a save merges into the row it replaces.
+    const merged = { ...state.loraProfiles.find((row) => row.loraId === profile.loraId), ...profile }
+    state.loraProfiles = [...state.loraProfiles.filter((row) => row.loraId !== profile.loraId), merged]
     emit(Events.loraProfilesChanged, { loraId: profile.loraId })
-    return profile
+    return merged
   })
   // As main: what the file's header and sidecars name (LoraMetadata).
   h.set(Ipc.loraProfilesInspect, () => ({ triggers: [], suggestedTriggers: [] }))

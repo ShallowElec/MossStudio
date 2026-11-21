@@ -90,7 +90,7 @@ export function LoraTriggerBar({
               data-trigger-state={present ? 'in' : 'out'}
               title={present ? `从描述里去掉「${word}」` : `加到描述`}
               onClick={() => onDescriptionChange?.((current) => toggleTriggerInDescription(current, word))}
-              className={cn(CHIP, present ? 'bg-accent-soft font-medium text-ink' : 'bg-well-strong text-ink-2 enabled:hover:text-ink')}
+              className={cn(CHIP, present ? 'bg-accent-soft font-medium text-ink' : 'bg-well-strong text-ink enabled:hover:bg-raised')}
             >
               {present ? <Check className="size-3 shrink-0" aria-hidden="true" strokeWidth={1.8} /> : null}
               <span className="truncate">{word}</span>

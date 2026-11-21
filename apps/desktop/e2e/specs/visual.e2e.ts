@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { Page } from 'playwright-core'
 import { settle, useApp, type E2eApp, type OpenOptions } from '../support/app'
 import { audit, clippedText, expectVisualRules } from '../support/visual'
+import { openCollab, openLoraRows, seedLoraBoard } from '../support/board'
 
 interface Stop {
   page: string
@@ -18,7 +19,14 @@ interface Stop {
   prepare?: (page: Page) => Promise<void>
 }
 
-const ALL_FEATURES = { trainingEnabled: true, remoteHostsEnabled: true, gbcEnabled: true, lanWebEnabled: true }
+const ALL_FEATURES = {
+  trainingEnabled: true,
+  remoteHostsEnabled: true,
+  workerHostsEnabled: true,
+  gbcEnabled: true,
+  lanWebEnabled: true,
+  externalAgentsEnabled: true,
+}
 
 /** A project whose canvas has a description, two regions and a finished run with four outputs. */
 async function seedStudio(page: Page): Promise<void> {
@@ -382,6 +390,64 @@ const STOPS: Stop[] = [
   { page: 'settings', state: 'llm-empty', open: { scenario: 'ready', route: '/settings/llm' } },
   { page: 'settings', state: 'llm', open: { scenario: 'ready', route: '/settings/llm' }, seed: seedProviders },
   { page: 'settings', state: 'features', open: { scenario: 'ready', route: '/settings/features', settings: ALL_FEATURES } },
+  { page: 'settings', state: 'features-default', open: { scenario: 'ready', route: '/settings/features' } },
+  {
+    page: 'settings',
+    state: 'host-worker',
+    open: { scenario: 'workerHost', route: '/settings/devices' },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: 'GPU Worker 更多操作' }).click()
+      await page.getByRole('menuitem', { name: '编辑' }).click()
+      await page.getByRole('dialog', { name: '编辑 SSH 主机' }).waitFor()
+    },
+  },
+  {
+    page: 'studio',
+    state: 'lora-triggers',
+    open: { scenario: 'ready', route: '/studio' },
+    seed: (page) => seedLoraBoard(page),
+    prepare: openLoraRows,
+  },
+  {
+    page: 'studio',
+    state: 'collab',
+    open: { scenario: 'externalAgents', route: '/studio' },
+    seed: (page) => seedLoraBoard(page),
+    prepare: async (page) => {
+      await openCollab(page)
+      await page.getByText('画一张海边的海报').waitFor()
+    },
+  },
+  {
+    page: 'studio',
+    state: 'mcp-connect',
+    open: { scenario: 'externalAgents', route: '/studio' },
+    seed: (page) => seedLoraBoard(page),
+    prepare: async (page) => {
+      await openCollab(page)
+      await page.locator('[data-mcp-wizard]').click()
+      await page.locator('[data-mcp-client="codex"]').waitFor()
+    },
+  },
+  {
+    page: 'studio',
+    state: 'approval-overlay',
+    open: { scenario: 'externalAgents', route: '/library' },
+    prepare: async (page) => {
+      await page.locator('[data-global-approval-overlay]').waitFor()
+    },
+  },
+  {
+    page: 'studio',
+    state: 'adapter-picker-worker',
+    open: { scenario: 'workerHost', route: '/studio' },
+    seed: (page) => seedLoraBoard(page, { workerHost: true }),
+    prepare: async (page) => {
+      await openLoraRows(page)
+      await page.locator('[data-adapter-picker]').first().click()
+      await page.getByText('ink.safetensors').first().waitFor()
+    },
+  },
   { page: 'settings', state: 'updates', open: { scenario: 'updateAvailable', route: '/settings/updates' } },
   { page: 'settings', state: 'about', open: { scenario: 'ready', route: '/settings/about' } },
   { page: 'settings', state: 'training', open: { scenario: 'remoteHost', route: '/settings/training', settings: ALL_FEATURES } },

@@ -36,6 +36,7 @@ import type {
   ProjectDocument,
   Settings,
   TrainerVersion,
+  LoraProfile,
 } from '@shared/types'
 import {
   FIXTURE_MODELS_PATH,
@@ -166,6 +167,8 @@ export interface MockBackendState {
   training: MockTrainingState
   /** 外部 Agent (协同 panel, MCP clients, approvals) and the LoRA of a Worker host. */
   agents: MockAgentsState
+  /** Remembered LoRA trigger words (lora-profiles.json). */
+  loraProfiles: LoraProfile[]
   /** 看图拆区域: whether GBC runs, its versions, and what reading a picture finds. */
   gbc: {
     status: GbcStatus
@@ -267,6 +270,7 @@ export function scenario(name: ScenarioName = 'ready', patch: Partial<MockBacken
     // Ready to train on 本机 (RTX 4070, 12 GB), no trainings yet.
     training: trainingStateFixture(),
     agents: agentsStateFixture(),
+    loraProfiles: [],
   }
 
   const firstRun = (): Partial<MockBackendState> => ({
