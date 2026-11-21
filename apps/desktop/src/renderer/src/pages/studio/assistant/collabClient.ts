@@ -1,6 +1,7 @@
 import { Events, Ipc } from '@shared/channels'
 import type { GuideTopic, ToolProfileId } from '@shared/capabilities'
 import { ApiError, call, onEvent } from '../../../lib/api'
+import { setSessionsResumable } from './sessionBindings'
 
 /**
  * Typed access to the Agent hub (`agent-hub:*`), the MCP server and the
@@ -15,6 +16,8 @@ export interface AgentBackendInfo {
   connected: boolean
   command?: string
   detail?: string
+  /** Its conversations can be listed and loaded again after a restart. */
+  resumable?: boolean
 }
 
 export interface AgentSession {
@@ -213,6 +216,7 @@ export function normalizeBackend(value: unknown): AgentBackendInfo | null {
     connected: value.connected === true,
     ...(text(value.command) ? { command: text(value.command) } : {}),
     ...(text(value.detail) ? { detail: text(value.detail) } : {}),
+    ...(value.resumable === true ? { resumable: true } : {}),
   }
 }
 
@@ -549,6 +553,12 @@ type Subscribe = <T>(channel: string, callback: (data: T) => void) => () => void
 
 const STREAM_TYPES = new Set(['status', 'delta', 'tool-start', 'tool-end', 'done', 'error'])
 
+/** Which Agents keep their conversations across a restart decides where their project bindings are stored. */
+function rememberResumable(backends: AgentBackendInfo[]): AgentBackendInfo[] {
+  for (const backend of backends) setSessionsResumable(backend.id, backend.resumable === true)
+  return backends
+}
+
 export function createCollabClient(invoke: Invoke = call, subscribe: Subscribe = onEvent): CollabClient {
   return {
     async mcpClients() {
@@ -598,7 +608,6 @@ export function createCollabClient(invoke: Invoke = call, subscribe: Subscribe =
             ...(profile ? { profile } : {}),
             ...(profile === 'custom' && enabledPacks ? { enabledPacks: [...enabledPacks] } : {}),
           },
-          source: 'ipc',
         })
         return guideMarkdown(result)
       } catch {
@@ -608,7 +617,7 @@ export function createCollabClient(invoke: Invoke = call, subscribe: Subscribe =
 
     async listBackends() {
       try {
-        return normalizeBackends(await invoke<unknown>(Ipc.agentHubBackends))
+        return rememberResumable(normalizeBackends(await invoke<unknown>(Ipc.agentHubBackends)))
       } catch (error) {
         if (!isHubMissing(error)) throw error
         return FALLBACK_BACKENDS.map((backend) => (isCustomBackend(backend) ? { ...backend } : { ...backend, detail: HUB_MISSING_DETAIL }))
@@ -616,7 +625,9 @@ export function createCollabClient(invoke: Invoke = call, subscribe: Subscribe =
     },
 
     async connect(input) {
-      return normalizeBackend(await invoke<unknown>(Ipc.agentHubConnect, input))
+      const backend = normalizeBackend(await invoke<unknown>(Ipc.agentHubConnect, input))
+      if (backend) rememberResumable([backend])
+      return backend
     },
 
     async disconnect(backendId) {

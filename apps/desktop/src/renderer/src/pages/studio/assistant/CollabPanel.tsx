@@ -37,6 +37,7 @@ import { ModelPicker, type ModelState } from './ModelPicker'
 import { NewSessionDialog, type CanvasProjectOption, type WorkspaceOption } from './NewSessionDialog'
 import {
   adoptSessionBinding,
+  bindNewSession,
   bindSession,
   groupByWorkspace,
   projectSessions,
@@ -493,9 +494,8 @@ function ProjectChat({
     setCreating(true)
     try {
       const id = await client.createSession(chat.id, input)
-      // A conversation tied to another canvas project is listed there too.
-      if (input.projectId && input.projectId !== board.projectId) bindSession(chat.id, input.projectId, id)
-      bind(id)
+      // A conversation made for another canvas project is listed there, not here.
+      setBinding(bindNewSession(chat.id, board.projectId, input.projectId, id))
       setSessions(await listSessions())
       return true
     } catch (reason) {

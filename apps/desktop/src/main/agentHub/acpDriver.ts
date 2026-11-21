@@ -1,10 +1,23 @@
 import { app } from 'electron'
-import { randomUUID } from 'node:crypto'
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { paths } from '../lib/paths'
+import type {
+  AgentBackendInfo,
+  AgentDriver,
+  AgentHubEvent,
+  AgentMessagePage,
+  AgentModels,
+  AgentSendInput,
+  AgentSession,
+  AgentSetModelInput,
+} from '@shared/agentHub'
+import { getMcpServerState } from '../mcp/server'
+import { bridgeLaunch } from '../mcp/clientInstaller'
+
+/** A turn that streams nothing for this long is stopped: the Agent hung or lost its model. */
+export const PROMPT_IDLE_TIMEOUT_MS = 10 * 60_000
 
 export async function resolveAcpLaunch(
   command: string,
@@ -30,17 +43,14 @@ export async function resolveAcpLaunch(
   const localNode = resolve(dirname(candidate), 'node.exe')
   return { command: existsSync(localNode) ? localNode : process.execPath, args: [script, ...args] }
 }
-import type {
-  AgentBackendInfo,
-  AgentDriver,
-  AgentHubEvent,
-  AgentMessagePage,
-  AgentModels,
-  AgentSendInput,
-  AgentSession,
-  AgentSetModelInput,
-} from '@shared/agentHub'
-import { getMcpServerState } from '../mcp'
+
+/** The environment of a child: Electron runs a script as node only with ELECTRON_RUN_AS_NODE, and only this app's own binary needs it. */
+export function childEnv(command: string): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  delete env.ELECTRON_RUN_AS_NODE
+  return command === process.execPath ? { ...env, ELECTRON_RUN_AS_NODE: '1' } : env
+}
+
 function attachmentSummary(input: AgentSendInput): string {
   return [input.text, ...(input.attachments ?? []).map((file) => `${file.name} (${file.mime})${file.path ? `: ${file.path}` : ''}`)].join(
     '\n',
@@ -66,27 +76,14 @@ export function probeAcpCommand(command: string): Promise<boolean> {
   probes.set(command, { expires: Date.now() + 30_000, result })
   return result
 }
+
+/** The prompt's content blocks: the text, then each picture inline (the Agent gets the bytes; nothing is written to disk). */
 function buildAcpPromptBlocks(input: AgentSendInput, bodyText: string): Array<Record<string, unknown>> {
   const blocks: Array<Record<string, unknown>> = [{ type: 'text', text: bodyText }]
   for (const attachment of input.attachments ?? []) {
     if (attachment.dataUrl) {
       const match = /^data:([^;,]+);base64,(.+)$/s.exec(attachment.dataUrl)
-      if (match) {
-        const mimeType = match[1] || attachment.mime || 'image/png'
-        const data = match[2]!
-        try {
-          const dir = paths.collabAttachments()
-          mkdirSync(dir, { recursive: true })
-          const safe = attachment.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'attachment.png'
-          const target = join(dir, `${randomUUID()}-${safe}`)
-          const tmp = `${target}.tmp`
-          writeFileSync(tmp, Buffer.from(data, 'base64'))
-          renameSync(tmp, target)
-        } catch {
-          // Non-fatal: inline ACP image block still carries the full image bytes.
-        }
-        blocks.push({ type: 'image', data, mimeType })
-      }
+      if (match) blocks.push({ type: 'image', data: match[2]!, mimeType: match[1] || attachment.mime || 'image/png' })
     } else if (attachment.path && existsSync(attachment.path)) {
       try {
         const data = readFileSync(attachment.path).toString('base64')
@@ -110,6 +107,17 @@ interface McpConnection {
   discoveryPath: string
 }
 
+interface SessionState {
+  info: AgentSession
+  page: AgentMessagePage
+  active: boolean
+  assistant?: number
+  /** The last message is the person's, still being replayed by `session/load`. */
+  replayingUser?: boolean
+  /** While `session/load` replays history: nothing is streamed to the panel. */
+  loading?: boolean
+}
+
 export function createAcpDriver(options: {
   id: string
   label: string
@@ -117,14 +125,21 @@ export function createAcpDriver(options: {
   emit: (event: AgentHubEvent) => void
   getMcpState?: () => McpConnection
   timeoutMs?: number
+  promptIdleMs?: number
 }): AgentDriver {
   let child: ChildProcessWithoutNullStreams | undefined
   let connected = false
   let httpMcp = false
+  /** The Agent can resume a conversation after a restart (`loadSession`) and list them (`sessionCapabilities.list`). */
+  let canLoad = false
+  let canList = false
   let sequence = 0
   let defaultModels: AgentModels = { models: [] }
   const modelStates = new Map<string, AgentModels>()
   const modelOptionIds = new Map<string, string>()
+  /** Conversations the Agent listed but that are not loaded in this run yet. */
+  const listed = new Map<string, AgentSession>()
+  const loads = new Map<string, Promise<SessionState>>()
   const parseModels = (value: Record<string, unknown>, sessionId?: string): AgentModels => {
     const state = object(value.models)
     const available = Array.isArray(state.availableModels) ? state.availableModels : []
@@ -153,26 +168,13 @@ export function createAcpDriver(options: {
     }
     return models
   }
-  const setModel = async (input: AgentSetModelInput): Promise<{ ok: true; model: string; provider?: string; reasoningEffort?: string }> => {
-    if (input.provider || input.reasoningEffort) throw new Error('此 ACP 后端暂不支持单独选择供应商或推理强度')
-    const configId = modelOptionIds.get(input.sessionId)
-    await rpc(
-      configId ? 'session/set_config_option' : 'session/set_model',
-      configId ? { sessionId: input.sessionId, configId, value: input.model } : { sessionId: input.sessionId, modelId: input.model },
-    )
-    const state = modelStates.get(input.sessionId) ?? { models: [] }
-    state.currentModel = input.model
-    modelStates.set(input.sessionId, state)
-    const session = sessions.get(input.sessionId)
-    if (session) session.info.model = input.model
-    return { ok: true, model: input.model }
-  }
   let command = options.command
   const pending = new Map<
     number,
     { resolve: (value: unknown) => void; reject: (error: Error) => void; timer?: ReturnType<typeof setTimeout> }
   >()
-  const sessions = new Map<string, { info: AgentSession; page: AgentMessagePage; active: boolean; assistant?: number }>()
+  const sessions = new Map<string, SessionState>()
+  const idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const info = (available: boolean): AgentBackendInfo => ({
     id: options.id,
     label: options.label,
@@ -180,6 +182,7 @@ export function createAcpDriver(options: {
     connected,
     available,
     command,
+    resumable: connected && canLoad && canList,
   })
   const emit = (sessionId: string, event: Omit<AgentHubEvent, 'backendId' | 'sessionId'>) =>
     options.emit({ backendId: options.id, sessionId, ...event })
@@ -194,9 +197,10 @@ export function createAcpDriver(options: {
     if (!child || child.killed || !child.stdin.writable) throw new Error('Agent 尚未连接，请先连接后端')
     child.stdin.write(`${JSON.stringify(value)}\n`)
   }
-  const rpc = (method: string, params: unknown, timeoutOverrideMs?: number): Promise<unknown> =>
-    new Promise((resolve, reject) => {
-      const id = ++sequence
+  /** One request; `timeoutOverrideMs` 0 means no overall limit (a turn is bounded by its idle timer instead). */
+  const request = (method: string, params: unknown, timeoutOverrideMs?: number): { id: number; promise: Promise<unknown> } => {
+    const id = ++sequence
+    const promise = new Promise((resolve, reject) => {
       const ms = timeoutOverrideMs !== undefined ? timeoutOverrideMs : (options.timeoutMs ?? 120_000)
       const timer =
         ms > 0
@@ -212,25 +216,60 @@ export function createAcpDriver(options: {
       } catch (error) {
         if (timer) clearTimeout(timer)
         pending.delete(id)
-        reject(error)
+        reject(error as Error)
       }
     })
+    return { id, promise }
+  }
+  const rpc = (method: string, params: unknown, timeoutOverrideMs?: number): Promise<unknown> =>
+    request(method, params, timeoutOverrideMs).promise
+  const setModel = async (input: AgentSetModelInput): Promise<{ ok: true; model: string; provider?: string; reasoningEffort?: string }> => {
+    if (input.provider || input.reasoningEffort) throw new Error('此 ACP 后端暂不支持单独选择供应商或推理强度')
+    await sessionState(input.sessionId)
+    const configId = modelOptionIds.get(input.sessionId)
+    await rpc(
+      configId ? 'session/set_config_option' : 'session/set_model',
+      configId ? { sessionId: input.sessionId, configId, value: input.model } : { sessionId: input.sessionId, modelId: input.model },
+    )
+    const state = modelStates.get(input.sessionId) ?? { models: [] }
+    state.currentModel = input.model
+    modelStates.set(input.sessionId, state)
+    const session = sessions.get(input.sessionId)
+    if (session) session.info.model = input.model
+    return { ok: true, model: input.model }
+  }
+  const touch = (sessionId: string) => {
+    const timer = idleTimers.get(sessionId)
+    if (timer) timer.refresh()
+  }
   const update = (params: Record<string, unknown>) => {
     const sessionId = text(params.sessionId)
     const session = sessions.get(sessionId)
     if (!session) return
+    touch(sessionId)
     const change = object(params.update)
     const kind = text(change.sessionUpdate)
-    if (kind === 'agent_message_chunk') {
+    if (kind === 'user_message_chunk') {
+      // Only `session/load` sends the person's own messages: the history it replays.
+      const content = object(change.content)
+      if (content.type !== 'text') return
+      session.assistant = undefined
+      if (!session.replayingUser) session.page.messages.push({ seq: ++session.page.asOfSeq, role: 'user', text: '' })
+      session.replayingUser = true
+      session.page.messages.at(-1)!.text += text(content.text)
+    } else if (kind === 'agent_message_chunk') {
       const content = object(change.content)
       if (content.type !== 'text') return
       const chunk = text(content.text)
+      session.replayingUser = false
       if (session.assistant === undefined) {
         session.assistant = session.page.messages.length
         session.page.messages.push({ seq: ++session.page.asOfSeq, role: 'assistant', text: '' })
       }
       session.page.messages[session.assistant]!.text += chunk
-      emit(sessionId, { type: 'delta', text: chunk })
+      if (!session.loading) emit(sessionId, { type: 'delta', text: chunk })
+    } else if (session.loading) {
+      return
     } else if (kind === 'tool_call' || kind === 'tool_call_update') {
       const terminal = change.status === 'completed' || change.status === 'failed'
       emit(sessionId, {
@@ -243,10 +282,16 @@ export function createAcpDriver(options: {
   }
   async function disconnect(): Promise<void> {
     connected = false
+    canLoad = false
+    canList = false
     const current = child
     child = undefined
     failPending(new Error('Agent 已断开连接'))
+    for (const timer of idleTimers.values()) clearTimeout(timer)
+    idleTimers.clear()
     sessions.clear()
+    listed.clear()
+    loads.clear()
     modelStates.clear()
     modelOptionIds.clear()
     if (!current || current.exitCode !== null) return
@@ -272,6 +317,55 @@ export function createAcpDriver(options: {
       }
     })
   }
+  const mcpServers = (): unknown[] => {
+    const mcp = (options.getMcpState ?? (() => getMcpServerState(true)))()
+    if (!mcp.running || !mcp.url || !mcp.token) return []
+    if (httpMcp)
+      return [{ type: 'http', name: 'MossStudio', url: mcp.url, headers: [{ name: 'Authorization', value: `Bearer ${mcp.token}` }] }]
+    // Prefers the person's node; this app runs the bridge as node only without one.
+    const launch = bridgeLaunch({ stdioBridgePath: mcp.stdioBridgePath, discoveryPath: mcp.discoveryPath })
+    return [
+      {
+        name: 'MossStudio',
+        command: launch.command,
+        args: launch.args,
+        env: Object.entries(launch.env).map(([name, value]) => ({ name, value })),
+      },
+    ]
+  }
+  /** A conversation by id: one of this run, or one the Agent keeps, loaded (and its history replayed) on first use. */
+  const sessionState = (sessionId: string): Promise<SessionState> => {
+    const known = sessions.get(sessionId)
+    if (known) return Promise.resolve(known)
+    if (!connected || !canLoad) return Promise.reject(new Error('Agent 会话不存在'))
+    const running = loads.get(sessionId)
+    if (running) return running
+    const meta = listed.get(sessionId)
+    const state: SessionState = {
+      info: meta ? { ...meta } : { id: sessionId, title: 'Agent 会话' },
+      page: { messages: [], hasMore: false, asOfSeq: 0 },
+      active: false,
+      loading: true,
+    }
+    sessions.set(sessionId, state)
+    const load = rpc('session/load', { sessionId, cwd: state.info.cwd ?? process.cwd(), mcpServers: mcpServers() })
+      .then((result) => {
+        state.loading = false
+        state.replayingUser = false
+        state.assistant = undefined
+        const models = parseModels(object(result), sessionId)
+        modelStates.set(sessionId, models.models.length ? models : defaultModels)
+        if (models.currentModel) state.info.model = models.currentModel
+        return state
+      })
+      .catch((error: unknown) => {
+        sessions.delete(sessionId)
+        throw error instanceof Error ? error : new Error(String(error))
+      })
+      .finally(() => loads.delete(sessionId))
+    loads.set(sessionId, load)
+    return load
+  }
   return {
     id: options.id,
     async probe() {
@@ -283,7 +377,7 @@ export function createAcpDriver(options: {
       if (!command) throw new Error('请填写 ACP 命令')
       const launch = await resolveAcpLaunch(command, input.customArgs ?? [])
       child = spawn(launch.command, launch.args, {
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        env: childEnv(launch.command),
         stdio: 'pipe',
         windowsHide: true,
         detached: process.platform !== 'win32',
@@ -330,12 +424,12 @@ export function createAcpDriver(options: {
               : { error: { code: -32601, message: 'Unsupported client method' } }),
           })
         } else if (typeof message.id === 'number') {
-          const request = pending.get(message.id)
-          if (!request) return
-          clearTimeout(request.timer)
+          const pendingRequest = pending.get(message.id)
+          if (!pendingRequest) return
+          clearTimeout(pendingRequest.timer)
           pending.delete(message.id)
-          if (message.error) request.reject(new Error(text(object(message.error).message) || 'Agent 请求失败'))
-          else request.resolve(message.result)
+          if (message.error) pendingRequest.reject(new Error(text(object(message.error).message) || 'Agent 请求失败'))
+          else pendingRequest.resolve(message.result)
         }
       })
       try {
@@ -347,7 +441,10 @@ export function createAcpDriver(options: {
           }),
         )
         defaultModels = parseModels(result)
-        httpMcp = object(object(result.agentCapabilities).mcpCapabilities).http === true
+        const capabilities = object(result.agentCapabilities)
+        httpMcp = object(capabilities.mcpCapabilities).http === true
+        canLoad = capabilities.loadSession === true
+        canList = Boolean(object(capabilities.sessionCapabilities).list)
         connected = true
         return info(true)
       } catch (error) {
@@ -357,28 +454,29 @@ export function createAcpDriver(options: {
     },
     disconnect,
     async listSessions() {
-      return [...sessions.values()].map(({ info: session }) => ({ ...session }))
+      if (connected && canList) {
+        // The Agent's own list, so conversations from before a restart are there to load.
+        const result = object(await rpc('session/list', {}))
+        for (const raw of Array.isArray(result.sessions) ? result.sessions : []) {
+          const row = object(raw)
+          const id = text(row.sessionId)
+          if (!id || sessions.has(id)) continue
+          const updatedAt = Date.parse(text(row.updatedAt))
+          listed.set(id, {
+            id,
+            title: text(row.title) || 'Agent 会话',
+            ...(text(row.cwd) ? { cwd: text(row.cwd) } : {}),
+            ...(Number.isFinite(updatedAt) ? { updatedAt } : {}),
+          })
+        }
+      }
+      const live = [...sessions.values()].map(({ info: session }) => ({ ...session }))
+      const ids = new Set(live.map((session) => session.id))
+      return [...live, ...[...listed.values()].filter((session) => !ids.has(session.id)).map((session) => ({ ...session }))]
     },
     async createSession(input) {
       if (!connected) throw new Error('请先连接 Agent')
-      const mcp = (options.getMcpState ?? (() => getMcpServerState(true)))()
-      const mcpServers: unknown[] = []
-      if (mcp.running && mcp.url && mcp.token) {
-        mcpServers.push(
-          httpMcp
-            ? { type: 'http', name: 'MossStudio', url: mcp.url, headers: [{ name: 'Authorization', value: `Bearer ${mcp.token}` }] }
-            : {
-                name: 'MossStudio',
-                command: process.execPath,
-                args: [mcp.stdioBridgePath],
-                env: [
-                  { name: 'ELECTRON_RUN_AS_NODE', value: '1' },
-                  { name: 'MOSSSTUDIO_MCP_DISCOVERY', value: mcp.discoveryPath },
-                ],
-              },
-        )
-      }
-      const result = object(await rpc('session/new', { cwd: input.cwd ?? process.cwd(), mcpServers }))
+      const result = object(await rpc('session/new', { cwd: input.cwd ?? process.cwd(), mcpServers: mcpServers() }))
       const sessionId = text(result.sessionId)
       if (!sessionId) throw new Error('Agent 未返回有效会话')
       sessions.set(sessionId, {
@@ -395,17 +493,16 @@ export function createAcpDriver(options: {
       return { sessionId }
     },
     async models(sessionId) {
+      if (sessionId) await sessionState(sessionId).catch(() => undefined)
       return structuredClone((sessionId ? modelStates.get(sessionId) : undefined) ?? defaultModels)
     },
     setModel,
     async readMessages(sessionId) {
-      const session = sessions.get(sessionId)
-      if (!session) throw new Error('Agent 会话不存在')
+      const session = await sessionState(sessionId)
       return { ...session.page, messages: session.page.messages.map((message) => ({ ...message })) }
     },
     async send(input) {
-      const session = sessions.get(input.sessionId)
-      if (!session) throw new Error('Agent 会话不存在')
+      const session = await sessionState(input.sessionId)
       if (session.active) throw new Error('Agent 正在回复，请先停止当前轮')
       session.active = true
       session.info.running = true
@@ -414,9 +511,20 @@ export function createAcpDriver(options: {
       const content = attachmentSummary(input) + (input.studioContext ? `\n\n[Current Studio context]\n${input.studioContext}` : '')
       const promptBlocks = buildAcpPromptBlocks(input, content)
       emit(input.sessionId, { type: 'status', text: '正在思考' })
-      // Run session/prompt without a 120s kill-timeout and without blocking IPC so the Stop button remains responsive.
-      const promptPromise = rpc('session/prompt', { sessionId: input.sessionId, prompt: promptBlocks }, 0)
-      void promptPromise
+      // No overall limit (a turn may run long), but one that streams nothing for too long is stopped.
+      const prompt = request('session/prompt', { sessionId: input.sessionId, prompt: promptBlocks }, 0)
+      const idle = setTimeout(() => {
+        const waiting = pending.get(prompt.id)
+        pending.delete(prompt.id)
+        try {
+          write({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: input.sessionId } })
+        } catch {
+          // The Agent is gone; the turn ends below either way.
+        }
+        waiting?.reject(new Error('Agent 很久没有回应，已停止这一轮'))
+      }, options.promptIdleMs ?? PROMPT_IDLE_TIMEOUT_MS)
+      idleTimers.set(input.sessionId, idle)
+      void prompt.promise
         .then(() => {
           emit(input.sessionId, { type: 'done' })
         })
@@ -424,6 +532,8 @@ export function createAcpDriver(options: {
           emit(input.sessionId, { type: 'error', message: error instanceof Error ? error.message : String(error) })
         })
         .finally(() => {
+          clearTimeout(idle)
+          if (idleTimers.get(input.sessionId) === idle) idleTimers.delete(input.sessionId)
           session.active = false
           session.info.running = false
           session.info.updatedAt = Date.now()

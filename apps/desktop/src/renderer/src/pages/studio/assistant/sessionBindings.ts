@@ -5,7 +5,8 @@ import type { AgentSession } from './collabClient'
  * conversation it has, across all its folders; the picker shows only the ones
  * this project started or the person chose for it, and offers the rest grouped
  * by working folder. The binding is per Agent and per project and lives in
- * localStorage: losing it only hides conversations, never deletes them.
+ * localStorage when the Agent can resume conversations after a restart, else
+ * for this run only: losing it only hides conversations, never deletes them.
  */
 
 export interface ProjectSessionBinding {
@@ -43,9 +44,27 @@ export function pinnedSessionsKey(backendId: string, projectKey: string | null):
   return `mossstudio.collab.pinned.${backendId}.${projectPart(projectKey)}`
 }
 
+/** Agents whose conversations outlive a restart (`AgentBackendInfo.resumable`). */
+const resumable = new Set<string>()
+
+/**
+ * Whether `backendId` can load its conversations again after a restart. Only
+ * then is a binding kept in localStorage; otherwise it lasts for this run
+ * (sessionStorage), so a reopened app never lists conversations that are gone.
+ */
+export function setSessionsResumable(backendId: string, value: boolean): void {
+  if (value) resumable.add(backendId)
+  else resumable.delete(backendId)
+}
+
+function storageFor(key: string): Storage {
+  const backendId = /^mossstudio\.collab\.(?:session|pinned)\.([^.]+)\./.exec(key)?.[1] ?? ''
+  return resumable.has(backendId) ? localStorage : sessionStorage
+}
+
 function readItem(key: string): string | null {
   try {
-    return localStorage.getItem(key)
+    return storageFor(key).getItem(key)
   } catch {
     return null
   }
@@ -53,8 +72,9 @@ function readItem(key: string): string | null {
 
 function writeItem(key: string, value: string | null): void {
   try {
-    if (value === null || value === '') localStorage.removeItem(key)
-    else localStorage.setItem(key, value)
+    const storage = storageFor(key)
+    if (value === null || value === '') storage.removeItem(key)
+    else storage.setItem(key, value)
   } catch {
     // Remembering the binding is a convenience only.
   }
@@ -100,6 +120,23 @@ export function bindSession(backendId: string, projectKey: string | null, sessio
   writePinned(backendId, projectKey, next)
   writeItem(sessionBindingKey(backendId, projectKey), sessionId)
   return { currentId: sessionId, pinnedIds: next }
+}
+
+/**
+ * Bind a conversation just made: to the project it was made for. The open
+ * project's binding changes only when that is the open project.
+ */
+export function bindNewSession(
+  backendId: string,
+  openProject: string | null,
+  forProject: string | undefined,
+  sessionId: string,
+): ProjectSessionBinding {
+  if (forProject && forProject !== openProject) {
+    bindSession(backendId, forProject, sessionId)
+    return readSessionBinding(backendId, openProject)
+  }
+  return bindSession(backendId, openProject, sessionId)
 }
 
 /** Take `sessionId` out of the project's list; the conversation itself stays with the Agent. */

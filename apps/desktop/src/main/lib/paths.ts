@@ -96,7 +96,6 @@ export const paths = {
   capabilityReviews: () => join(root(), 'reviews'),
   loraProfiles: () => join(root(), 'lora-profiles.json'),
   mcpDir: () => join(root(), 'mcp'),
-  collabAttachments: () => join(root(), 'collab-attachments'),
   mcpDiscovery: () => join(root(), 'mcp-server.json'),
   trainerRoot: (custom?: string | null) => (custom ? resolve(custom) : join(root(), 'trainer')),
   trainerGit: () => join(root(), 'trainer', 'git'),

@@ -1,17 +1,46 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   adoptSessionBinding,
+  bindNewSession,
   bindSession,
   groupByWorkspace,
   pinnedSessionsKey,
   projectSessions,
   readSessionBinding,
   sessionBindingKey,
+  setSessionsResumable,
   unbindSession,
   workspaceKey,
 } from '@renderer/pages/studio/assistant/sessionBindings'
 
-afterEach(() => localStorage.clear())
+// These Agents keep their conversations across a restart; the last describe covers one that does not.
+beforeEach(() => setSessionsResumable('codex-acp', true))
+afterEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+  setSessionsResumable('codex-acp', false)
+})
+
+describe('bindings of an Agent that cannot resume conversations', () => {
+  it('last for this run only, so a restarted app never lists conversations that are gone', () => {
+    setSessionsResumable('codex-acp', false)
+    bindSession('codex-acp', 'p1', 's1')
+    expect(readSessionBinding('codex-acp', 'p1')).toEqual({ currentId: 's1', pinnedIds: ['s1'] })
+    expect(localStorage.getItem(sessionBindingKey('codex-acp', 'p1'))).toBeNull()
+    sessionStorage.clear()
+    expect(readSessionBinding('codex-acp', 'p1')).toEqual({ currentId: '', pinnedIds: [] })
+  })
+})
+
+describe('a conversation made for another project', () => {
+  it('is pinned to that project only, and leaves the open project as it was', () => {
+    bindSession('codex-acp', 'open', 's1')
+    expect(bindNewSession('codex-acp', 'open', 'other', 's2')).toEqual({ currentId: 's1', pinnedIds: ['s1'] })
+    expect(readSessionBinding('codex-acp', 'other').pinnedIds).toEqual(['s2'])
+    expect(bindNewSession('codex-acp', 'open', 'open', 's3').pinnedIds).toEqual(['s1', 's3'])
+    expect(bindNewSession('codex-acp', 'open', undefined, 's4').currentId).toBe('s4')
+  })
+})
 
 describe('project session bindings', () => {
   it('keeps every conversation a project started or chose, per Agent and per project', () => {

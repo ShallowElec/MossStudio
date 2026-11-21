@@ -25,6 +25,8 @@ export interface AgentBackendInfo {
   connected: boolean
   command?: string
   detail?: string
+  /** Its conversations outlive a restart: it lists them (`session/list`) and loads them again (`session/load`). */
+  resumable?: boolean
 }
 export interface AgentSession extends AgentSessionBase {
   projectId?: string

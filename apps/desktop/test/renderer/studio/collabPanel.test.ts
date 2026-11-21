@@ -43,6 +43,7 @@ afterEach(() => {
   root = null
   host = null
   localStorage.clear()
+  sessionStorage.clear()
 })
 
 const missing = new ApiError({ code: 'E_MOCK_UNHANDLED', message: 'mock backend has no handler' })
@@ -462,7 +463,8 @@ describe('CollabPanel', () => {
     await settle()
     expect(backend.callsTo(Ipc.agentHubCreateSession)).toEqual([{ backendId: 'codex-acp', cwd: 'F:\\work\\comic', projectId: 'q' }])
     expect(readSessionBinding('codex-acp', 'q').pinnedIds).toEqual(['fixture-agent-session'])
-    expect(readSessionBinding('codex-acp', 'p').pinnedIds).toEqual(['s1', 'fixture-agent-session'])
+    // Made for 漫画集, so it is listed there and not pinned to the open project as well (A-L5).
+    expect(readSessionBinding('codex-acp', 'p').pinnedIds).toEqual(['s1'])
   })
 
   it('creates a new project folder and a new canvas project for the conversation', async () => {
