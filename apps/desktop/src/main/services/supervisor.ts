@@ -76,7 +76,7 @@ const running = new Map<string, RunningJob>()
 const canceledBeforeStart = new Set<string>()
 const seqs = new Map<string, number>()
 const completionListeners: Array<(job: JobRecord) => void> = []
-let loaded = false
+let loaded: Promise<void> | null = null
 
 function jobsDir(): string {
   return join(paths.root(), 'jobs')
@@ -86,9 +86,17 @@ function logPath(jobId: string): string {
   return join(jobsDir(), `${jobId}.jsonl`)
 }
 
-async function loadJobs(): Promise<void> {
-  if (loaded) return
-  loaded = true
+/**
+ * Every caller waits for the one load: a caller that went on while the list was
+ * still being read would add jobs that the late read then overwrote with the
+ * saved copies, marked interrupted, so they stopped counting as active.
+ */
+function loadJobs(): Promise<void> {
+  loaded ??= readJobList()
+  return loaded
+}
+
+async function readJobList(): Promise<void> {
   // Live previews belong to running jobs; whatever a previous run left is stale.
   await rm(previewsDir(), { recursive: true, force: true }).catch(() => undefined)
   try {
@@ -536,7 +544,7 @@ interface QueuedEngineJob {
 
 const engineQueues = new Map<string, QueuedEngineJob[]>()
 const activeEngineSlots = new Set<string>()
-const canvasReservations = new Map<string, { canvasId: string; sourceId: string; path: Set<string> }>()
+const canvasReservations = new Map<string, { projectId: string; canvasId: string; sourceId: string; path: Set<string> }>()
 const pendingAutoGpuAssignments = new Map<string, number>()
 
 /**
@@ -863,18 +871,25 @@ export async function startEngineJob(input: StartEngineJobInput): Promise<JobRec
       throw new Error(`此 Canvas 已有任务${state === 'queued' ? '排队' : '正在运行'}，请等待完成或先取消该任务。`)
     }
     // More runs of the same canvas wait their turn, one drawing and at most MAX_QUEUED_RUNS behind it.
-    // Requests of the same source still being scheduled count too, so two at once cannot both pass.
+    // Requests of the same source still being scheduled count too, so two at once cannot both pass;
+    // a request whose job is already listed (it is starting) counts once, as that job.
+    const listed = [...jobs.values()].filter(
+      (job) =>
+        job.projectId === input.projectId &&
+        job.canvasId !== undefined &&
+        (job.canvasLineage?.[0] ?? job.canvasId) === sourceId &&
+        active(job),
+    )
+    const listedCanvases = new Set(listed.map((job) => job.canvasId))
     const going =
-      [...jobs.values()].filter(
-        (job) =>
-          job.projectId === input.projectId &&
-          job.canvasId !== undefined &&
-          (job.canvasLineage?.[0] ?? job.canvasId) === sourceId &&
-          active(job),
-      ).length + [...canvasReservations.values()].filter((reservation) => reservation.sourceId === sourceId).length
+      listed.length +
+      [...canvasReservations.values()].filter(
+        (reservation) =>
+          reservation.projectId === input.projectId && reservation.sourceId === sourceId && !listedCanvases.has(reservation.canvasId),
+      ).length
     if (going > MAX_QUEUED_RUNS) throw codedError('E_QUEUE_FULL', `这个画面已经排了 ${MAX_QUEUED_RUNS} 张，等前面的画完再加`)
     const reservationId = randomUUID()
-    canvasReservations.set(reservationId, { ...branch, canvasId: input.canvasId })
+    canvasReservations.set(reservationId, { ...branch, projectId: input.projectId, canvasId: input.canvasId })
     try {
       return await scheduleEngineJob(input)
     } finally {

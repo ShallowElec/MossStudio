@@ -49,6 +49,10 @@ vi.mock('@main/lib/engineActivation', () => ({ waitForEngineActivation: async ()
  * While `holdWrite` is set, a save waits for it at its temp file write, after it took its snapshot.
  */
 const jobListGate = vi.hoisted(() => ({
+  /** While set, making the outputs folder (a job's first step after it is listed) waits for it. */
+  outputs: null as Promise<void> | null,
+  /** While set, reading the saved job list at start-up waits for it. */
+  read: null as Promise<void> | null,
   hold: null as Promise<void> | null,
   holdWrite: null as Promise<void> | null,
   fail: [] as Array<'throw' | 'reject'>,
@@ -59,6 +63,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   const locked = (): Error => Object.assign(new Error('EPERM: operation not permitted (locked)'), { code: 'EPERM' })
   const mkdir = ((path: Parameters<typeof actual.mkdir>[0], options?: Parameters<typeof actual.mkdir>[1]) => {
+    if (/[\\/]outputs$/.test(String(path)) && jobListGate.outputs) return jobListGate.outputs.then(() => actual.mkdir(path, options))
     if (/[\\/]jobs$/.test(String(path))) {
       const failure = jobListGate.fail.shift()
       if (failure === 'throw') throw locked()
@@ -82,7 +87,18 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       if (String(from).endsWith('jobs.json.tmp')) jobListGate.writing -= 1
     }
   }) as typeof actual.rename
-  return { ...actual, mkdir, writeFile, rename, default: { ...actual, mkdir, writeFile, rename } }
+  const readFile = (async (file: Parameters<typeof actual.readFile>[0], ...rest: [never?]) => {
+    if (String(file).endsWith('jobs.json') && jobListGate.read) await jobListGate.read
+    return actual.readFile(file, ...rest)
+  }) as typeof actual.readFile
+  return {
+    ...actual,
+    mkdir,
+    writeFile,
+    rename,
+    readFile,
+    default: { ...actual, mkdir, writeFile, rename, readFile },
+  }
 })
 
 const dataRoot = useTempDataRoot()
@@ -552,6 +568,57 @@ describe('engine jobs: runs of one canvas', () => {
     const panel = request('panel', { projectId: 'manga-1', canvasId: 'panel-1' })
     await supervisor.startEngineJob(panel)
     await expect(supervisor.startEngineJob(panel)).rejects.toThrow('此 Canvas 已有任务')
+  })
+
+  it('starts no job before the saved job list is read, so the late read cannot mark live jobs interrupted', async () => {
+    let release!: () => void
+    jobListGate.read = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const first = supervisor.startEngineJob(runOf('scene', 'run-0'))
+      const second = supervisor.startEngineJob(runOf('scene', 'run-1'))
+      let settled = false
+      void second.then(
+        () => (settled = true),
+        () => (settled = true),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(settled).toBe(false)
+      expect(starts).toHaveLength(0)
+      release()
+      const jobs = await Promise.all([first, second])
+      await supervisor.settleJobWrites()
+      const live = await supervisor.listJobs()
+      expect(jobs.map((job) => live.find((item) => item.id === job.id)?.state)).toEqual(['starting', 'queued'])
+    } finally {
+      release()
+      jobListGate.read = null
+    }
+  })
+
+  it('counts a run once while it is both listed and still being started', async () => {
+    // The first run is listed as a job and is still starting (its outputs folder is being made).
+    let release!: () => void
+    jobListGate.outputs = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const first = supervisor.startEngineJob(runOf('scene', 'run-0'))
+      await vi.waitFor(() =>
+        expect(emit.mock.calls.some(([channel, job]) => channel === Events.job && (job as JobRecord).canvasId === 'run-0')).toBe(true),
+      )
+      // Room for MAX_QUEUED_RUNS more behind it, not one fewer.
+      for (let index = 1; index <= MAX_QUEUED_RUNS; index += 1) {
+        await expect(supervisor.startEngineJob(runOf('scene', `run-${index}`))).resolves.toMatchObject({ state: 'queued' })
+      }
+      await expect(supervisor.startEngineJob(runOf('scene', 'one-too-many'))).rejects.toMatchObject({ code: 'E_QUEUE_FULL' })
+      release()
+      await first
+    } finally {
+      release()
+      jobListGate.outputs = null
+    }
   })
 
   it('counts requests still being scheduled toward the limit, so a burst cannot pass it', async () => {
