@@ -55,7 +55,7 @@ export const app = {
   requestSingleInstanceLock: () => true,
   setAppUserModelId: (): void => undefined,
   disableHardwareAcceleration: (): void => undefined,
-  commandLine: { appendSwitch: (): void => undefined },
+  commandLine: { appendSwitch: (_name: string, _value?: string): void => undefined, hasSwitch: (_name: string): boolean => false },
 }
 
 class FakeWebContents extends EventEmitter {

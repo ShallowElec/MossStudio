@@ -59,6 +59,7 @@ import { run } from './lib/run'
 import { archiveLegacyInferenceData } from './services/legacyMigration'
 import { matchRule, parseTqdm } from './services/parsers'
 import { registerIpc } from './ipc'
+import { configurePasswordStore } from './lib/passwordStore'
 import { configureInstallModeSwitches, registerUninstallIpc, runInstallMode } from './install/app'
 import { applyAppUserModelId } from './install/identity'
 import { acquireAppLock } from './install/singleInstance'
@@ -96,6 +97,8 @@ if (scenario) {
 app.setName('MossStudio')
 applyAppUserModelId()
 configureInstallModeSwitches()
+// Before ready: Electron picks the Linux keyring when it sets up encryption, right after this script.
+configurePasswordStore()
 nativeTheme.themeSource = getSettings().theme
 
 protocol.registerSchemesAsPrivileged([
