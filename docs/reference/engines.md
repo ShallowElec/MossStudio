@@ -1,7 +1,7 @@
 ---
 status: current
 last-verified: 2026-11-08 (fec4fe3)
-code: apps/desktop/src/shared/enginePackages.ts, apps/desktop/src/shared/engineChoice.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/shared/gpuProfile.ts, apps/desktop/src/shared/engineProtocol.ts, apps/desktop/src/main/services/engineMachine.ts, apps/desktop/src/main/services/enginePlan.ts, apps/desktop/src/main/services/engineInstalls.ts, apps/desktop/src/main/services/mossInfer.ts, apps/desktop/src/main/services/cliEngine.ts, apps/desktop/src/main/services/supervisor.ts, apps/desktop/src/main/services/weightPrecision.ts, apps/desktop/src/main/services/remoteEngine.ts, apps/desktop/src/main/services/mossInferDownload.ts, apps/desktop/src/main/services/engineAutoUpdate.ts
+code: apps/desktop/src/main/services/workerHostManager.ts, apps/desktop/src/main/services/remoteWorker.ts, apps/desktop/src/shared/enginePackages.ts, apps/desktop/src/shared/engineChoice.ts, apps/desktop/src/shared/cliEngine.ts, apps/desktop/src/shared/gpuProfile.ts, apps/desktop/src/shared/engineProtocol.ts, apps/desktop/src/main/services/engineMachine.ts, apps/desktop/src/main/services/enginePlan.ts, apps/desktop/src/main/services/engineInstalls.ts, apps/desktop/src/main/services/mossInfer.ts, apps/desktop/src/main/services/cliEngine.ts, apps/desktop/src/main/services/supervisor.ts, apps/desktop/src/main/services/weightPrecision.ts, apps/desktop/src/main/services/remoteEngine.ts, apps/desktop/src/main/services/mossInferDownload.ts, apps/desktop/src/main/services/engineAutoUpdate.ts
 ---
 
 # Engines and GPU support
@@ -140,6 +140,12 @@ Remote hosts are an optional feature, off by default (`Settings.remoteHostsEnabl
 
 Each job opens its own SSH session (`runRemoteEngineJob` in `main/services/remoteEngine.ts`), which runs `cd <engineRoot> && exec bin/moss-server` and speaks the same JSON-lines protocol: `hello` (protocol 2), `load` with the host's model path, memory mode, tier and `<engineRoot>/cache`, upload of the job's input pictures into a per-job folder on the host (`uploadJobInputs`), then `generate`. The result PNG comes back as base64 over a second SSH command into `<data root>/outputs`. When the job ends the input folder is removed, `shutdown` is sent and the session closed (killed after 5 seconds, `REMOTE_SHUTDOWN_TIMEOUT_MS`), so no server lingers in the host's GPU memory. Cancel sends the engine's `cancel` and closes the session if it does not confirm within 5 seconds (`REMOTE_CANCEL_TIMEOUT_MS`); before `generate`, cancel closes the session outright.
 
+### Worker hosts (experimental)
+
+Under 远程主机, 设置 › 功能 › Worker 远程主机 (`Settings.workerHostsEnabled`, off by default) lets a host run a Worker service instead of `moss-server`: `remoteBackend: 'worker-daemon'` on the host, with the path of the service's information file (`workerDiscoveryPath`) and a workflow name. The Worker is an external program that this repository does not ship or describe; it brings its own engine, models and LoRA. While the switch is off, Worker hosts are hidden from every host list and lookup and cannot be saved (`workerHostsOn` in `main/services/workerHostManager.ts`).
+
+`connectWorkerHost` reads the information file and the key file beside it over SSH (absolute paths only, no shell expansion), opens an SSH tunnel to the service's loopback port and keeps the key in memory only. What a run can use comes from the service's `/v1/capabilities` (`features.lora`, `features.samplers`, `values`; `workerEngineFeatures`); picture inputs, control, references, 高清修复 and live previews stay off, since the app sends a Worker text-to-image jobs only (`runRemoteWorkerJob` in `main/services/remoteWorker.ts`). In the Studio a Worker host is picked in 运行位置 like any host; its LoRA come from the Worker's own list (`Ipc.remoteWorkerLoras`) in the LoRA picker, never from this computer's library, and it is not listed on 模型. Tunnels and Worker jobs end when the app quits.
+
 Jobs on one host run one at a time (slot `host:<id>`). The host's hello is cached for ten minutes (`remoteEngineHello`). Control adapters and live previews are not carried over SSH, and the Studio refuses LoRA on a remote host (`renderer/src/pages/studio/useGenerate.ts`). Models for a host are prepared on the host (`main/services/remoteModels.ts`); see [models.md](/docs/reference/models.md).
 
 ## Install and update
@@ -166,5 +172,5 @@ Progress is one `MossInferDownloadState` (`event:mossinfer-download`), with `ste
 ## Not built
 
 - No run of the HIP engine on a real AMD GPU is recorded (ADR-0012).
-- Live preview, control adapters and LoRA do not work on remote hosts.
+- Live preview, control adapters and LoRA do not work on remote hosts (a Worker host applies its own LoRA).
 - Remote hosts cannot run the Vulkan or HIP engines.

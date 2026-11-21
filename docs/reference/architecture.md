@@ -1,6 +1,6 @@
 ---
 status: current
-last-verified: 2026-11-21 (b2c77e9)
+last-verified: 2026-11-08 (fec4fe3)
 code: apps/desktop/src/main/index.ts, apps/desktop/src/main/services/languageModels.ts, apps/desktop/src/main/windows.ts, apps/desktop/src/main/ipc.ts, apps/desktop/src/main/lib/paths.ts, apps/desktop/src/main/install/, apps/desktop/src/main/update/, apps/desktop/src/preload/index.ts, apps/desktop/src/renderer/src/App.tsx, apps/desktop/src/renderer/src/components/shell/routes.ts, apps/desktop/src/renderer/src/pages/settings/sections.ts, apps/desktop/src/renderer/src/pages/settings/LanguageModelsSection.tsx, apps/desktop/src/renderer/src/components/common/ProviderDialog.tsx, apps/desktop/src/shared/channels.ts, apps/desktop/src/shared/agent/, apps/desktop/src/backend/index.ts, apps/desktop/src/main/services/backend.ts, apps/desktop/src/main/services/gbc.ts, apps/desktop/src/shared/gbc.ts, apps/desktop/src/shared/capabilities/, apps/desktop/src/main/capabilities/, apps/desktop/src/main/mcp/, apps/desktop/src/main/agentHub/, apps/desktop/src/main/services/loraProfiles.ts, apps/desktop/src/main/services/workerHostManager.ts, apps/desktop/src/main/services/remoteWorker.ts, apps/desktop/src/renderer/src/pages/studio/remoteWorkerLoras.ts, apps/desktop/src/renderer/src/lib/capabilities/, tools/mcp/mossstudio-mcp-stdio.mjs
 ---
 
@@ -113,20 +113,15 @@ The assistant's tools cross this boundary the other way. `shared/agent/` is the 
 
 Events go through `emit(channel, payload)` in `main/lib/events.ts`, which sends to every open window and to `onEmit` listeners; the backend subscribes and rebroadcasts over WebSocket. The renderer listens with `onEvent(channel, cb)`.
 
-## Capabilities, external Agents and Remote Workers
+## External Agents, LoRA trigger words and Worker hosts
 
-One contract describes everything an Agent can do, whether the built-in assistant, an external Agent over MCP, or an ACP session asks.
+Three optional pieces added in PR #124. The first two are described in their own docs; this table says where each lives.
 
-| Piece | Where | What it does |
+| Piece | Where | Doc |
 | --- | --- | --- |
-| Capability Protocol | `shared/capabilities/` | `protocol.ts` defines versioned descriptors (`ActionDescriptor`: dotted id such as `studio.cards.create`, target `main`, `renderer` or `hybrid`, effect, policy gate, input and output schema). `registry.ts` validates the packs, filters them by surface and feature flag, checks arguments and synthesizes the matching `SKILL.md`. Built-in tools that an action supersedes keep their snake_case name as `legacyAlias`. |
-| Main dispatcher | `main/capabilities/` | `dispatcher.ts` runs `main` actions in main and sends `renderer` actions to the studio window, after the feature flag, schema and policy checks. `audit.ts` appends one line per call to `<dataRoot>/logs/capabilities.jsonl`, without secrets. |
-| Renderer host | `renderer/src/lib/capabilities/host.ts`, `pages/studio/studioCapabilities.ts` | The Studio registers handlers while it is mounted; each call gets the same precheck, validation, `advanced` deferral and problem report as the built-in tools. Board changes from an external call join one undo step labelled 外部 Agent 的修改, including changes made after the handler awaited. |
-| Loopback MCP server | `main/mcp/server.ts` | Streamable HTTP on `127.0.0.1` with an ephemeral port and its own random bearer token. Serves `tools/*`, `resources/*` (live skills, context, audit) and `prompts/*` over the dispatcher, and writes `<dataRoot>/mcp-server.json` for discovery. |
-| Bundled stdio bridge | `tools/mcp/mossstudio-mcp-stdio.mjs` | A zero-dependency Node script that reads `mcp-server.json` (or `MOSSSTUDIO_MCP_URL` and `MOSSSTUDIO_MCP_TOKEN`) and forwards stdio JSON-RPC to the loopback server. `tools/release/package-app.mjs` ships it under `resources/tools/mcp/`; `main/mcp/clientInstaller.ts` registers it in Codex CLI and Claude Code, backing up their config first. |
-| ACP Agent Hub | `main/agentHub/`, `shared/agentHub.ts` | Drives Agent Client Protocol processes (`acpDriver.ts`: `initialize`, `session/new` with the MCP server attached, `session/prompt`). `index.ts` lists the backends (Codex ACP and a custom command); `approvalQueue.ts` holds calls whose policy needs a person to confirm. The 协同 panel (`pages/studio/assistant/`) is its UI. |
-| LoRA trigger profiles | `main/services/loraProfiles.ts`, `pages/studio/prompt.ts` | Main reads trigger words from safetensors metadata and sidecar files and keeps the person's choices in `<dataRoot>/lora-profiles.json`. The renderer publishes the profiles to `prompt.ts`, so readiness, generation and Agents compile the same prompt with words set to add before or after it. |
-| Remote Worker daemon hosts | `main/services/workerHostManager.ts`, `main/services/remoteWorker.ts`, `shared/remoteWorker.ts` | A remote host with `remoteBackend: 'worker-daemon'` runs a Worker daemon instead of MossInfer over SSH. Main reads the daemon's discovery file over SSH, opens an SSH tunnel to a loopback port and talks to the daemon with its token. Each live Worker appears in the catalog as a `remote-worker:<id>` bundle (`models.ts`), and `engineJobStart.ts` and `supervisor.ts` send those jobs to the Worker. The Worker owns its model files, engine and LoRA, so `pages/studio/readiness.ts` skips the local engine, model location, local-only and LoRA checks for it (`isWorkerRun`). In Studio a Worker host is picked like an SSH host, in 运行位置 (`hostId`): `pages/studio/remoteWorkerLoras.ts` binds the run to that host's `remote-worker:<providerId>` bundle, so nothing has to be downloaded on this computer, and the same `AdapterPicker` lists the Worker's registered LoRA (`Ipc.remoteWorkerLoras`) with a 管理登记 view (`Ipc.remoteWorkerLoraRegister`). Readiness and `useGenerate.ts` check chosen LoRA against that list only once it is read and non-empty, never against the local library. Tunnels and Worker jobs end on app quit. |
+| External Agents: capability registry, MCP server, stdio bridge, client registration, 协同 panel, approvals. Behind `Settings.externalAgentsEnabled`; the 助手 does not use it | `shared/capabilities/`, `main/capabilities/`, `main/mcp/`, `main/agentHub/`, `main/externalAgents.ts`, `renderer/src/lib/capabilities/`, `pages/studio/assistant/`, `tools/mcp/` | [external-agents.md](/docs/reference/external-agents.md), [ADR-0016](/docs/decisions/0016-external-agents-over-mcp.md) |
+| LoRA trigger words | `main/services/loraProfiles.ts`, `components/studio/LoraTriggerBar.tsx`, `pages/studio/prompt.ts` | [models.md](/docs/reference/models.md#51-trigger-words) |
+| Worker hosts (experimental), behind `Settings.workerHostsEnabled` under 远程主机 | `main/services/workerHostManager.ts`, `main/services/remoteWorker.ts`, `shared/remoteWorker.ts`, `pages/studio/remoteWorkerLoras.ts` | [engines.md](/docs/reference/engines.md#worker-hosts-experimental) |
 
 ## The backend and the LAN web UI
 

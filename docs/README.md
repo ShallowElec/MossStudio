@@ -27,10 +27,11 @@ Developer documentation for MossStudio: an Electron + React + TypeScript desktop
 | How the app is put together: processes, windows, routes, services, storage | [reference/architecture.md](reference/architecture.md) |
 | The Studio node board: 画面, 风格, 放大, inputs, wires, regions, runs, recipes | [reference/studio-node-board.md](reference/studio-node-board.md) |
 | The Studio assistant: tools, cards, 自主 and 审批 modes | [reference/studio-assistant.md](reference/studio-assistant.md) |
+| External Agents (外部 Agent): the MCP server, capability registry, approvals, connecting Codex and Claude Code, the 协同 panel | [reference/external-agents.md](reference/external-agents.md) |
 | 漫画: series, 人物卡, storyboard by language model, page frames and 抽卡, drawing queue and review, lettering, export | [reference/manga.md](reference/manga.md), test report [records/2026-11-12-manga-test-report.md](records/2026-11-12-manga-test-report.md), review fixes [records/2026-11-12-manga-review-fixes.md](records/2026-11-12-manga-review-fixes.md), character consistency [records/2026-11-13-manga-consistency.md](records/2026-11-13-manga-consistency.md) |
 | Why the Studio is a node board, and what it refuses to be | [explanation/studio-design.md](explanation/studio-design.md) |
-| Engines and GPUs: CUDA packages, 兼容模式 (Vulkan), AMD 原生 (HIP), tiers, remote hosts | [reference/engines.md](reference/engines.md) |
-| Models: catalog, bundles, component files, directories, LoRA | [reference/models.md](reference/models.md) |
+| Engines and GPUs: CUDA packages, 兼容模式 (Vulkan), AMD 原生 (HIP), tiers, remote hosts, Worker hosts | [reference/engines.md](reference/engines.md) |
+| Models: catalog, bundles, component files, directories, LoRA and their trigger words | [reference/models.md](reference/models.md) |
 | Training (训练): a training's files and states, channels, how a run is composed, samples, the saved LoRA, screens | [reference/training.md](reference/training.md) |
 | KohakuGBC: what upstream offers now, what is already wired, and the plan for a Studio 解析 entry and dataset labelling | [records/2026-11-18-gbc-survey-and-plan.md](records/2026-11-18-gbc-survey-and-plan.md), [records/2026-11-18-gbc-implementation-plan.md](records/2026-11-18-gbc-implementation-plan.md) |
 
@@ -55,6 +56,7 @@ Decisions are ADRs in [decisions/](decisions/README.md), one per choice, never e
 | Own installer, launcher and signed updates | [0010](decisions/0010-own-installer-and-signed-updates.md), amended by [0014](decisions/0014-nightly-update-channel.md) (nightly channel) |
 | The Trainer stays an external Python tool; training runs in the main window | [0002](decisions/0002-trainer-backend.md), amended by [0015](decisions/0015-training-in-the-main-window.md) (no trainer window) |
 | How these docs are organised | [0013](decisions/0013-documentation-structure-and-language.md) |
+| External Agents use MossStudio over MCP; the 助手 keeps its own tools | [0016](decisions/0016-external-agents-over-mcp.md) |
 
 ## Records and history
 

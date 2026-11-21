@@ -1,7 +1,15 @@
-/** Adapted from OpenMOSS/MOSS-Image's public prompt-enhancer skill and layout reference. */
+/*
+ * The two guides below are adapted from the MOSS-Image prompt-enhancer skill
+ * (skills/moss-image-prompt-enhancer/SKILL.md and references/layout.md in
+ * https://github.com/OpenMOSS/MOSS-Image), copyright the MOSS-Image authors and
+ * licensed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+ * Changed for MossStudio: shortened, reworded, and pointed at MossStudio's own
+ * board tools instead of a JSON output format. Each guide names its source and
+ * licence where an Agent reads it.
+ */
 export const MOSS_PROMPTCRAFT_SKILL_MD = String.raw`# MOSS Official Promptcraft Skill
 
-Source: https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/SKILL.md
+Adapted from https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/SKILL.md (Apache License 2.0), changed for MossStudio.
 
 ## Choose Caption or Layout
 Honor an explicit choice. Use a pure Caption for ordinary scenes, photographs and illustrations; detail alone does not require Layout. Use Layout for controlled object relationships, posters, several panels or precisely placed visible text. Preserve subjects, counts, relationships, medium, style and exclusions. Resolve ordinary creative gaps, but ask when a missing decision materially changes the image. Never invent factual logistics or specifications as supplied facts.
@@ -18,7 +26,7 @@ Write the positive Caption through studio.board.set_prompt using the actual tool
 
 export const MOSS_LAYOUT_DESIGN_SKILL_MD = String.raw`# MOSS Official Layout Design Skill
 
-Source: https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/references/layout.md
+Adapted from https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/references/layout.md (Apache License 2.0), changed for MossStudio.
 
 ## Public Layout vocabulary
 The public model draft has summary plus a flat items array. summary.caption is the nonempty global image description; optional summary.meta is a medium/genre string array, summary.canvas is single, multi_panel or collage, and summary.palette is an optional string array. Each item has label object, character or text, a nonempty caption and bbox. Optional item tags and palette are string arrays. A text item's caption describes typography, glyph style and surface treatment ONLY; text contains the exact rendered characters and intended line breaks (JSON \n). Split text into independent items only when placement matters, not merely for mixed font styles.

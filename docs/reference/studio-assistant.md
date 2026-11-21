@@ -33,7 +33,7 @@ Every message carries the project as it is at send time: `lib/agentTools.ts` `fo
 | Studio API | `renderer/src/lib/agent/types.ts` (`StudioToolApi`), implemented in `StudioPage.tsx` | `state`, `readContext`, `readCanvas`, `setPrompt`, `setSampler`, `addLayer`, `addTextLayer`, `updateLayer`, `removeLayer`, `createScenes`, `selectCanvas`, `generate`, `problems`, and `oneStep`, which makes a turn's board changes one undo step (section 7) |
 | Bridge | `lib/agentTools.ts` (`installStudioToolBridge`) | `Events.aiToolCall` from main (`AiToolCallRequest`, which names the turn in `turnId`) runs `executeStudioTool`; the result goes back through `Ipc.aiToolResult` |
 
-`resolveToolset` mounts `canvas.read` and `ask` everywhere, `canvas.write` and `storyboard` on the Studio only, and nothing when the provider cannot call tools. The `library` pack exists as a name only (section 10).
+`resolveToolset` mounts `canvas.read` and `ask` everywhere, `canvas.write` and `storyboard` on the Studio only, and nothing when the provider cannot call tools. The `library` pack exists as a name only (section 11).
 
 | Tool | 标题 | Pack, risk | Does | Refused when |
 | --- | --- | --- | --- | --- |
@@ -99,10 +99,14 @@ Only one card waits at a time: the newest unanswered one sits above the composer
 
 Text replies are never written automatically. 用作描述 under a reply opens 替换描述？ with 现在 and 替换为, and `applyStudioDescription` writes it on confirm.
 
-## 10. Not built
+## 10. External Agents
+
+The 助手 is not the only Agent that can change the board: with 设置 › 功能 › 外部 Agent on, Codex, Claude Code or another MCP client reaches it through a capability registry and an MCP server, and the 协同 button in the 助手's header opens a panel for an ACP Agent ([external-agents.md](/docs/reference/external-agents.md), [ADR-0016](/docs/decisions/0016-external-agents-over-mcp.md)). The 助手 does not use that registry: its tools, rules, plans, undo and 质量 snapping are the ones above. A tool call reaches the Studio marked `external` only when an external Agent made it, and `installStudioToolBridge` leaves those calls to the external bridge.
+
+## 11. Not built
 
 From `docs/design/agent-tool-rack.md`, still open at fec4fe3: thumbnails for composition choices (options are text only); the `library` pack (`pick_reference` from 作品); a `MAX_TOOL_ROUNDS` that grows for a storyboard; a check of all plan steps before 应用 runs the first; a way to answer a card without sending at once.
 
-## 11. Tests
+## 12. Tests
 
 `apps/desktop/test/shared/agentRegistry.test.ts` (registry names equal `TOOL_SCHEMAS` keys, schema shape, mounting), `test/renderer/lib/agentTools.test.ts` (executor: prechecks, held writes, `applyPlan`, cards, a turn's tools inside one undo step, and that a text region made through the tools passes `compileCanvasPrompt`), `test/renderer/studio/canvases.test.ts` (`addRegion`, `editLayer`, `sceneCanvas`), `test/renderer/studio/assistantFormat.test.ts` (`turnCalls`), `test/renderer/studio/history.test.ts` (`turnState`); end to end `apps/desktop/e2e/specs/agent.e2e.ts` and the 撤销这一步 test in `undo.e2e.ts`, whose mock turn (`MockBackendState.aiTurn`) runs its tools in the window as main does.
