@@ -93,17 +93,46 @@ export async function runExternalToolCall(
   return follow ? follow(request.callId, run) : run()
 }
 
-/** Subscribe once; resolves every tool call the main process asks for. */
+/** Subscribe once; resolves every tool call the 助手 asks for. An external Agent's calls go to `installExternalToolBridge`. */
 export function installStudioToolBridge(): () => void {
   return onEvent<AiToolCallRequest>(Events.aiToolCall, (request) => {
+    if (request.external) return
     void (async () => {
-      // The 助手's own tools run as they always have; only an external Agent's call takes the capability path.
-      const result = request.external
+      const result = await executeStudioTool(
+        { id: request.callId, name: request.name, arguments: request.arguments },
+        { mode: request.mode, turnId: request.turnId },
+      )
+      await call(Ipc.aiToolResult, { callId: request.callId, result }).catch(() => undefined)
+    })()
+  })
+}
+
+/** How long an external Agent's call waits for the Studio to open before it is told why it could not run. */
+export const STUDIO_OPEN_WAIT_MS = 8_000
+
+/** Resolves once the Studio has registered its tools, or false after `waitMs`. */
+async function studioReady(waitMs: number): Promise<boolean> {
+  const deadline = Date.now() + waitMs
+  while (!getStudioApi()) {
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  return true
+}
+
+/**
+ * Subscribe once, from the app shell, while 外部 Agent is on: an external
+ * Agent's board call opens the Studio when the person is on another page, and
+ * says so plainly when it still cannot run.
+ */
+export function installExternalToolBridge(options: { openStudio: () => void; waitMs?: number }): () => void {
+  return onEvent<AiToolCallRequest>(Events.aiToolCall, (request) => {
+    if (!request.external) return
+    void (async () => {
+      if (!getStudioApi()) options.openStudio()
+      const result = (await studioReady(options.waitMs ?? STUDIO_OPEN_WAIT_MS))
         ? await runExternalToolCall(request)
-        : await executeStudioTool(
-            { id: request.callId, name: request.name, arguments: request.arguments },
-            { mode: request.mode, turnId: request.turnId },
-          )
+        : { ok: false, content: JSON.stringify({ error: 'MossStudio 的创作页还没有打开，请让用户先打开创作页再试' }) }
       await call(Ipc.aiToolResult, { callId: request.callId, result }).catch(() => undefined)
     })()
   })

@@ -200,6 +200,8 @@ export function StudioPage(): React.JSX.Element {
   const [galleryTarget, setGalleryTarget] = useState<PickTarget | { at: { x: number; y: number } } | { underlayOf: string } | null>(null)
 
   const remoteEnabled = settings?.remoteHostsEnabled === true
+  /** 设置 › 功能 › 外部 Agent: the 协同 panel beside the 助手. */
+  const externalAgents = settings?.externalAgentsEnabled === true
   /** 运行位置: local (or empty) for this computer, else an SSH host id. */
   const selectRemoteHost = useCallback((id: string) => {
     const next = id === LOCAL_HOST_ID ? '' : id
@@ -1225,7 +1227,7 @@ export function StudioPage(): React.JSX.Element {
           onWidthChange={(right) => setWidths((value) => ({ ...value, right }))}
         >
           <div className="flex h-full min-h-0 flex-col p-4">
-            {assistantMode === 'collab' ? (
+            {assistantMode === 'collab' && externalAgents ? (
               <CollabPanel
                 board={{
                   projectId: project.projectId,
@@ -1241,7 +1243,7 @@ export function StudioPage(): React.JSX.Element {
                 onCreateProject={project.createProject}
               />
             ) : (
-              <Assistant board={assistantUndo} onCollab={() => chooseAssistantMode('collab')} />
+              <Assistant board={assistantUndo} onCollab={externalAgents ? () => chooseAssistantMode('collab') : undefined} />
             )}
           </div>
         </StudioSidebar>

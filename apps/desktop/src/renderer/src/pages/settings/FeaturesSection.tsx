@@ -20,7 +20,7 @@ export function FeaturesSection(): React.JSX.Element {
     <SectionBody>
       <Section title="可选功能" description="这些功能默认关闭。关闭时，相关的按钮和页面都不会出现。">
         <Group>
-          {FEATURES.map((feature) => (
+          {FEATURES.filter((feature) => !feature.within || featureEnabled(settings, feature.within)).map((feature) => (
             <SwitchRow
               key={feature.key}
               title={feature.label}

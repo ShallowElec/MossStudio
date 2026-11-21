@@ -1,4 +1,3 @@
-import { listActiveWorkerProfiles } from './workerHostManager'
 import { mergeLoraMeta } from './loraProfiles'
 import { fetchHf } from './hfNetwork'
 import { getHfToken } from './hfCredentials'
@@ -433,44 +432,9 @@ async function findInstall(
   return null
 }
 
-function withWorkerProfiles(catalog: Catalog): Catalog {
-  const profiles = listActiveWorkerProfiles()
-  if (!profiles.length) return catalog
-  const models: ModelEntry[] = profiles.map((profile) => ({
-    id: `remote-worker:${profile.id}`,
-    name: profile.label,
-    provider: 'local',
-    repo: '',
-    revision: 'main',
-    role: 'full',
-    precision: '',
-    sizeBytes: 0,
-    license: '',
-    tags: ['remote-worker'],
-    installed: true,
-    installedBytes: 0,
-    installState: 'ready',
-  }))
-  return {
-    ...catalog,
-    models: [...catalog.models, ...models],
-    bundles: [
-      ...catalog.bundles,
-      ...models.map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: '使用已连接的远端服务',
-        components: { dit: model.id, textEncoder: model.id, vae: model.id },
-        support: model.id,
-        custom: true,
-      })),
-    ],
-  }
-}
-
 export async function getCatalog(settings: Settings, force = false): Promise<Catalog> {
   const key = JSON.stringify([paths.models(settings.modelsRoot), settings.modelDirectories])
-  if (catalogCache && catalogRoot === key && !force) return withWorkerProfiles(catalogCache)
+  if (catalogCache && catalogRoot === key && !force) return catalogCache
   let raw = BUILTIN
   let source: Catalog['source'] = 'builtin'
   const local = catalogOverrideDir()
@@ -733,7 +697,7 @@ export async function getCatalog(settings: Settings, force = false): Promise<Cat
     bundles,
     source,
   }
-  return withWorkerProfiles(catalogCache)
+  return catalogCache
 }
 
 /** Why an own file is not used: changed where it is, or gone (its disk, or the file itself). */

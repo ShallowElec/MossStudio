@@ -10,12 +10,12 @@ import {
 } from '@shared/capabilities'
 import { writeFileAtomic } from '../lib/atomicWrite'
 import { paths } from '../lib/paths'
-import type { ManagedHost } from '@shared/types'
+import type { ManagedHost, Settings } from '@shared/types'
 import { remoteEngineInfo } from '../services/engines'
 import { mergeLoraMeta } from '../services/loraProfiles'
 import { changeRemoteWorkerLora, listRemoteWorkerLoras } from '../services/remoteWorker'
 import { getTrainingHost, listManagedHosts, testTrainingHost } from '../services/trainingHosts'
-import { connectWorkerHost, isWorkerDaemonHost } from '../services/workerHostManager'
+import { connectWorkerHost, isWorkerDaemonHost, workerHostsOn } from '../services/workerHostManager'
 import { listControlAdapters } from '../services/controlAdapters'
 import { getGpuInventory } from '../services/devices'
 import { listDiagnostics } from '../services/diagnostics'
@@ -71,6 +71,16 @@ type AppArgsMap = {
 
 function typed<Id extends keyof AppArgsMap>(fn: (args: AppArgsMap[Id]) => unknown | Promise<unknown>): MainCapabilityHandler {
   return (args) => fn(args as AppArgsMap[Id])
+}
+
+/** The 设置 › 功能 switches capability packs are gated by. */
+export function capabilityFlags(settings: Settings): Record<string, boolean> {
+  return {
+    gbcEnabled: settings.gbcEnabled === true,
+    trainingEnabled: settings.trainingEnabled === true,
+    remoteHostsEnabled: settings.remoteHostsEnabled === true,
+    workerHostsEnabled: workerHostsOn(settings),
+  }
 }
 
 function publicRemoteHost(host: ManagedHost) {
@@ -270,11 +280,7 @@ export function createBuiltinMainHandlers(): Record<string, MainCapabilityHandle
           name: adapter.name,
           controlKinds: adapter.controlKinds,
         })),
-        enabledFlags: {
-          gbcEnabled: settings.gbcEnabled === true,
-          trainingEnabled: settings.trainingEnabled === true,
-          remoteHostsEnabled: settings.remoteHostsEnabled === true,
-        },
+        enabledFlags: capabilityFlags(settings),
       }
     },
     'system.window.focus': typed<'system.window.focus'>(({ route }) => {
@@ -306,11 +312,7 @@ export function createBuiltinMainHandlers(): Record<string, MainCapabilityHandle
       const settings = getSettings()
       const projected = projectCapabilities(BUILTIN_CAPABILITY_REGISTRY, {
         profile: profile ?? 'atomic',
-        enabledFlags: {
-          gbcEnabled: settings.gbcEnabled === true,
-          trainingEnabled: settings.trainingEnabled === true,
-          remoteHostsEnabled: settings.remoteHostsEnabled === true,
-        },
+        enabledFlags: capabilityFlags(settings),
         enabledPacks: enabledPacks as CapabilityId[] | undefined,
       })
       const activeTopic = topic ?? 'all'
@@ -332,11 +334,7 @@ export function createBuiltinMainDispatcher(): MainCapabilityDispatcher {
     mainHandlers: createBuiltinMainHandlers(),
     readFlags: () => {
       const settings = getSettings()
-      return {
-        gbcEnabled: settings.gbcEnabled === true,
-        trainingEnabled: settings.trainingEnabled === true,
-        remoteHostsEnabled: settings.remoteHostsEnabled === true,
-      }
+      return capabilityFlags(settings)
     },
   })
 }

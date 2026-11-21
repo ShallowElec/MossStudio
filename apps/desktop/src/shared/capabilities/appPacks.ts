@@ -294,6 +294,7 @@ export const APP_CAPABILITY_PACKS: readonly BuiltinCapabilityPack[] = [
     id: 'remote.hosts',
     title: '远程主机',
     version: '1.0.0',
+    featureFlag: 'remoteHostsEnabled',
     requiresPacks: [],
     actions: [
       {

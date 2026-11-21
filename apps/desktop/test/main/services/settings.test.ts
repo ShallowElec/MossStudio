@@ -182,6 +182,14 @@ describe('getSettings', () => {
     expect(settings.trainingEnabled).toBe(true)
   })
 
+  it('leaves 外部 Agent and Worker hosts off for a settings file from before they existed, also with remote hosts set up', async () => {
+    writeFileSync(join(root(), 'training-hosts.json'), JSON.stringify([{ id: 'ssh-a' }]))
+    writeSettings({ theme: 'dark', remoteHostsEnabled: true })
+    const settings = (await load()).getSettings()
+    expect(settings.externalAgentsEnabled).toBe(false)
+    expect(settings.workerHostsEnabled).toBe(false)
+  })
+
   it('does not turn training on for the empty folders created at every launch', async () => {
     for (const dir of ['git', 'versions', 'runtimes']) mkdirSync(join(root(), 'trainer', dir), { recursive: true })
     mkdirSync(join(root(), 'trainer', 'versions', 'empty'), { recursive: true })

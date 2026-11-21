@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
-import { createBuiltinMainDispatcher } from '../../../src/main/capabilities'
+import { createBuiltinMainDispatcher, createBuiltinMainHandlers, createMainCapabilityDispatcher } from '../../../src/main/capabilities'
 import { sha256Text } from '@shared/capabilities'
 import { createMcpServer } from '../../../src/main/mcp/server'
 
@@ -36,7 +36,11 @@ it('never accepts client approval or reuses client ids, and hashes the returned 
 
 it('serves authenticated loopback discovery, six resources and two prompts', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'moss-mcp-'))
-  const server = await createMcpServer({ discoveryPath: join(dir, 'mcp-server.json') })
+  const dispatcher = createMainCapabilityDispatcher({
+    mainHandlers: createBuiltinMainHandlers(),
+    readFlags: () => ({ remoteHostsEnabled: true, workerHostsEnabled: true }),
+  })
+  const server = await createMcpServer({ dispatcher, discoveryPath: join(dir, 'mcp-server.json') })
   try {
     expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:/)
     expect(server.token.length).toBeGreaterThanOrEqual(43)

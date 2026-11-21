@@ -47,17 +47,12 @@ beforeEach(async () => {
 const byId = <T extends { id: string }>(items: T[], id: string): T | undefined => items.find((item) => item.id === id)
 
 describe('getCatalog sources', () => {
-  it('merges connected worker bundles even after the local catalog is cached', async () => {
-    await models.getCatalog(settings)
+  it('never lists a connected Worker as a model on 模型, so it cannot be deleted there', async () => {
     listActiveWorkerProfiles.mockReturnValue([{ id: 'render', label: 'Render worker', hostId: 'worker-host' }])
-    const connected = await models.getCatalog(settings)
-    expect(byId(connected.bundles, 'remote-worker:render')).toMatchObject({
-      name: 'Render worker',
-      components: { dit: 'remote-worker:render' },
-    })
-    expect(byId(connected.models, 'remote-worker:render')).toMatchObject({ installed: true, installState: 'ready' })
-    listActiveWorkerProfiles.mockReturnValue([])
-    expect(byId((await models.getCatalog(settings)).bundles, 'remote-worker:render')).toBeUndefined()
+    const catalog = await models.getCatalog(settings, true)
+    expect(catalog.models.some((model) => model.id.startsWith('remote-worker:'))).toBe(false)
+    expect(catalog.bundles.some((item) => item.id.startsWith('remote-worker:'))).toBe(false)
+    expect(catalog.adapters.some((adapter) => adapter.tags.includes('remote-worker'))).toBe(false)
   })
 
   it('reads a local release catalog and normalises raw entries', async () => {

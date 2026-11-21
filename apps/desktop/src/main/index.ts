@@ -60,9 +60,9 @@ import {
 import { run } from './lib/run'
 import { archiveLegacyInferenceData } from './services/legacyMigration'
 import { matchRule, parseTqdm } from './services/parsers'
-import { registerIpc, runToolInStudioWindow } from './ipc'
+import { registerIpc, syncExternalAgents } from './ipc'
 import { configurePasswordStore } from './lib/passwordStore'
-import { startMcpServer, stopMcpServer } from './mcp'
+import { stopMcpServer } from './mcp'
 import { stopAgentHub } from './agentHub'
 import { configureInstallModeSwitches, registerUninstallIpc, runInstallMode } from './install/app'
 import { applyAppUserModelId } from './install/identity'
@@ -190,7 +190,8 @@ app
     })
     registerGalleryProtocol()
     registerIpc()
-    void startMcpServer({ runInRenderer: runToolInStudioWindow }).catch((error: unknown) => console.warn('[mcp]', error))
+    // Off by default (设置 › 功能 › 外部 Agent): then nothing listens and no discovery file is written.
+    void syncExternalAgents(getSettings()).catch((error: unknown) => console.warn('[mcp]', error))
     registerUninstallIpc()
     if (scenario === 'model-management') {
       try {
@@ -1993,6 +1994,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
+/** How long quitting waits for Agent processes, worker cancellation and tunnels to end. */
+const QUIT_CLEANUP_MS = 3500
 let quitCleanupStarted = false
 let quitCleanupFinished = false
 app.on('before-quit', (event) => {
@@ -2008,20 +2011,18 @@ app.on('before-quit', (event) => {
   closeAllSshTerminals()
   stopUpdater()
   stopBackend()
-  void stopMcpServer()
-  void stopAgentHub()
-  // Keep tunnels alive until cancellation is delivered, but never let an unreachable worker block quit.
+  // Agent children (taskkill on Windows), worker jobs and tunnels end before the app does, within a bounded budget.
   void (async () => {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
-        cancelAllRemoteWorkerJobs(),
+        Promise.allSettled([stopMcpServer(), stopAgentHub(), cancelAllRemoteWorkerJobs()]),
         new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, 1500)
+          timer = setTimeout(resolve, QUIT_CLEANUP_MS)
         }),
       ])
     } catch (error) {
-      console.warn('[quit] worker cancellation failed', error)
+      console.warn('[quit] cleanup failed', error)
     } finally {
       if (timer) clearTimeout(timer)
       try {

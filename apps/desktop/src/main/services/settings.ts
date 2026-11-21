@@ -69,6 +69,8 @@ export const DEFAULT_SETTINGS: Settings = {
   remoteHostsEnabled: false,
   trainingEnabled: false,
   gbcEnabled: false,
+  externalAgentsEnabled: false,
+  workerHostsEnabled: false,
   gbcProviderId: null,
   languageProviderId: null,
   gbcVersionId: null,

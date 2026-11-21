@@ -260,6 +260,10 @@ export interface Settings {
   trainingEnabled: boolean
   /** Optional feature: 拆成区域 with KohakuGBC. Off by default. */
   gbcEnabled: boolean
+  /** Optional feature: external Agents (Codex, Claude Code…) use the board over MCP, and the 协同 panel. Off by default. */
+  externalAgentsEnabled: boolean
+  /** Optional feature, under 远程主机: hosts that run an external Worker daemon. Off by default; experimental. */
+  workerHostsEnabled: boolean
   /** 设置 › 语言模型 › 看图: the model 解析 and 拆成区域 read pictures with; null = the first that can. */
   gbcProviderId: string | null
   /** 设置 › 语言模型 › 助手和漫画: the model the assistant, 漫画 and training captions use; null = the first connected. */

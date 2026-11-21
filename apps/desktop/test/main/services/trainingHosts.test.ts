@@ -24,6 +24,7 @@ vi.mock('@main/services/hfCredentials', () => ({ hasHfToken: (id: string) => id 
 
 const root = useTempDataRoot()
 const settings = settingsFixture()
+const workerSettings = settingsFixture({ remoteHostsEnabled: true, workerHostsEnabled: true })
 const input = { name: '  ', host: 'gpu.test', user: ' moss ', trainerRoot: ' ~/t ' }
 const stored = (): TrainingHost[] => JSON.parse(readFileSync(join(root(), 'hosts.json'), 'utf8'))
 
@@ -43,7 +44,7 @@ it('probes worker hosts without invoking the Linux SSH shell', async () => {
     .mockResolvedValue({ path: '', root: '', gpu: '', online: true, available: true, checkedAt: '2026-01-01' })
   const { saveTrainingHost, testTrainingHost } = await load()
   const host = saveTrainingHost({ ...input, remoteBackend: 'worker-daemon' })
-  expect(await testTrainingHost(settings, host.id)).toMatchObject({ status: 'ok' })
+  expect(await testTrainingHost(workerSettings, host.id)).toMatchObject({ status: 'ok' })
   expect(workerProbe).toHaveBeenCalledWith(expect.objectContaining({ id: host.id }), true)
   expect(state.probe).not.toHaveBeenCalled()
 })
@@ -99,7 +100,23 @@ describe('saveTrainingHost', () => {
       workerWorkflow: 'default',
     })
     vi.resetModules()
-    expect((await load()).getTrainingHost(settings, saved.id)).toMatchObject({ remoteBackend: 'worker-daemon', workerWorkflow: 'default' })
+    expect((await load()).getTrainingHost(workerSettings, saved.id)).toMatchObject({
+      remoteBackend: 'worker-daemon',
+      workerWorkflow: 'default',
+    })
+  })
+
+  it('hides a saved Worker host everywhere while its switch is off, and keeps it in the file', async () => {
+    const { saveTrainingHost, getTrainingHost, listTrainingHosts, listManagedHosts } = await load()
+    const plain = saveTrainingHost(input)
+    const worker = saveTrainingHost({ ...input, name: 'gpu-box', remoteBackend: 'worker-daemon', workerDiscoveryPath: '/srv/d.json' })
+    for (const off of [settings, settingsFixture({ remoteHostsEnabled: true }), settingsFixture({ workerHostsEnabled: true })]) {
+      expect(listTrainingHosts(off).map((host) => host.id)).toEqual(['local', plain.id])
+      expect(listManagedHosts(off).map((host) => host.id)).toEqual(['local', plain.id])
+      expect(getTrainingHost(off, worker.id)).toBeUndefined()
+    }
+    saveTrainingHost(input)
+    expect(listTrainingHosts(workerSettings).map((host) => host.id)).toContain(worker.id)
   })
 
   it('trims input, falls back to the host as name and defaults port/auth', async () => {

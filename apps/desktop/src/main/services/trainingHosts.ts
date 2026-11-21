@@ -1,4 +1,4 @@
-import { isWorkerDaemonHost, probeWorkerHost, workerHostDevices } from './workerHostManager'
+import { isWorkerDaemonHost, probeWorkerHost, workerHostDevices, workerHostsOn } from './workerHostManager'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -47,7 +47,8 @@ export function listTrainingHosts(settings: Settings): TrainingHost[] {
     modelsRoot: paths.models(settings.modelsRoot),
     status: 'unchecked',
   }
-  return [local, ...load()]
+  // A Worker host saved while its switch was on stays in the file, but nothing can reach it while the switch is off.
+  return [local, ...load().filter((host) => workerHostsOn(settings) || !isWorkerDaemonHost(host))]
 }
 
 export interface SaveTrainingHostInput {

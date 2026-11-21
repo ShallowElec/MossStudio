@@ -785,7 +785,12 @@ function defaultHandlers(): Map<string, Handler> {
   h.set(Ipc.trainerAllVersions, (_, { state }) => state.trainerVersions)
 
   // Hosts
-  h.set(Ipc.hostsList, (_, { state }) => state.hosts)
+  // As main: a Worker host is hidden while 设置 › 功能 › Worker 远程主机 (under 远程主机) is off.
+  h.set(Ipc.hostsList, (_, { state }) =>
+    state.settings.remoteHostsEnabled && state.settings.workerHostsEnabled
+      ? state.hosts
+      : state.hosts.filter((host) => host.remoteBackend !== 'worker-daemon'),
+  )
   h.set(Ipc.hostsSave, (payload, { state, emit }) => {
     const { password, ...config } = p<Partial<ManagedHost> & { password?: string }>(payload)
     const host = {

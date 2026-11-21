@@ -11,6 +11,7 @@ import { ModelImportHost } from './components/ModelImport'
 import { ToastProvider, cn, useToast } from './components/ui'
 import { ActivityPanel } from './components/shell/ActivityPanel'
 import { GlobalApprovalOverlay } from './pages/studio/assistant/GlobalApprovalOverlay'
+import { installExternalToolBridge } from './lib/agentTools'
 import { Rail } from './components/shell/Rail'
 import { LEGACY_REDIRECTS, routeRoot, visibleRoutes } from './components/shell/routes'
 import { Titlebar } from './components/shell/Titlebar'
@@ -74,6 +75,12 @@ function useWindowIntents(): void {
   }, [navigate, openActivity])
 }
 
+/** An external Agent's board calls reach the Studio from any page: it opens the Studio when it is not there yet. */
+function useExternalAgentBridge(enabled: boolean): void {
+  const navigate = useNavigate()
+  useEffect(() => (enabled ? installExternalToolBridge({ openStudio: () => void navigate('/studio') }) : undefined), [enabled, navigate])
+}
+
 function useDiagnosticToasts(): void {
   const toast = useToast()
   useEffect(
@@ -92,6 +99,7 @@ function StudioShell(): React.JSX.Element {
   const openActivity = useShell((state) => state.openActivity)
   useWindowIntents()
   useDiagnosticToasts()
+  useExternalAgentBridge(settings?.externalAgentsEnabled === true)
 
   const pathname = location.pathname
   const root = routeRoot(pathname)
@@ -134,7 +142,7 @@ function StudioShell(): React.JSX.Element {
         <main className="relative min-w-0 flex-1 overflow-hidden rounded-tl-xl">
           <PageHost active={active} />
           <ActivityPanel />
-          <GlobalApprovalOverlay />
+          {settings?.externalAgentsEnabled ? <GlobalApprovalOverlay /> : null}
         </main>
       </div>
       <ModelImportHost />

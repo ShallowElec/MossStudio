@@ -19,6 +19,9 @@ import { useTempDataRoot } from '@test/helpers/tempDir'
 
 useTempDataRoot()
 
+/** remote.hosts.* is behind 设置 › 功能 › 远程主机 (and its Worker hosts behind their own switch). */
+const REMOTE = { remoteHostsEnabled: true, workerHostsEnabled: true }
+
 beforeEach(() => {
   resetCapabilityAuditMemory()
 })
@@ -40,7 +43,7 @@ describe('main/capabilities dispatcher and audit trail', () => {
     } as ManagedHost
     const spy = vi.spyOn(trainingHosts, 'listManagedHosts').mockReturnValue([{ ...host, id: 'local', kind: 'local' }, host])
     try {
-      const dispatcher = createMainCapabilityDispatcher({ mainHandlers: createBuiltinMainHandlers() })
+      const dispatcher = createMainCapabilityDispatcher({ mainHandlers: createBuiltinMainHandlers(), readFlags: () => REMOTE })
       const result = await dispatcher.execute({ name: 'remote.hosts.list', source: 'external-agent' })
       expect(result.ok).toBe(true)
       expect(JSON.parse(result.content)).toEqual({
@@ -61,6 +64,15 @@ describe('main/capabilities dispatcher and audit trail', () => {
     }
   })
 
+  it('refuses remote.hosts.* while 设置 › 功能 › 远程主机 is off', async () => {
+    const list = vi.fn(() => ({ hosts: [] }))
+    const dispatcher = createMainCapabilityDispatcher({ mainHandlers: { 'remote.hosts.list': list }, readFlags: () => ({}) })
+    const result = await dispatcher.execute({ name: 'remote.hosts.list', source: 'external-agent' })
+    expect(result.ok).toBe(false)
+    expect(JSON.parse(result.content).error).toContain('远程主机')
+    expect(list).not.toHaveBeenCalled()
+  })
+
   it('tests hosts, refreshes status and invalidates the catalog after connecting', async () => {
     const host: ManagedHost = { id: 'ssh-node', name: 'Node', kind: 'ssh', trainerRoot: '/trainer', status: 'unchecked', devices: [] }
     vi.spyOn(trainingHosts, 'getTrainingHost').mockReturnValue(host)
@@ -71,7 +83,7 @@ describe('main/capabilities dispatcher and audit trail', () => {
       .spyOn(engines, 'remoteEngineInfo')
       .mockResolvedValue({ online: true } as Awaited<ReturnType<typeof engines.remoteEngineInfo>>)
     try {
-      const dispatcher = createMainCapabilityDispatcher({ mainHandlers: createBuiltinMainHandlers() })
+      const dispatcher = createMainCapabilityDispatcher({ mainHandlers: createBuiltinMainHandlers(), readFlags: () => REMOTE })
       const result = await dispatcher.execute({ name: 'remote.hosts.test', arguments: { hostId: host.id } })
       expect(result.ok).toBe(true)
       expect(JSON.parse(result.content)).toMatchObject({ id: host.id, status: 'ok', remoteBackend: 'moss-ssh', devices: [] })
@@ -103,7 +115,7 @@ describe('main/capabilities dispatcher and audit trail', () => {
     const change = vi.spyOn(remoteWorker, 'changeRemoteWorkerLora').mockResolvedValue({ id: item.id, registered: false })
     const invalidate = vi.spyOn(models, 'invalidateCatalog').mockImplementation(() => {})
     try {
-      const dispatcher = createMainCapabilityDispatcher({ mainHandlers: createBuiltinMainHandlers() })
+      const dispatcher = createMainCapabilityDispatcher({ mainHandlers: createBuiltinMainHandlers(), readFlags: () => REMOTE })
       const result = await dispatcher.execute({ name: 'remote.hosts.loras_list', arguments: { hostId: host.id, candidates: true } })
       expect(result.ok).toBe(true)
       expect(JSON.parse(result.content)).toEqual({ value: [{ ...item, triggers: ['style-token'] }] })
@@ -127,7 +139,7 @@ describe('main/capabilities dispatcher and audit trail', () => {
 
   it('requires human approval before changing remote Worker LoRA registration', async () => {
     const change = vi.fn(() => ({ registered: true }))
-    const dispatcher = createMainCapabilityDispatcher({ mainHandlers: { 'remote.hosts.lora_register': change } })
+    const dispatcher = createMainCapabilityDispatcher({ mainHandlers: { 'remote.hosts.lora_register': change }, readFlags: () => REMOTE })
     const call = {
       name: 'remote.hosts.lora_register',
       arguments: { hostId: 'ssh-worker', id: 'style', action: 'register' },

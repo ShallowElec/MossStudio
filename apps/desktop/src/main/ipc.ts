@@ -1,12 +1,28 @@
-import { connectWorkerHost, disconnectWorkerHost, isWorkerDaemonHost, workerHostProviderId } from './services/workerHostManager'
+import {
+  connectWorkerHost,
+  disconnectWorkerHost,
+  isWorkerDaemonHost,
+  stopAllWorkerHostTunnels,
+  workerHostProviderId,
+  workerHostsOn,
+} from './services/workerHostManager'
 import { listRemoteWorkerLoras, changeRemoteWorkerLora } from './services/remoteWorker'
 import { mergeLoraMeta } from './services/loraProfiles'
 import { resolveAdapterFile } from './services/models'
 import type { CapabilityId } from '@shared/capabilities'
 import { createBuiltinMainDispatcher, listCapabilityAudit } from './capabilities'
-import { getActiveMcpServer, getMcpServerState, startMcpServer, getMcpClientsStatus, installMcpClient, uninstallMcpClient } from './mcp'
+import {
+  getActiveMcpServer,
+  getMcpServerState,
+  startMcpServer,
+  stopMcpServer,
+  getMcpClientsStatus,
+  installMcpClient,
+  uninstallMcpClient,
+} from './mcp'
 import { listLoraProfiles, saveLoraProfile, extractSafetensorsTriggers } from './services/loraProfiles'
-import { agentHub, attachCapabilityApproval, capabilityApprovalQueue } from './agentHub'
+import { agentHub, attachCapabilityApproval, capabilityApprovalQueue, stopAgentHub } from './agentHub'
+import { assertExternalAgentsOn, externalAgentsOn } from './externalAgents'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { totalmem } from 'node:os'
@@ -178,6 +194,13 @@ function handle<T>(channel: string, schema: ZodType | null, fn: (input: any, eve
   )
 }
 
+/** A channel of the 外部 Agent feature: refused while 设置 › 功能 › 外部 Agent is off. */
+const handleExternal: typeof handle = (channel, schema, fn) =>
+  handle(channel, schema, (input, event) => {
+    assertExternalAgentsOn()
+    return fn(input, event)
+  })
+
 /** Tool calls are executed by the renderer (it owns the Studio state); main only relays. */
 const pendingToolCalls = new Map<string, (result: AiToolResult) => void>()
 
@@ -262,6 +285,18 @@ export async function runToolInStudioWindow(call: AiToolCall, mode: AgentMode, c
   return runToolOnWebContents(win.webContents, call, mode, conversationId, timeoutMs)
 }
 
+/**
+ * Starts or stops everything behind 设置 › 功能 › 外部 Agent. Off, nothing
+ * listens, the discovery file is gone and every Agent child process is ended.
+ */
+export async function syncExternalAgents(settings: Settings): Promise<void> {
+  if (externalAgentsOn(settings)) {
+    await startMcpServer({ runInRenderer: runToolInStudioWindow })
+    return
+  }
+  await Promise.all([stopMcpServer(), stopAgentHub()])
+}
+
 export function registerIpc(): void {
   async function refreshSharedModels(settings: Settings, changed = false): Promise<void> {
     await refreshModelSources(settings, changed)
@@ -322,54 +357,51 @@ export function registerIpc(): void {
   const capabilities = createBuiltinMainDispatcher()
   attachCapabilityApproval(capabilities)
 
-  handle(Ipc.agentHubBackends, null, () => agentHub.backends())
-  handle(Ipc.agentHubModels, schemas.agentHubModels, ({ backendId, sessionId }) => agentHub.models(backendId, sessionId))
-  handle(Ipc.agentHubSetModel, schemas.agentHubSetModel, (input) => agentHub.setModel(input))
-  handle(Ipc.agentHubSessionStats, schemas.agentHubSession, ({ backendId, sessionId }) => agentHub.sessionStats(backendId, sessionId))
-  handle(Ipc.agentHubConnect, schemas.agentHubConnect, (input) => agentHub.connect(input))
-  handle(Ipc.agentHubDisconnect, schemas.agentHubBackend, ({ backendId }) => agentHub.disconnect(backendId))
-  handle(Ipc.agentHubSessions, schemas.agentHubBackend, ({ backendId }) => agentHub.sessions(backendId))
-  handle(Ipc.agentHubCreateSession, schemas.agentHubCreateSession, (input) => agentHub.createSession(input))
-  handle(Ipc.agentHubMessages, schemas.agentHubSession, ({ backendId, sessionId }) => agentHub.messages(backendId, sessionId))
-  handle(Ipc.agentHubSend, schemas.agentHubSend, (input) => agentHub.send(input))
-  handle(Ipc.agentHubStop, schemas.agentHubSession, ({ backendId, sessionId }) => agentHub.stop(backendId, sessionId))
-  handle(Ipc.agentHubApprovals, null, () => capabilityApprovalQueue.listPending())
-  handle(Ipc.agentHubResolveApproval, schemas.agentHubResolveApproval, ({ id, decision }) => capabilityApprovalQueue.resolve(id, decision))
-
-  handle(Ipc.capabilitiesList, schemas.capabilitiesList, (input) =>
-    capabilities.list(
-      input
-        ? {
-            ...input,
-            enabledPacks: input.enabledPacks as CapabilityId[] | undefined,
-          }
-        : undefined,
-    ),
+  // 设置 › 功能 › 外部 Agent gates every channel of the MCP server, the 协同 panel and its approvals.
+  handleExternal(Ipc.agentHubBackends, null, () => agentHub.backends())
+  handleExternal(Ipc.agentHubModels, schemas.agentHubModels, ({ backendId, sessionId }) => agentHub.models(backendId, sessionId))
+  handleExternal(Ipc.agentHubSetModel, schemas.agentHubSetModel, (input) => agentHub.setModel(input))
+  handleExternal(Ipc.agentHubSessionStats, schemas.agentHubSession, ({ backendId, sessionId }) =>
+    agentHub.sessionStats(backendId, sessionId),
+  )
+  handleExternal(Ipc.agentHubConnect, schemas.agentHubConnect, (input) => agentHub.connect(input))
+  handleExternal(Ipc.agentHubDisconnect, schemas.agentHubBackend, ({ backendId }) => agentHub.disconnect(backendId))
+  handleExternal(Ipc.agentHubSessions, schemas.agentHubBackend, ({ backendId }) => agentHub.sessions(backendId))
+  handleExternal(Ipc.agentHubCreateSession, schemas.agentHubCreateSession, (input) => agentHub.createSession(input))
+  handleExternal(Ipc.agentHubMessages, schemas.agentHubSession, ({ backendId, sessionId }) => agentHub.messages(backendId, sessionId))
+  handleExternal(Ipc.agentHubSend, schemas.agentHubSend, (input) => agentHub.send(input))
+  handleExternal(Ipc.agentHubStop, schemas.agentHubSession, ({ backendId, sessionId }) => agentHub.stop(backendId, sessionId))
+  handleExternal(Ipc.agentHubApprovals, null, () => capabilityApprovalQueue.listPending())
+  handleExternal(Ipc.agentHubResolveApproval, schemas.agentHubResolveApproval, ({ id, decision }) =>
+    capabilityApprovalQueue.resolve(id, decision),
   )
 
-  handle(Ipc.capabilitiesSkill, schemas.capabilitiesList, (input) =>
-    capabilities.skill(
-      input
-        ? {
-            ...input,
-            enabledPacks: input.enabledPacks as CapabilityId[] | undefined,
-          }
-        : undefined,
-    ),
+  handleExternal(Ipc.capabilitiesList, schemas.capabilitiesList, (input) =>
+    capabilities.list(input ? { ...input, enabledPacks: input.enabledPacks as CapabilityId[] | undefined } : undefined),
   )
-
-  handle(Ipc.capabilitiesExecute, schemas.capabilitiesExecute, (input, event) =>
+  handleExternal(Ipc.capabilitiesSkill, schemas.capabilitiesList, (input) =>
+    capabilities.skill(input ? { ...input, enabledPacks: input.enabledPacks as CapabilityId[] | undefined } : undefined),
+  )
+  // The 协同 panel only reads through this (the guide); a change always comes from an Agent over MCP, behind approval.
+  handleExternal(Ipc.capabilitiesExecute, schemas.capabilitiesExecute, (input, event) =>
     capabilities.execute({
       ...input,
+      source: 'ipc',
+      readOnly: true,
       runInRenderer: (call, mode, conversationId) => runToolInRenderer(event, call, mode, conversationId ?? ''),
     }),
   )
+  handleExternal(Ipc.capabilitiesAudit, schemas.capabilitiesAudit, (input) => listCapabilityAudit(input ?? {}))
 
-  handle(Ipc.capabilitiesAudit, schemas.capabilitiesAudit, (input) => listCapabilityAudit(input ?? {}))
+  handleExternal(Ipc.mcpClientsStatus, schemas.mcpClientsStatus, () => getMcpClientsStatus())
+  handleExternal(Ipc.mcpClientInstall, schemas.mcpClientInstall, ({ clientId }) => installMcpClient(clientId))
+  handleExternal(Ipc.mcpClientUninstall, schemas.mcpClientUninstall, ({ clientId }) => uninstallMcpClient(clientId))
+  handleExternal(Ipc.mcpInfo, schemas.mcpInfo, (input) => getMcpServerState(input?.includeToken === true))
+  handleExternal(Ipc.mcpSetProfile, schemas.mcpSetProfile, async ({ profile, enabledPacks }) => {
+    const server = getActiveMcpServer() ?? (await startMcpServer({ runInRenderer: runToolInStudioWindow }))
+    return server.setProfile(profile, enabledPacks as CapabilityId[] | undefined)
+  })
 
-  handle(Ipc.mcpClientsStatus, schemas.mcpClientsStatus, () => getMcpClientsStatus())
-  handle(Ipc.mcpClientInstall, schemas.mcpClientInstall, ({ clientId }) => installMcpClient(clientId))
-  handle(Ipc.mcpClientUninstall, schemas.mcpClientUninstall, ({ clientId }) => uninstallMcpClient(clientId))
   const workerProfileFor = async ({ hostId, providerId }: { hostId?: string; providerId?: string }) => {
     const settings = getSettings()
     const host = hostId
@@ -403,12 +435,6 @@ export function registerIpc(): void {
       throw new Error('本机找不到该 LoRA 的权重文件，请手动填写触发词或确认权重路径')
     }
     return extractSafetensorsTriggers(resolved)
-  })
-  handle(Ipc.mcpInfo, schemas.mcpInfo, (input) => getMcpServerState(input?.includeToken === true))
-
-  handle(Ipc.mcpSetProfile, schemas.mcpSetProfile, async ({ profile, enabledPacks }) => {
-    const server = getActiveMcpServer() ?? (await startMcpServer({ runInRenderer: runToolInStudioWindow }))
-    return server.setProfile(profile, enabledPacks as CapabilityId[] | undefined)
   })
 
   handle(Ipc.aiProvidersList, null, () => listProviders())
@@ -546,6 +572,8 @@ export function registerIpc(): void {
   handle(Ipc.hostsList, null, () => listManagedHosts(getSettings()))
 
   handle(Ipc.hostsSave, schemas.hostSave, async (input) => {
+    if (input.remoteBackend === 'worker-daemon' && !workerHostsOn(getSettings()))
+      throw codedError('E_FEATURE_OFF', 'Worker 远程主机还没有打开，请先在 设置 › 功能 里打开')
     if (input.id) await disconnectWorkerHost(input.id)
     invalidateCatalog()
     const saved = saveTrainingHost(input)
@@ -743,6 +771,13 @@ export function registerIpc(): void {
     if (before.lanWebEnabled !== settings.lanWebEnabled || before.lanWebPort !== settings.lanWebPort) {
       stopBackend()
       await startBackend()
+    }
+    if (externalAgentsOn(before) !== externalAgentsOn(settings)) {
+      await syncExternalAgents(settings).catch((error: unknown) => console.warn('[mcp]', error))
+    }
+    if (workerHostsOn(before) && !workerHostsOn(settings)) {
+      await stopAllWorkerHostTunnels()
+      invalidateCatalog()
     }
     const modelDirsChanged =
       before.modelsRoot !== settings.modelsRoot || JSON.stringify(before.modelDirectories) !== JSON.stringify(settings.modelDirectories)

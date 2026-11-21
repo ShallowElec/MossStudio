@@ -4,6 +4,7 @@ import { Ipc } from '@shared/channels'
 import type { RemoteHostBackend, SshAuthMethod } from '@shared/types'
 import { call } from '../../lib/api'
 import { Advanced, Button, Field, FieldLabel, IconButton, Input, Modal, Segmented, Spinner, Switch, useToast } from '../../components/ui'
+import { useApp } from '../../store'
 import { errorText } from './fields'
 import { parseSshCommand, validateHostForm, type HostForm, type HostFormErrors } from './hostForm'
 
@@ -28,6 +29,7 @@ export function HostDialog({
   onSave: (form: HostForm) => Promise<boolean>
 }): React.JSX.Element {
   const toast = useToast()
+  const workerHosts = useApp((state) => state.settings?.workerHostsEnabled === true)
   const [form, setForm] = useState(initial)
   const [errors, setErrors] = useState<HostFormErrors>({})
   const [saving, setSaving] = useState(false)
@@ -107,19 +109,21 @@ export function HostDialog({
           void submit()
         }}
       >
-        <div className="flex flex-col gap-2">
-          <FieldLabel>运行方式</FieldLabel>
-          <Segmented<RemoteHostBackend>
-            label="运行方式"
-            block
-            value={form.remoteBackend}
-            onChange={(value) => set('remoteBackend', value)}
-            options={[
-              { value: 'moss-ssh', label: 'MossStudio 引擎（Linux）' },
-              { value: 'worker-daemon', label: 'Worker 守护进程（Windows / Linux）' },
-            ]}
-          />
-        </div>
+        {workerHosts || isWorker ? (
+          <div className="flex flex-col gap-2">
+            <FieldLabel>运行方式</FieldLabel>
+            <Segmented<RemoteHostBackend>
+              label="运行方式"
+              block
+              value={form.remoteBackend}
+              onChange={(value) => set('remoteBackend', value)}
+              options={[
+                { value: 'moss-ssh', label: 'MossStudio 引擎（Linux）' },
+                { value: 'worker-daemon', label: 'Worker 守护进程（Windows / Linux）' },
+              ]}
+            />
+          </div>
+        ) : null}
         <div className="grid grid-cols-[1fr_96px] gap-3">
           <Field label="地址">
             <Input

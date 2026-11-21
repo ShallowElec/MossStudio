@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import type { RemoteWorkerProfile } from '@shared/remoteWorker'
-import type { ComputeDevice, RemoteEngineInfo, TrainingHost } from '@shared/types'
+import type { ComputeDevice, RemoteEngineInfo, Settings, TrainingHost } from '@shared/types'
 import { codedError } from '../lib/codedError'
 import { run } from '../lib/run'
 import { requestWorkerDaemon, setMemoryWorkerToken } from './remoteWorker'
@@ -46,6 +46,10 @@ interface Session {
 const sessions = new Map<string, Session>()
 const inflight = new Map<string, { signature: string; promise: Promise<RemoteWorkerProfile> }>()
 const epochs = new Map<string, number>()
+/** Worker hosts sit under 远程主机 and have their own switch in 设置 › 功能; off, they are hidden everywhere. */
+export function workerHostsOn(settings: Pick<Settings, 'remoteHostsEnabled' | 'workerHostsEnabled'>): boolean {
+  return settings.remoteHostsEnabled === true && settings.workerHostsEnabled === true
+}
 export function isWorkerDaemonHost(
   host?: Pick<WorkerHostConfig, 'kind' | 'remoteBackend'> | null,
 ): host is WorkerHostConfig & { kind: 'ssh'; remoteBackend: 'worker-daemon' } {
