@@ -31,7 +31,7 @@ import {
   settingsFrom,
   type RegionInput,
 } from './canvases'
-import { clampDimension, isSeedLocked, samplingForBundle, SEED_MAX } from './defaults'
+import { clampDimension, isSeedLocked, nearestQuality, qualityPreset, samplingForBundle, SEED_MAX } from './defaults'
 import { InspectorPanel } from './InspectorPanel'
 import type { InputsWiring } from './InputsSection'
 import { ACTIVE_JOB_STATES } from './jobStatus'
@@ -84,7 +84,7 @@ import { useGenerate } from './useGenerate'
 import { useInputImport } from './useInputImport'
 import { droppedPaths, useModelImport } from '../../lib/modelImport'
 import { externalFocusMessage, externalFocusOf, useStudioProject, type StepOutcome } from './useStudioProject'
-import { LOCAL_HOST_ID, registerStudioCapabilities, withExactSteps, type StudioCapabilityDeps } from './studioCapabilities'
+import { LOCAL_HOST_ID, registerStudioCapabilities, type StudioCapabilityDeps } from './studioCapabilities'
 import { ownsUndoKey } from './history'
 import { usePictureRegions } from './usePictureRegions'
 
@@ -767,7 +767,7 @@ export function StudioPage(): React.JSX.Element {
           })),
           selected: canvas ? viewOf(canvas) : null,
           notes:
-            'prompt is the overall description; the final prompt is compiled from it plus the visible regions. bbox is [x1,y1,x2,y2] in canvas pixels; the tools take normalised 0-1 x/y/w/h. steps is any whole number from 1 to 100 and is kept exactly; 8 (fast), 20 (standard) and 50 (fine) are the presets. A text region needs both strings: caption is the lettering style, text is exactly what is rendered.',
+            'prompt is the overall description; the final prompt is compiled from it plus the visible regions. bbox is [x1,y1,x2,y2] in canvas pixels; the tools take normalised 0-1 x/y/w/h. steps snap to 8 (fast), 20 (standard) or 50 (fine). A text region needs both strings: caption is the lettering style, text is exactly what is rendered.',
         }
       },
       readCanvas: (id) => {
@@ -829,7 +829,10 @@ export function StudioPage(): React.JSX.Element {
             clampDimension(patch.height ?? next.height, next.height),
           )
         }
-        if (patch.steps !== undefined) next = withExactSteps(next, patch.steps, patch.cfg !== undefined)
+        if (patch.steps !== undefined) {
+          const preset = qualityPreset(nearestQuality(patch.steps))
+          next = { ...next, steps: preset.steps, cfg: patch.cfg === undefined ? preset.cfg : next.cfg }
+        }
         if (patch.cfg !== undefined) next = { ...next, cfg: Math.min(20, Math.max(0, patch.cfg)) }
         if (patch.seed !== undefined) next = { ...next, seed: Math.min(SEED_MAX, Math.max(0, Math.round(patch.seed))), seedLocked: true }
         live.current.project.updateCanvas(canvas.id, () => next)

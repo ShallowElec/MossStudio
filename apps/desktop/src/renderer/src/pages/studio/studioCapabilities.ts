@@ -37,7 +37,7 @@ import {
   settingsFrom,
 } from './canvases'
 import { canConnect } from './connect'
-import { clampDimension, qualityFor, qualityPreset, samplingForBundle } from './defaults'
+import { clampDimension, samplingForBundle } from './defaults'
 import { resolveJobInputs } from './jobInputs'
 import { ACTIVE_JOB_STATES } from './jobStatus'
 import { patchControl, patchControlImage, patchInit, patchReferences, removeLink, setControlAdapter, setLink } from './links'
@@ -69,22 +69,6 @@ import {
 import { clampHiresDimension, withHiresPatch, withHiresScale, withSampling } from './sampling'
 import { tidyPlaces } from './selection'
 import type { StudioProject } from './useStudioProject'
-
-/** The lowest and highest step count a card takes. */
-export const STEPS_MIN = 1
-export const STEPS_MAX = 100
-
-/**
- * A step count as asked, kept exactly (1–100). Only a count that is one of the
- * quality presets (8, 20, 50) also takes that preset's CFG, and only when the
- * same call does not set CFG itself.
- */
-export function withExactSteps(canvas: ProjectCanvas, steps: number, cfgGiven: boolean): ProjectCanvas {
-  const exact = Math.min(STEPS_MAX, Math.max(STEPS_MIN, Math.round(steps)))
-  const quality = qualityFor(exact)
-  const cfg = cfgGiven || quality === 'custom' ? canvas.cfg : qualityPreset(quality).cfg
-  return { ...canvas, steps: exact, cfg }
-}
 
 /**
  * Studio capability handlers for the actions that have no built-in assistant

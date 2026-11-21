@@ -114,6 +114,8 @@ export interface AiToolCallRequest {
   mode?: AgentMode
   /** The turn that asked (its reply's message id): the Studio makes one undo step of a turn's changes. */
   turnId?: string
+  /** Made by an external Agent over MCP, not by the 助手: it may name a capability id instead of a built-in tool. */
+  external?: true
 }
 
 export interface AiProviderPreset {

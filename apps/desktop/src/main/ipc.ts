@@ -14,6 +14,7 @@ import { ZodError, type ZodType } from 'zod'
 import { Events, Ipc } from '@shared/channels'
 import { schemas } from '@shared/schemas'
 import { trainingSchemas } from '@shared/training'
+import { resolveToolset, toolDefinitions } from '@shared/agent/registry'
 import type { AgentMode, AiToolCall, AiToolCallRequest, AiToolResult } from '@shared/ai'
 import type { IpcResult, Settings } from '@shared/types'
 import { emit } from './lib/events'
@@ -227,7 +228,14 @@ function runToolOnWebContents(
       settle({ ok: false, content: JSON.stringify({ error: 'window closed' }) })
       return
     }
-    sender.send(Events.aiToolCall, { callId, name: call.name, arguments: call.arguments, mode, conversationId })
+    sender.send(Events.aiToolCall, {
+      callId,
+      name: call.name,
+      arguments: call.arguments,
+      mode,
+      conversationId,
+      external: true,
+    } satisfies AiToolCallRequest)
   })
 }
 export async function runToolInStudioWindow(call: AiToolCall, mode: AgentMode, conversationId?: string): Promise<AiToolResult> {
@@ -437,16 +445,8 @@ export function registerIpc(): void {
       emit: (payload) => {
         if (!event.sender.isDestroyed()) event.sender.send(Events.aiStream, payload)
       },
-      runTool: (call, mode, turnId) =>
-        capabilities.execute({
-          callId: call.id,
-          name: call.name,
-          arguments: call.arguments,
-          mode,
-          source: 'assistant',
-          runInRenderer: (rendererCall, rendererMode) => runToolInRenderer(event, rendererCall, rendererMode, turnId),
-        }),
-      tools: capabilities.list({ profile: 'compact', surface: '/studio', nameStyle: 'legacy-or-id' }).tools,
+      runTool: (call, mode, turnId) => runToolInRenderer(event, call, mode, turnId),
+      tools: toolDefinitions(resolveToolset({ page: 'studio' })),
     }),
   )
 

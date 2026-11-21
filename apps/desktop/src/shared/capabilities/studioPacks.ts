@@ -716,7 +716,7 @@ export const STUDIO_CAPABILITY_PACKS: readonly BuiltinCapabilityPack[] = [
         legacyPack: 'canvas.write',
         title: '调整参数',
         description:
-          'Update sampler values on the selected Canvas. Pass only the fields you want to change; steps accept every integer from 1 to 100.',
+          'Update sampler values on the selected Canvas. Pass only the fields you want to change; steps snap to the nearest quality preset (8, 20 or 50) and take its CFG unless cfg is given.',
         inputSchema: STUDIO_ACTION_SCHEMAS['studio.sampling.set'],
         target: 'renderer',
         scope: 'project',
@@ -791,7 +791,7 @@ export const STUDIO_CAPABILITY_PACKS: readonly BuiltinCapabilityPack[] = [
         audience: ['tools', 'resources'],
         markdown: [
           '## Models and Sampling',
-          '- Report the actual values returned by `studio_set_sampler`; steps support every integer from 1 to 100 and dimensions align to 16 px.',
+          '- Report the actual values returned by `studio_set_sampler`: steps snap to 8, 20 or 50 and dimensions align to 16 px.',
           '- Never edit size or sampling while a canvas has an active generation job.',
         ].join('\n'),
       },

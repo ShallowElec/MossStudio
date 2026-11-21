@@ -490,6 +490,29 @@ describe('lib/agentTools installStudioToolBridge', () => {
   })
 })
 
+describe('lib/agentTools bridge: the 助手 and external Agents', () => {
+  it("runs the 助手's call through its own tool, never the external path, even for a capability id", async () => {
+    const backend = createMockBackend('ready')
+    const uninstall = backend.install()
+    const followExternal = vi.fn(<T>(_call: string, run: () => Promise<T>) => run())
+    const setSampler = vi.fn(() => ({}))
+    registerStudioTools(api({ followExternal, setSampler } as Partial<StudioToolApi>))
+    const off = installStudioToolBridge()
+    backend.emit(Events.aiToolCall, { callId: 'a1', name: 'studio.sampling.set', arguments: '{"steps":20}', mode: 'auto', turnId: 't' })
+    await flush()
+    expect(JSON.parse((backend.callsTo(Ipc.aiToolResult)[0] as { result: { content: string } }).result.content)).toHaveProperty('error')
+    expect(setSampler).not.toHaveBeenCalled()
+    expect(followExternal).not.toHaveBeenCalled()
+
+    backend.emit(Events.aiToolCall, { callId: 'x1', name: 'studio.sampling.set', arguments: '{"steps":20}', mode: 'auto', external: true })
+    await flush()
+    expect(setSampler).toHaveBeenCalledWith({ steps: 20 })
+    expect(followExternal).toHaveBeenCalledTimes(1)
+    off()
+    uninstall()
+  })
+})
+
 describe('lib/agentTools snapshot helpers', () => {
   it('readStudioSnapshot reads live state at call time, or null before registration', () => {
     expect(readStudioSnapshot()).toBeNull()

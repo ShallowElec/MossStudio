@@ -73,27 +73,23 @@ export function legacyToolName(name: string): string | null {
 }
 
 /**
- * One tool call from the main process. The built-in assistant's tools keep
- * their own path (and its per-turn undo); every other capability goes to the
- * renderer host. A call without a turn comes from an external Agent over MCP:
- * the Studio follows what it did on the board.
+ * One call an external Agent made over MCP. A capability that supersedes a
+ * built-in tool runs that tool's handler; every other one goes to the renderer
+ * host. Its board changes are one undo step, and the Studio follows them.
  */
-export async function runStudioToolCall(
+export async function runExternalToolCall(
   request: AiToolCallRequest,
   host: RendererCapabilityHost = RENDERER_CAPABILITY_HOST,
 ): Promise<AiToolResult> {
   const legacy = legacyToolName(request.name)
   const run = (): Promise<AiToolResult> =>
     legacy
-      ? executeStudioTool(
-          { id: request.callId, name: legacy, arguments: request.arguments },
-          { mode: request.mode, turnId: request.turnId },
-        )
+      ? executeStudioTool({ id: request.callId, name: legacy, arguments: request.arguments }, { mode: request.mode })
       : host.execute(
           { id: request.callId, name: request.name, arguments: request.arguments },
           { mode: request.mode, conversationId: request.conversationId },
         )
-  const follow = request.turnId ? undefined : getStudioApi()?.followExternal
+  const follow = getStudioApi()?.followExternal
   return follow ? follow(request.callId, run) : run()
 }
 
@@ -101,7 +97,13 @@ export async function runStudioToolCall(
 export function installStudioToolBridge(): () => void {
   return onEvent<AiToolCallRequest>(Events.aiToolCall, (request) => {
     void (async () => {
-      const result = await runStudioToolCall(request)
+      // The 助手's own tools run as they always have; only an external Agent's call takes the capability path.
+      const result = request.external
+        ? await runExternalToolCall(request)
+        : await executeStudioTool(
+            { id: request.callId, name: request.name, arguments: request.arguments },
+            { mode: request.mode, turnId: request.turnId },
+          )
       await call(Ipc.aiToolResult, { callId: request.callId, result }).catch(() => undefined)
     })()
   })

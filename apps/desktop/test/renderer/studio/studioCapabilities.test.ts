@@ -2,36 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { ALL_CAPABILITY_PACKS, createCapabilityRegistry, type BuiltinCapabilityPack } from '@shared/capabilities'
 import type { ManagedHost, ProjectCanvas, Settings } from '@shared/types'
-import { runStudioToolCall, legacyToolName, registerStudioTools, type StudioToolApi } from '@renderer/lib/agentTools'
+import { runExternalToolCall, legacyToolName, registerStudioTools, type StudioToolApi } from '@renderer/lib/agentTools'
 import { createRendererCapabilityHost } from '@renderer/lib/capabilities'
-import {
-  LOCAL_HOST_ID,
-  registerStudioCapabilities,
-  withExactSteps,
-  type StudioCapabilityDeps,
-} from '@renderer/pages/studio/studioCapabilities'
+import { LOCAL_HOST_ID, registerStudioCapabilities, type StudioCapabilityDeps } from '@renderer/pages/studio/studioCapabilities'
 import { externalFocusMessage, externalFocusOf } from '@renderer/pages/studio/useStudioProject'
 import { canvas } from './fixtures'
 
 afterEach(() => registerStudioTools(null))
-
-describe('withExactSteps', () => {
-  const base = canvas({ steps: 20, cfg: 4.5 })
-
-  it('keeps any count from 1 to 100 exactly instead of snapping to a preset', () => {
-    expect(withExactSteps(base, 37, false)).toMatchObject({ steps: 37, cfg: 4.5 })
-    expect(withExactSteps(base, 12, false).steps).toBe(12)
-    expect(withExactSteps(base, 0, false).steps).toBe(1)
-    expect(withExactSteps(base, 250, false).steps).toBe(100)
-    expect(withExactSteps(base, 27.6, false).steps).toBe(28)
-  })
-
-  it("takes a preset's CFG only for a preset count, and never over a CFG set in the same call", () => {
-    expect(withExactSteps(base, 8, false)).toMatchObject({ steps: 8, cfg: 1 })
-    expect(withExactSteps(base, 50, false)).toMatchObject({ steps: 50, cfg: 3 })
-    expect(withExactSteps(base, 8, true)).toMatchObject({ steps: 8, cfg: 4.5 })
-  })
-})
 
 function deps(
   canvases: ProjectCanvas[],
@@ -133,8 +110,8 @@ describe('Studio capabilities for external Agents', () => {
     expect(legacyToolName('studio.cards.create')).toBeNull()
   })
 
-  it("follows an external Agent's calls, but not the built-in assistant's turns", async () => {
-    const setSampler = vi.fn(() => ({ steps: 37 }))
+  it('groups and follows every external Agent call, also one that names a built-in tool', async () => {
+    const setSampler = vi.fn(() => ({ steps: 20 }))
     const follow = vi.fn(<T>(_call: string, run: () => Promise<T>) => run())
     registerStudioTools({
       state: () => ({ hasSelection: true, editable: true }),
@@ -144,14 +121,11 @@ describe('Studio capabilities for external Agents', () => {
     } as unknown as StudioToolApi)
     const host = createRendererCapabilityHost()
 
-    const external = await runStudioToolCall(call('studio.sampling.set', { steps: 37 }), host)
+    const external = await runExternalToolCall({ ...call('studio.sampling.set', { steps: 37 }), external: true }, host)
     expect(external.ok).toBe(true)
     expect(setSampler).toHaveBeenCalledWith({ steps: 37 })
     expect(follow).toHaveBeenCalledTimes(1)
-
-    await runStudioToolCall(call('studio_set_sampler', { steps: 20 }, { turnId: 't1' }), host)
-    expect(setSampler).toHaveBeenCalledTimes(2)
-    expect(follow).toHaveBeenCalledTimes(1)
+    expect(follow.mock.calls[0]![0]).toBe('c-studio.sampling.set')
   })
 })
 
