@@ -75,7 +75,7 @@ A reviewer has to read and understand every line before it merges. A PR that can
 - dependency updates;
 - fixes to unrelated bugs you noticed on the way.
 
-**Size limits.** `PR size` counts *source lines*: additions plus deletions, leaving out tests, docs, `*.md`, release notes, the lockfile and binary files.
+**Size limits.** `PR size` counts *source lines*: additions plus deletions, leaving out tests, docs, `*.md`, release notes, the lockfile and binary files. A renamed or moved file counts only the lines changed in it, and a deleted file counts as one line.
 
 | Source lines | What happens |
 | --- | --- |

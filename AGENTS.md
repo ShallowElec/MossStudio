@@ -91,7 +91,7 @@ On Linux, `pnpm test:e2e`, `pnpm test:scenarios` and `pnpm test:install` run the
 - Do not push to `main`. Do not merge unless asked; when asked, add the PR to the merge queue (`gh pr merge <n> --squash`) instead of rebasing it onto `main` by hand.
 - Do not stack PRs. If one must build on another, wait for the base to merge, then branch from `main`.
 - One PR, one change. Keep refactors, renames, reformatting, dependency updates and unrelated fixes out of a feature PR; send each as its own PR.
-- Size: aim for ≤ 400 source lines for a fix and ≤ 800 for a feature slice (additions + deletions, not counting tests, docs, lockfile). CI's `PR size` warns above 800 and fails above 1,500 source lines or 3,000 in all. Never add or ask for the `large-change` label; only a maintainer grants it.
+- Size: aim for ≤ 400 source lines for a fix and ≤ 800 for a feature slice (additions + deletions, not counting tests, docs, lockfile; a rename counts only its changed lines, a deleted file one line). CI's `PR size` warns above 800 and fails above 1,500 source lines or 3,000 in all. Never add or ask for the `large-change` label; only a maintainer grants it.
 - Work that will not fit: stop and propose a slicing plan first (an issue; an ADR for architecture; a reviewed design for UI). Then land it in working slices behind a setting that is off by default, one PR at a time. Details: [CONTRIBUTING.md › Size and scope](CONTRIBUTING.md#size-and-scope).
 - No AI attribution anywhere: no `Co-Authored-By` for a tool, no `Assisted-by`, no "Generated with" lines. The human contributor is the author and is responsible for the change.
 - Fill in the PR template: what and why, how it was verified (commands and results, light and dark screenshots for UI), platforms affected.
