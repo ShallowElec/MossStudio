@@ -15,6 +15,9 @@ import {
 import { agentPicturePath, prepareAgentPaths } from '@main/capabilities/agentPaths'
 import { MAX_PENDING_PER_SOURCE, createCapabilityApprovalQueue } from '@main/agentHub/approvalQueue'
 import * as supervisor from '@main/services/supervisor'
+import * as trainingRun from '@main/services/training/run'
+import { updateSettings } from '@main/services/settings'
+import { createBuiltinMainDispatcher } from '@main/capabilities'
 import { useTempDataRoot, useTempDir } from '@test/helpers/tempDir'
 
 const root = useTempDataRoot()
@@ -135,6 +138,26 @@ describe('capability dispatcher: who may run what', () => {
     const result = await dispatcher.execute({ name: 'training.runs.start', arguments: { id: 'tp-abcd1' }, source: 'external-agent' })
     expect(result.content).toContain('未获批准')
     expect(approval.mock.calls[0]![0].summary).toContain('recipe of tp-abcd1')
+  })
+})
+
+describe('the built-in dispatcher', () => {
+  it('shows the recipe and the computer of a training run in its approval, and starts nothing without a yes', async () => {
+    updateSettings({ trainingEnabled: true })
+    vi.spyOn(trainingRun, 'trainingGet').mockResolvedValue({
+      name: '阿明',
+      hostId: 'local',
+      recipe: { algo: 'lokr', dim: null, steps: 1200, batch: 2, resolution: 1024, overrides: '' },
+    } as never)
+    const start = vi.spyOn(trainingRun, 'trainingStart').mockResolvedValue({} as never)
+    const dispatcher = createBuiltinMainDispatcher()
+    const approval = vi.fn(async (_request: { summary: string }) => false)
+    dispatcher.requestApproval = approval
+    const result = await dispatcher.execute({ name: 'training.runs.start', arguments: { id: 'tp-aming' }, source: 'external-agent' })
+    expect(result.ok).toBe(false)
+    expect(approval.mock.calls[0]![0].summary).toContain('「阿明」在本机上训练：lokr · 1200 步 · batch 2 · 1024px')
+    expect(start).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
   })
 })
 
