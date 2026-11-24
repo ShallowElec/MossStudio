@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Events } from '@shared/channels'
-import type { CapabilityApprovalRequest, PendingCapabilityApproval } from '@shared/agentHub'
-
-/** How long a request waits for the person before it counts as rejected. MCP clients get a tool timeout longer than this. */
-export const APPROVAL_WAIT_MS = 120_000
+import { APPROVAL_WAIT_MS, type CapabilityApprovalRequest, type PendingCapabilityApproval } from '@shared/agentHub'
 
 /** Requests one caller may have waiting at once; more are rejected at once instead of piling up. */
 export const MAX_PENDING_PER_SOURCE = 5

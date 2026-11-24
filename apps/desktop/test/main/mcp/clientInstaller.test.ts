@@ -1,9 +1,9 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { APPROVAL_WAIT_MS } from '@main/agentHub/approvalQueue'
+import { APPROVAL_WAIT_MS } from '@shared/agentHub'
+import { CLIENT_TOOL_TIMEOUT_SEC } from '@shared/mcpClients'
 import {
-  CLIENT_TOOL_TIMEOUT_SEC,
   getMcpClientsStatus,
   installMcpClient,
   refreshMcpClientRegistrations,
@@ -77,6 +77,8 @@ function setup(clis: string[] = ['codex', 'claude', 'node'], registeredCodex?: R
     homeDir: home,
     env: { PATH: bin },
     platform: 'linux',
+    // Keeps a CI runner's own /usr/local/bin/node out of these tests.
+    systemDirs: [],
     stdioBridgePath: join(dir(), 'data', 'mcp', 'mossstudio-mcp-stdio.mjs'),
     discoveryPath: join(dir(), 'data', 'mcp-server.json'),
     execPath: '/opt/MossStudio/app-2.0.1/MossStudio',
@@ -153,13 +155,17 @@ describe('main/mcp/clientInstaller', () => {
     )
   })
 
-  it.each(['npm', 'scoop/shims', '.volta/bin'])('uses Windows %s when PATH lacks a usable client', async (subdir) => {
+  it.each(['npm', 'scoop/shims', 'AppData/Local/Volta/bin'])('uses Windows %s when PATH lacks a usable client', async (subdir) => {
     const e = setup([])
     const location = join(e.home, subdir)
     mkdirSync(location, { recursive: true })
     writeFileSync(join(location, 'claude.exe'), '')
     writeFileSync(join(e.bin, 'claude.bat'), '@echo off')
-    const options = { ...e.options, platform: 'win32' as const, env: { PATH: e.bin, APPDATA: e.home, PATHEXT: '.BAT;.EXE' } }
+    const options = {
+      ...e.options,
+      platform: 'win32' as const,
+      env: { PATH: e.bin, APPDATA: e.home, LOCALAPPDATA: join(e.home, 'AppData', 'Local'), PATHEXT: '.BAT;.EXE' },
+    }
     expect(await getMcpClientsStatus(options)).toContainEqual(
       expect.objectContaining({ id: 'claude-code', state: 'not_configured', installMode: 'auto' }),
     )
@@ -435,5 +441,17 @@ describe('main/mcp/clientInstaller', () => {
     await uninstallRecordedMcpClients(dataRoot, { ...env.options, recordPath: undefined })
     expect(env.calls.map((call) => basename(call.command))).toEqual(['claude'])
     expect(env.claudeServers()).toEqual({})
+  })
+
+  it('uninstalling the app also removes a registration made while the bridge ran from the bundled copy', async () => {
+    const env = setup()
+    const { stdioBridgePath: _stable, ...options } = env.options
+    const bundled = join(dir(), 'app-2.0.1', 'resources', 'tools', 'mcp', 'mossstudio-mcp-stdio.mjs')
+    await installMcpClient('codex', { ...options, stdioBridgePath: bundled })
+    await installMcpClient('claude-code', { ...options, stdioBridgePath: bundled })
+    await uninstallRecordedMcpClients(join(dir(), 'data'), { ...options, recordPath: undefined })
+    expect(env.codexEntry()).toBeUndefined()
+    expect(env.claudeServers()).toEqual({})
+    expect(JSON.parse(readFileSync(env.options.recordPath!, 'utf8'))).toEqual({})
   })
 })

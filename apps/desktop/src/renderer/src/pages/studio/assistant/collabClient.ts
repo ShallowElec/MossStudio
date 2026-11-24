@@ -1,4 +1,11 @@
-import { CLIENT_STATES, type BridgeLaunch, type McpClientId, type McpClientStatus, type ManagedClientId } from '@shared/mcpClients'
+import {
+  CLIENT_STATES,
+  CLIENT_TOOL_TIMEOUT_SEC,
+  type BridgeLaunch,
+  type McpClientId,
+  type McpClientStatus,
+  type ManagedClientId,
+} from '@shared/mcpClients'
 export type { McpClientStatus } from '@shared/mcpClients'
 import { Events, Ipc } from '@shared/channels'
 import type { AgentBackendInfo as HubBackendInfo, AgentConnectInput, AgentCreateSessionInput, AgentProject } from '@shared/agentHub'
@@ -483,7 +490,11 @@ export type McpConfigKind = 'all' | 'http' | 'stdio' | 'dsh'
 export function mcpConfigJson(connection: McpConnection, kind: McpConfigKind = 'all'): string {
   const http = { mossstudio: { url: connection.url, headers: { Authorization: `Bearer ${connection.token}` } } }
   if (kind === 'dsh')
-    return JSON.stringify({ serverName: 'mossstudio', transport: 'stdio', ...connection.bridge, toolCallTimeoutMs: 180_000 }, null, 2)
+    return JSON.stringify(
+      { serverName: 'mossstudio', transport: 'stdio', ...connection.bridge, toolCallTimeoutMs: CLIENT_TOOL_TIMEOUT_SEC * 1000 },
+      null,
+      2,
+    )
   const stdio = { 'mossstudio-stdio': connection.bridge }
   const servers = kind === 'http' ? http : kind === 'stdio' ? stdio : { ...http, ...stdio }
   return JSON.stringify({ mcpServers: servers }, null, 2)

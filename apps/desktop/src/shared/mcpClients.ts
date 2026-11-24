@@ -1,3 +1,8 @@
+import { APPROVAL_WAIT_MS } from './agentHub'
+
+/** Seconds a client waits for one tool call: longer than an approval waits, so a late approval never runs an abandoned call. */
+export const CLIENT_TOOL_TIMEOUT_SEC = Math.ceil(APPROVAL_WAIT_MS / 1000) + 60
+
 export type ManagedClientId = 'codex' | 'claude-code'
 export type McpClientId = ManagedClientId | 'dsh'
 export const CLIENT_STATES = [

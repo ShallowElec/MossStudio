@@ -1,4 +1,7 @@
 import type { ToolProfileId } from './capabilities'
+
+/** How long a request waits for the person before it counts as rejected. MCP clients get a tool timeout longer than this. */
+export const APPROVAL_WAIT_MS = 120_000
 interface AgentSessionBase {
   id: string
   title: string

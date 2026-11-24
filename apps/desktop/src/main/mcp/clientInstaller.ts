@@ -1,9 +1,8 @@
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join } from 'node:path'
-import { APPROVAL_WAIT_MS } from '../agentHub/approvalQueue'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import type { BridgeLaunch, ManagedClientId, McpClientStatus } from '@shared/mcpClients'
+import { CLIENT_TOOL_TIMEOUT_SEC, type BridgeLaunch, type ManagedClientId, type McpClientStatus } from '@shared/mcpClients'
 import { childEnv, cliLaunch, findCli } from '../lib/cliDiscovery'
 import { isNetworkPath } from '../lib/localPath'
 export type { McpClientId, McpClientStatus } from '@shared/mcpClients'
@@ -25,14 +24,14 @@ import { getMcpServerState } from './server'
 
 /** MCP server name MossStudio registers under in each client. */
 export const MCP_SERVER_NAME = 'mossstudio'
-/** Seconds a client waits for one tool call: longer than an approval waits, so a late approval never runs an abandoned call. */
-export const CLIENT_TOOL_TIMEOUT_SEC = Math.ceil(APPROVAL_WAIT_MS / 1000) + 60
 const CLI_TIMEOUT_MS = 20_000
 
 export interface McpClientInstallerOptions {
   homeDir?: string
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
+  /** Folders outside the home folder to look for CLIs in; see `findCli`. */
+  systemDirs?: readonly string[]
   stdioBridgePath?: string
   discoveryPath?: string
   execPath?: string
@@ -48,6 +47,7 @@ interface Resolved {
   home: string
   env: NodeJS.ProcessEnv
   platform: NodeJS.Platform
+  systemDirs?: readonly string[]
   stdioBridgePath: string
   discoveryPath: string
   execPath: string
@@ -65,6 +65,7 @@ function resolve(options: McpClientInstallerOptions = {}): Resolved {
     home: options.homeDir ?? homedir(),
     env,
     platform,
+    systemDirs: options.systemDirs,
     stdioBridgePath: options.stdioBridgePath ?? state!.stdioBridgePath,
     discoveryPath: options.discoveryPath ?? state!.discoveryPath,
     execPath: options.execPath ?? process.execPath,
@@ -72,7 +73,7 @@ function resolve(options: McpClientInstallerOptions = {}): Resolved {
     runCli:
       options.runCli ??
       (async (command, args) => {
-        const launch = cliLaunch(command, args, { platform, env, home: options.homeDir }, options.execPath)
+        const launch = cliLaunch(command, args, { platform, env, home: options.homeDir, systemDirs: options.systemDirs }, options.execPath)
         // A Windows shim may resolve to this app's own binary, which runs the script only as node.
         return run(launch.command, launch.args, {
           timeoutMs: options.cliTimeoutMs ?? CLI_TIMEOUT_MS,
@@ -156,12 +157,19 @@ async function readEntry(
   return transport === undefined ? undefined : { transport }
 }
 
+/** The bridge this instance runs, or the bundled copy a record kept when copying it to `<dataRoot>/mcp/` had failed. */
+function ownBridge(args: unknown, r: Resolved): boolean {
+  if (isDeepStrictEqual(args, [r.stdioBridgePath])) return true
+  const [script] = Array.isArray(args) && args.length === 1 ? (args as unknown[]) : []
+  return typeof script === 'string' && isAbsolute(script) && basename(script) === basename(r.stdioBridgePath)
+}
+
 function matches(entry: unknown, launch: BridgeLaunch | undefined, r: Resolved): boolean {
   return (
     !!launch &&
     typeof launch.command === 'string' &&
     (launch.command === 'node' || isAbsolute(launch.command)) &&
-    isDeepStrictEqual(launch.args, [r.stdioBridgePath]) &&
+    ownBridge(launch.args, r) &&
     launch.env?.MOSSSTUDIO_MCP_DISCOVERY === r.discoveryPath &&
     object(entry) &&
     (entry.type === undefined || entry.type === 'stdio') &&
@@ -268,7 +276,7 @@ async function change(
   else records[id] = launch
   writeRecords(r.recordPath, records)
   if (!remove && id === 'codex' && !setCodexToolTimeout(codexConfigPath(r), CLIENT_TOOL_TIMEOUT_SEC))
-    throw new Error('Codex 已配置，请在客户端将工具超时设置为 180 秒')
+    throw new Error(`Codex 已配置，请在客户端将工具超时设置为 ${CLIENT_TOOL_TIMEOUT_SEC} 秒`)
   return next
 }
 
