@@ -60,10 +60,10 @@ export function ImageEditDialog({ path, project, onClose }: { path: string; proj
       title="外接重绘"
       footer={
         <>
-          <Button tone="ghost" onClick={onClose}>
+          <Button tone="ghost" size="md" onClick={onClose}>
             取消
           </Button>
-          <Button tone="primary" disabled={busy || !size || !c || !prompt.trim()} onClick={() => void run()}>
+          <Button tone="primary" size="md" disabled={busy || !size || !c || !prompt.trim()} onClick={() => void run()}>
             {busy ? '正在重绘…' : '发送并重绘'}
           </Button>
         </>

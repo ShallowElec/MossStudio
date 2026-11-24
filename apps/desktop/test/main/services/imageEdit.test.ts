@@ -318,7 +318,7 @@ describe('external redraw boundaries', () => {
     expect(wire.aborted).toBe(true)
     expect(readdirSync(projectAssetsDir(input.projectId))).toEqual(['source.png'])
   })
-  it('cancels a dialog run in flight and saves nothing, but only while the switch is on', async () => {
+  it('cancels a dialog run in flight, even under a reused id, and saves nothing, but only while the switch is on', async () => {
     const { input } = fixture()
     const runId = '7f9e2c41-5d3a-4b8e-9c1f-2a6b8d4e0f13'
     let markSent!: (wire: AbortSignal) => void, respond!: () => void
@@ -344,7 +344,10 @@ describe('external redraw boundaries', () => {
         },
       })
     }) as unknown as typeof https.request)
+    // An earlier run under the same id ends first; it must not unregister the live one.
+    const earlier = edit.runDialogImageEdit({ ...input, projectId: 'missing', runId })
     const running = edit.runDialogImageEdit({ ...input, runId })
+    await expect(earlier).rejects.toThrow('项目位置已改变')
     const wire = await sent
     edit.cancelImageEdit(runId)
     respond()

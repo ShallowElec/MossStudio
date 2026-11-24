@@ -115,7 +115,8 @@ export async function runDialogImageEdit({ runId, ...input }: z.infer<typeof sch
   try {
     return await runImageEdit(input, undefined, controller.signal)
   } finally {
-    if (runId) dialogRuns.delete(runId)
+    // A reused runId may already name a newer run; only remove this one's entry.
+    if (runId && dialogRuns.get(runId) === controller) dialogRuns.delete(runId)
   }
 }
 export function cancelImageEdit(runId: string) {
