@@ -90,6 +90,8 @@ export interface MockAgentsState {
   approvals: PendingCapabilityApproval[]
   clients: McpClientStatus[]
   workerLoras: Array<{ id: string; name: string; sizeBytes: number; registered: boolean; triggers?: string[] }>
+  /** While set, every agent-hub:send fails with this message, the way the ACP driver reports a dropped Agent. */
+  sendError?: string
   workerModels: Array<{
     id: string
     name: string

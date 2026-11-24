@@ -137,6 +137,30 @@ describe('外部 Agent on', () => {
     await expect.poll(() => dialog.locator('[data-mcp-client="codex"]').textContent()).toContain('已配置')
   })
 
+  it('offers one click back when an Agent’s connection drops, and stops saying it is there', async () => {
+    const page = await openStudio(app, 'externalAgents')
+    await openCollab(page)
+    const panel = page.locator('[data-collab-panel]')
+    const status = panel.locator('[data-collab-status]')
+    await expect.poll(() => status.getAttribute('data-activity')).toBe('idle')
+    expect(await panel.locator('[data-collab-reconnect]').count()).toBe(0)
+
+    // The Agent's process exits: the next send fails, and the hub now says it is not connected.
+    await page.evaluate(() => {
+      window.__mock.state.agents.sendError = 'Agent 进程已退出'
+      window.__mock.state.agents.backends = window.__mock.state.agents.backends.map((item) => ({ ...item, connected: false }))
+    })
+    await panel.getByLabel('发给 Codex 的消息').fill('你好')
+    await panel.getByRole('button', { name: '发给 Codex', exact: true }).click()
+    const notice = panel.locator('[data-notice="warn"]')
+    await expect.poll(() => notice.textContent()).toContain('Agent 进程已退出')
+    await expect.poll(() => status.getAttribute('data-activity')).toBe('offline')
+
+    await notice.locator('[data-collab-reconnect]').click()
+    await expect.poll(() => app.calls('agent-hub:connect')).toEqual([{ backendId: 'codex-acp' }])
+    await expect.poll(() => panel.locator('[data-notice="warn"]').count()).toBe(0)
+  })
+
   it('an Agent’s request can be answered from any page', async () => {
     const page = await app.open({ scenario: 'externalAgents', route: '/library' })
     const overlay = page.locator('[data-global-approval-overlay]')
