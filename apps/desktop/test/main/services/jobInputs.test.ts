@@ -254,6 +254,11 @@ describe("validateJobInputs: limits (the engine's, test_protocol.py)", () => {
     ['cfg truncation above 1', { sampling: { cfgTruncation: 1.5 } }, 'CFG 截断需在 0 到 1 之间'],
     ['empty path', { initImage: { path: '  ', strength: 0.5 } }, '图片路径不能为空'],
     ['hires below 64', { sampling: { hires: { width: 48, height: 1024 } } }, '高清修复尺寸至少 64'],
+    [
+      'hires over the pixel budget',
+      { sampling: { hires: { width: 4096, height: 4096 } } },
+      '高清修复总像素不能超过 4,200,000，请缩小高清修复尺寸',
+    ],
     ['NUL in a path', { references: { paths: ['/a\0b.png'] } }, '图片路径不能包含 NUL'],
   ]
   for (const [label, source, message] of cases) {

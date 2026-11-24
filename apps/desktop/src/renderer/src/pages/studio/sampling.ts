@@ -147,16 +147,17 @@ export function outputSize(
   canvas: Pick<ProjectCanvas, 'width' | 'height' | 'sampling'> & { baseSize?: { width: number; height: number } },
 ): { width: number; height: number } {
   const hires = canvas.sampling?.hires
-  return hires ? { width: hires.width, height: hires.height } : generationSize(canvas)
+  // A project saved before the budget can hold a larger target; it runs, and shows, fitted.
+  return hires ? withinBudget(hires) : generationSize(canvas)
 }
 
 export function hiresChoice(canvas: Pick<ProjectCanvas, 'width' | 'height' | 'sampling'>): HiresChoice {
-  const hires = canvas.sampling?.hires
-  if (!hires) return 'off'
+  if (!canvas.sampling?.hires) return 'off'
+  const target = outputSize(canvas)
   for (const scale of HIRES_SCALES) {
     if (!hiresScaleFits(canvas, scale)) continue
     const size = hiresSize(canvas, scale)
-    if (size.width === hires.width && size.height === hires.height) return String(scale) as HiresChoice
+    if (size.width === target.width && size.height === target.height) return String(scale) as HiresChoice
   }
   return 'custom'
 }
@@ -170,7 +171,9 @@ export function withHiresScale<T extends Pick<ProjectCanvas, 'width' | 'height' 
 }
 
 export function withHiresPatch<T extends Pick<ProjectCanvas, 'width' | 'height' | 'sampling'>>(canvas: T, patch: Partial<JobHires>): T {
-  const previous = canvas.sampling?.hires ?? { ...hiresSize(canvas, 2), strength: HIRES_STRENGTH_DEFAULT }
+  const current = canvas.sampling?.hires
+  // Edit the target as shown: one edge typed into an over-budget saved target keeps the other fitted.
+  const previous = current ? { ...current, ...outputSize(canvas) } : { ...hiresSize(canvas, 2), strength: HIRES_STRENGTH_DEFAULT }
   const hires: JobHires = { ...previous, ...patch }
   if (hires.steps === undefined) delete hires.steps
   if (hires.strength === undefined) delete hires.strength
@@ -202,7 +205,9 @@ export function samplingSummary(canvas: Pick<ProjectCanvas, 'width' | 'height' |
   if (sampling.sampler) parts.push(SAMPLER_NAMES[sampling.sampler] ?? sampling.sampler)
   if (sampling.scheduler) parts.push(SCHEDULER_NAMES[sampling.scheduler] ?? sampling.scheduler)
   const choice = hiresChoice(canvas)
-  if (choice === 'custom' && sampling.hires) parts.push(`高清修复 ${sampling.hires.width}×${sampling.hires.height}`)
-  else if (choice !== 'off') parts.push(`高清修复 ×${choice}`)
+  if (choice === 'custom') {
+    const target = outputSize(canvas)
+    parts.push(`高清修复 ${target.width}×${target.height}`)
+  } else if (choice !== 'off') parts.push(`高清修复 ×${choice}`)
   return parts.join(' · ')
 }

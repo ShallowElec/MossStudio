@@ -162,6 +162,10 @@ export const jobInputsSchema = z
       }
       kinds.add(image.kind)
     })
+    // Here, not in samplingSchema: a project saved before the budget still opens, and its job is fitted.
+    if (value.sampling?.hires && !withinPixelBudget(value.sampling.hires)) {
+      ctx.addIssue({ code: 'custom', path: ['sampling', 'hires'], message: '高清修复总像素不能超过 4,200,000，请缩小高清修复尺寸' })
+    }
   })
 
 const projectCanvasSchema = z.object({
