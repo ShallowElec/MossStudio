@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectCanvas } from '@shared/types'
 import { cliEngineFeatures } from '@shared/cliEngine'
+import { MAX_PIXELS } from '@shared/imageGeometry'
 import { inputStillDrawing, resolveJobInputs, type JobInputContext } from '@renderer/pages/studio/jobInputs'
 import { controlAdapterFixture, engineFeaturesFixture } from '@test/mocks/backend'
 import { canvas } from './fixtures'
@@ -204,6 +205,21 @@ describe('studio/jobInputs resolution', () => {
       context(),
     )
     expect(rerun.size).toEqual({ width: 1024, height: 768 })
+  })
+
+  it('fits a 高清修复 target saved over the engine pixel budget, keeping its shape', () => {
+    const square = resolveJobInputs(
+      target({ width: 2048, height: 2048, sampling: { hires: { width: 4096, height: 4096, steps: 12, strength: 0.4 } } }),
+      context(),
+    )
+    expect(square.size).toEqual({ width: 2048, height: 2048 })
+    expect(square.output).toEqual({ width: 2048, height: 2048 })
+    expect(square.params.sampling).toEqual({ hires: { width: 2048, height: 2048, steps: 12, strength: 0.4 } })
+    const wide = resolveJobInputs(target({ width: 2048, height: 1024, sampling: { hires: { width: 4096, height: 2048 } } }), context())
+    const hires = wide.params.sampling!.hires!
+    expect(hires.width * hires.height).toBeLessThanOrEqual(MAX_PIXELS)
+    expect(hires.width / hires.height).toBeCloseTo(2, 1)
+    expect(wide.output).toEqual({ width: hires.width, height: hires.height })
   })
 })
 

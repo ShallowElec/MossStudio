@@ -54,3 +54,19 @@ it('lets a Worker canvas reset saved enum choices to default when its capabiliti
     act(() => root.unmount())
   }
 })
+
+it('shows a 高清修复 target saved over the pixel budget at the fitted size the job uses', () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const card = canvas({ width: 1024, height: 1024, sampling: { hires: { width: 4096, height: 4096 } } })
+  const host = document.createElement('div')
+  const root = createRoot(host)
+  try {
+    act(() =>
+      root.render(createElement(SamplingSection, { canvas: card, features: engineFeaturesFixture(), worker: false, onChange: vi.fn() })),
+    )
+    expect(host.textContent).toContain('输出 2048 × 2048')
+    expect(host.textContent).not.toContain('4096')
+  } finally {
+    act(() => root.unmount())
+  }
+})
