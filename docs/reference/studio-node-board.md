@@ -16,7 +16,7 @@ Paths are relative to `apps/desktop/src/`; `studio/` stands for `renderer/src/pa
 | --- | --- | --- |
 | Title bar | The project switcher and the 助手 toggle | `studio/ProjectSwitcher.tsx`, `studio/StudioPage.tsx` (`TitlebarPortal`) |
 | Left sidebar 生成设置 | The selected card's settings: description, one line for 模型, 尺寸 and LoRA, 质量, 高级 (种子, 运行位置, 显卡, sampling), 输入, the regions list, and the 生成 button with its blockers | `studio/ParamsPanel.tsx`, `studio/InputsSection.tsx`, `studio/SamplingSection.tsx`, `studio/InspectorPanel.tsx` |
-| Board 画布 | Cards, wires, the floating toolbar (选择 V, 平移 H, 撤销, 重做, zoom 25 to 300 %, 适应窗口 F, 小地图), the minimap, the bar over picked cards and the right-click menus | `studio/Board.tsx`, `studio/Toolbar.tsx`, `studio/Minimap.tsx`, `studio/BoardMenu.tsx` |
+| Board 画布 | Cards, wires, the floating toolbar (工具与节点 while 工具与节点管理器 is on in 设置 › 功能, 选择 V, 平移 H, 撤销, 重做, zoom 25 to 300 %, 适应窗口 F, 小地图), the minimap, the bar over picked cards and the right-click menus | `studio/Board.tsx`, `studio/Toolbar.tsx`, `studio/ToolHub.tsx`, `studio/Minimap.tsx`, `studio/BoardMenu.tsx` |
 | Right sidebar 助手 | The assistant, hidden until toggled and kept mounted so a running chat survives; see [studio-assistant.md](/docs/reference/studio-assistant.md) | `studio/assistant/Assistant.tsx` |
 
 `studio/useStudioProject.ts` loads and saves the project; edits autosave after 1.2 s (`AUTOSAVE_DELAY_MS`). Keys: Ctrl+Enter generates, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes (section 13), V / H / M pick a tool, Space held pans, F fits every card, Ctrl+A picks every card, Esc keeps only the selected card, and Delete removes the selected region or wire, else the picked cards. Ctrl and ⌘ are the same key everywhere.

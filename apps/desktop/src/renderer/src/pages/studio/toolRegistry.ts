@@ -11,7 +11,8 @@ export interface ToolContext {
   /** Undefined when GBC is off; null when installed and ready. */
   parseBlocker: string | null | undefined
 }
-export type Availability = { kind: 'hidden' } | { kind: 'disabled'; reason: string } | { kind: 'ready' }
+/** `hint` on a ready tool says what stands in the way; choosing it then leads to the fix. */
+export type Availability = { kind: 'hidden' } | { kind: 'disabled'; reason: string } | { kind: 'ready'; hint?: string }
 export type ToolGroup = 'node' | 'recipe' | 'picture'
 export interface BoardAction {
   actionId: string

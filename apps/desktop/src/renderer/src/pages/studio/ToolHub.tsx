@@ -16,8 +16,8 @@ export function ToolHub({ context, execute }: { context: ToolContext; execute: (
       }}
       onWheelCapture={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
-        // Shortcuts such as Delete must not reach the board behind an open picker.
-        if (open) event.stopPropagation()
+        // Delete and Backspace must not remove cards behind an open picker; Ctrl+Z, Ctrl+S and the rest still reach the board.
+        if (open && (event.key === 'Delete' || event.key === 'Backspace')) event.stopPropagation()
       }}
     >
       <Popover
@@ -38,24 +38,25 @@ export function ToolHub({ context, execute }: { context: ToolContext; execute: (
             return items.length ? (
               <div key={group} role="group" aria-label={groups[group]}>
                 <FieldLabel className="px-2.5 pt-2">{groups[group]}</FieldLabel>
-                {items.map(({ tool, state }) => (
-                  <MenuItem
-                    key={tool.actionId}
-                    title={state.kind === 'disabled' ? state.reason : tool.description}
-                    disabled={state.kind === 'disabled'}
-                    onSelect={() => {
-                      if (boardTools.invoke(tool.actionId, context, execute)) close()
-                    }}
-                  >
-                    <span className="flex items-center gap-2">
-                      <tool.icon className="size-4" strokeWidth={1.6} />
-                      {tool.label}
-                    </span>
-                    {state.kind === 'disabled' && (
-                      <span className="block whitespace-normal pl-6 text-caption text-ink-2">{state.reason}</span>
-                    )}
-                  </MenuItem>
-                ))}
+                {items.map(({ tool, state }) => {
+                  const note = state.kind === 'disabled' ? state.reason : state.kind === 'ready' ? state.hint : undefined
+                  return (
+                    <MenuItem
+                      key={tool.actionId}
+                      title={note ?? tool.description}
+                      hint={note}
+                      disabled={state.kind === 'disabled'}
+                      onSelect={() => {
+                        if (boardTools.invoke(tool.actionId, context, execute)) close()
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <tool.icon className="size-4" strokeWidth={1.6} />
+                        {tool.label}
+                      </span>
+                    </MenuItem>
+                  )
+                })}
               </div>
             ) : null
           })
