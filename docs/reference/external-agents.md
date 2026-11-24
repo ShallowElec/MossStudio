@@ -1,7 +1,7 @@
 ---
 status: current
-last-verified: 2026-11-21 (e72b798)
-code: apps/desktop/src/shared/capabilities/, apps/desktop/src/main/capabilities/, apps/desktop/src/main/mcp/, apps/desktop/src/main/agentHub/, apps/desktop/src/main/externalAgents.ts, apps/desktop/src/main/services/imageEdit.ts, apps/desktop/src/renderer/src/lib/capabilities/, apps/desktop/src/renderer/src/lib/agentTools.ts, apps/desktop/src/renderer/src/pages/studio/studioCapabilities.ts, apps/desktop/src/renderer/src/pages/studio/assistant/, tools/mcp/mossstudio-mcp-stdio.mjs
+last-verified: 2026-11-24 (e07751d)
+code: apps/desktop/src/shared/capabilities/, apps/desktop/src/main/capabilities/, apps/desktop/src/main/mcp/, apps/desktop/src/main/agentHub/, apps/desktop/src/main/externalAgents.ts, apps/desktop/src/main/services/imageEdit.ts, apps/desktop/src/renderer/src/lib/capabilities/, apps/desktop/src/renderer/src/lib/agentTools.ts, apps/desktop/src/renderer/src/pages/studio/studioCapabilities.ts, apps/desktop/src/renderer/src/pages/studio/assistant/, tools/mcp/mossstudio-mcp-stdio.mjs, apps/desktop/src/main/lib/cliDiscovery.ts
 ---
 
 # External Agents
@@ -27,7 +27,7 @@ Paths are relative to `apps/desktop/src/`.
 
 `projectCapabilities` (`profiles.ts`) projects a toolset per profile: `compact` (the packs in `COMPACT_PROFILE_PACKS`), `moss-standard` and `moss-layout` (`MOSS_STANDARD_PROFILE_PACKS`, `MOSS_LAYOUT_PROFILE_PACKS`), `atomic` (everything enabled), `proposal-only` (no mutating action) and `custom` (chosen packs).
 
-Two packs carry only a guide and no actions: `skill.moss.standard` (描述写法指南) and `skill.moss.layout` (分区构图指南), in `appPacks.ts`. The active Skill includes a guide only when its pack is named in the enabled packs: by `moss-standard`, by `moss-layout` (both guides), or ticked in `custom`. `compact`, `atomic` and `proposal-only` never include them (`GUIDE_ONLY_PACKS` in `registry.ts`). While one is on, the 协同 panel also adds a short summary of it to each message (`toolProfileLine` in `CollabToolbar.tsx`). The built-in 助手 does not use either.
+Two packs carry only a guide and no actions: `skill.moss.standard` (描述写法指南) and `skill.moss.layout` (分区构图指南), in `appPacks.ts`. The active Skill includes a guide only when its pack is named in the enabled packs: by `moss-standard`, by `moss-layout` (both guides), or ticked in `custom`. `compact`, `atomic` and `proposal-only` never include them (`GUIDE_ONLY_PACKS` in `registry.ts`). While one is on, the 协同 panel also adds a short summary of it to each message (`toolProfileLine` in `CollabToolbar.tsx`). The panel's own MOSS Standard and MOSS Layout choices leave out `remote.hosts` (`MOSS_STANDARD_PACKS`, `MOSS_LAYOUT_PACKS`). The built-in 助手 does not use either.
 
 ## 3. The MCP server
 
@@ -42,7 +42,7 @@ Two packs carry only a guide and no actions: `skill.moss.standard` (描述写法
 | A call still waiting when the client hangs up is aborted: its approval is dropped and nothing runs | `res.once('close')` |
 | Wire names encode dots as `__` (`studio__cards__create`) | `toMcpToolName` |
 
-Resources: the active Skill, the promptcraft and layout guides, the workbench context and `mossstudio://audit/recent` (external Agents' calls only). The two guides in `shared/capabilities/officialSkills.ts` are adapted from the MOSS-Image prompt-enhancer skill (Apache License 2.0) and say so. `composeOfficialGuide` adds each guide to the full guide once, after the active Skill, whether or not its pack is on.
+Resources (`MCP_RESOURCE_URIS`): the active Skill, the promptcraft and layout guides, the full guide, the workbench context and `mossstudio://audit/recent` (external Agents' calls only). The two guides in `shared/capabilities/officialSkills.ts` are adapted from the MOSS-Image prompt-enhancer skill (Apache License 2.0) and say so. `composeOfficialGuide` adds each guide to the full guide once, after the active Skill, whether or not its pack is on.
 
 ## 4. The dispatcher
 
@@ -59,7 +59,7 @@ Resources: the active Skill, the promptcraft and layout guides, the workbench co
 
 Every call is audited (`main/capabilities/audit.ts`): one JSON line in `<dataRoot>/logs/capabilities.jsonl`, written off the main thread, rotated to `.1` at 2 MiB, with summaries and errors capped at 200 characters. After a restart the last 256 KiB are read back.
 
-Actions an external Agent may only run after a yes include deleting projects, series, trainings and models, moving 作品 to the trash, installing and downloading models, saving a 漫画, changing or stopping a training, writing captions, cancelling a job, switching 运行位置, every 看图拆区域 action and `image.edit.run`, which uploads a project or 作品 picture to a 外接重绘 channel (`policyFloor` in `shared/capabilities/appPacks.ts`). Its approval names the channel's origin and model; the upload is refused when either switch, the channel or the picture changed after the yes (`bindImageEdit` and `runImageEdit` in `main/services/imageEdit.ts`). Job ids are checked against `^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$` and must name a job the supervisor knows before any log or review file is read.
+Actions an external Agent may only run after a yes include deleting projects, series, trainings and models, moving 作品 to the trash, installing models and starting or cancelling their downloads, saving a 漫画, starting, changing or stopping a training and choosing its step, writing or generating captions, cancelling a job, switching 运行位置, registering a LoRA on a Worker host, reading a picture or starting or cancelling a job of 看图拆区域, and `image.edit.run`, which uploads a project or 作品 picture to a 外接重绘 channel (`policyFloor` in `shared/capabilities/appPacks.ts`). Its approval names the channel's origin and model; the upload is refused when either switch, the channel or the picture changed after the yes (`bindImageEdit` and `runImageEdit` in `main/services/imageEdit.ts`). Job ids are checked against `^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$` and must name a job the supervisor knows before any log or review file is read.
 
 ## 5. In the Studio
 
@@ -73,7 +73,7 @@ Each external call is one undo step, 外部 Agent 的修改, also for what it ch
 
 ## 7. Connecting a client
 
-`main/mcp/clientInstaller.ts` registers the stdio bridge (`tools/mcp/mossstudio-mcp-stdio.mjs`, copied to `<dataRoot>/mcp/` so it outlives updates) with the clients' own CLIs, run without a shell (`.cmd` shims through `resolveAcpLaunch`):
+`main/mcp/clientInstaller.ts` registers the stdio bridge (`tools/mcp/mossstudio-mcp-stdio.mjs`, copied to `<dataRoot>/mcp/` so it outlives updates) with the clients' own CLIs, found on `PATH` and then in the usual install folders (`findCli` in `main/lib/cliDiscovery.ts`) and run without a shell (`.cmd` shims through `resolveAcpLaunch`):
 
 | Client | Register | Remove | Tool timeout |
 | --- | --- | --- | --- |
@@ -88,7 +88,7 @@ The bridge forwards each JSON-RPC line to the server; requests after `initialize
 
 `pages/studio/assistant/CollabPanel.tsx`, opened with 协同 in the 助手's header, talks to an ACP Agent (`main/agentHub/acpDriver.ts`): Codex ACP, or a command the person enters; or to DSH Desktop (below). `session/new` and `session/load` attach the MCP server (HTTP when the Agent supports it, else the stdio bridge). An Agent that advertises `loadSession` and `sessionCapabilities.list` keeps its conversations across a restart: they are listed with `session/list` and loaded again on first use, history replayed without being streamed as new text. For any other Agent a project's conversation list lasts for this run only (`setSessionsResumable` in `sessionBindings.ts`). A turn that streams nothing for 10 minutes is cancelled. Pictures go to the Agent inline in the prompt; nothing is written to disk.
 
-Codex ACP is the default for someone who never picked an Agent; DSH Desktop is the default only when Codex ACP is not installed and DSH Desktop is running (`backends` in `main/agentHub/hub.ts`).
+Codex ACP is the default for someone who never picked an Agent; DSH Desktop is the default only when Codex ACP is not installed and DSH Desktop is running (`backends` in `main/agentHub/hub.ts`, in the order of `main/agentHub/index.ts`).
 
 ### DSH Desktop
 
@@ -98,9 +98,9 @@ Codex ACP is the default for someone who never picked an Agent; DSH Desktop is t
 | --- | --- | --- |
 | Find the app | Windows: `powershell.exe` (`Get-Process`, `Get-NetTCPConnection`). macOS and Linux: `ps -A -o pid=,comm=`. On Linux, where `comm` is cut to 15 characters, the name is confirmed with `/proc/<pid>/exe` (a ` (deleted)` suffix left by an upgrade is ignored); the listeners are then read without starting a process, from `/proc/net/tcp` and `/proc/net/tcp6` matched to the app's sockets in `/proc/<pid>/fd`. macOS, and Linux when `/proc/net` cannot be read: `lsof` on the app's own pids | No shell, 6-second timeout, ended on disconnect (`dshDiscovery.ts`). Only listeners on `127.0.0.1` or `::1` count |
 | Pick the pairing address | The address the person pastes, else `MOSSSTUDIO_DSH_PAIRING_URL`, else `<dataRoot>/dsh-desktop-live.json` (`{ version: 1, pid, pairingUrl }`) | The file is used only when it is a regular file of at most 4 KiB with one link, not a symlink or on a network path, on macOS and Linux owned by this user with mode `0600` or stricter, unchanged between check and read, and its `pid` and origin match a found listener (`pairingFor`) |
-| Pair | `GET /connect` on the found listener, then one WebSocket (`/api/remote.mux`) and `POST /api/<method>` calls | The address must be `http://127.0.0.1`, `[::1]` or `localhost` with a `token`, and belong to a found listener (`pairDesktop` in `dshPeer.ts`). Redirects are not followed; replies are capped at 16 MiB; pairing and calls time out after 15 seconds |
+| Pair | `GET /connect` on the found listener, then one WebSocket (`/api/remote.mux`) and `POST /api/<method>` calls | The address must be `http://127.0.0.1`, `[::1]` or `localhost` with a `token`, and belong to a found listener (`pairDesktop` in `dshPeer.ts`). Redirects are not followed; replies are capped at 16 MiB; `/connect` and each call time out after 15 seconds, the WebSocket handshake and a stream's first reply after 10 |
 
-Conversations are grouped by DSH workspace (`agent-hub:projects`). After a connection drops, the driver looks for the app again at most every 10 seconds and pairs again by itself unless the person pasted the address or disconnected. Pictures in its messages are shown only when they are inline PNG, JPEG or WebP; main decodes and checks each one once and keeps its hash, since the panel polls the same history every few seconds. The panel never loads an image URL or path from a reply (`replyImages` in `CollabPanel.tsx`).
+Conversations are grouped by DSH workspace (`agent-hub:projects`); a new conversation names a DSH workspace or a folder, not both, and only DSH Desktop takes a workspace (`createSession` in `hub.ts`). After a connection drops, the driver looks for the app again at most every 10 seconds and pairs again by itself unless the person pasted the address or disconnected. Pictures in its messages are shown only when they are inline PNG, JPEG or WebP; main decodes and checks each one once and keeps its hash, since the panel polls the same history every few seconds. The panel never loads an image URL or path from a reply (`replyImages` in `CollabPanel.tsx`).
 
 ## 9. Tests
 

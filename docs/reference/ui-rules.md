@@ -1,3 +1,9 @@
+---
+status: current
+last-verified: 2026-11-24 (e07751d)
+code: apps/desktop/src/renderer/src/components/, apps/desktop/src/renderer/src/lib/format.ts, apps/desktop/src/renderer/src/styles.css, apps/desktop/e2e/support/audit.browser.js
+---
+
 # UI rules
 
 How MossStudio screens are built, so the same kind of content and the same action look the same everywhere. Every rule here can be checked in code review. Paths are relative to `apps/desktop/src/renderer/src`.
@@ -25,8 +31,12 @@ The visual system is fixed: flat and quiet, areas told apart by lighter and dark
 | Loading | `LoadingRow` (spinner + "正在读取…" or a label) | `components/ui.tsx` |
 | Nothing here yet | `EmptyState` (`size="page"` or `"section"`) | `components/ui.tsx` |
 | Status label | `Pill` | `components/ui.tsx` |
-| Menus and pickers | `Popover` + `MenuItem` | `components/common/Popover.tsx` |
+| Menus and pickers | `Popover` + `MenuItem` (`hint` for a quiet value on the right; `title` says why a disabled item is off) | `components/common/Popover.tsx` |
+| A few mutually exclusive choices | `Segmented`: up to five in one row; more wrap into a grid through `className`, as 尺寸's eight do | `components/ui.tsx` |
+| Tabs across a page | `Tabs` | `components/ui.tsx` |
+| A dialog or a side sheet | `Modal` / `Sheet`; they animate in and out (`useMotionPresence`), so keep them mounted and drive `open` | `components/ui.tsx`, `components/motion.tsx` |
 | Confirming a destructive action | `ConfirmDialog` | `components/ui.tsx` |
+| A picture that opens larger | `PreviewButton`, or `openImagePreview` with a `gallery`; one `ImageLightbox` in `App.tsx` shows it with zoom and copy | `components/common/ImageLightbox.tsx` |
 | Joining classes | `cn` (tailwind-merge: a later class wins) | `components/cn.ts` |
 
 Checks: no hand-built warning boxes (`bg-warn-soft` / `bg-danger-soft` outside `Notice` and `Pill`); no `ProgressBar value={100}` standing in for "busy"; no `h-[NNpx]` / `h-6` / `h-7` overrides on `Button` (use a size).
@@ -37,7 +47,7 @@ Use only these levels. Do not hand-build a heading with `text-* font-*`.
 
 | Level | Look | Comes from |
 | --- | --- | --- |
-| Screen title | `text-title` semibold ink (`text-display` only on first-run setup) | `PageHeader` |
+| Screen title | `text-title` semibold ink (`text-display` only on first-use screens: `/setup`, the installer window, 训练's start screens) | `PageHeader` |
 | Dialog / sheet / popover title | `text-section` semibold ink | `Modal`, `Sheet` |
 | Section | `text-ui` semibold ink-2 | `Section` |
 | Label of a field or block | `text-caption` medium ink-2 | `FieldLabel`, `Field`, `PromptBlock` |
@@ -78,7 +88,7 @@ Recurring actions:
 ## 5. Status
 
 - `Tag` is not a state: it names what something is (INT8, 单文件). State is a `Pill`.
-- `Pill` tones: `neutral` (default, no state), `accent` (selected / in use), `accent-strong` (the same, solid, for a count on a primary button such as 生成's 排队 N), `ok` (ready), `warn` (needs attention, partly done), `danger` (failed, blocked). Use these names, not the aliases `blue` / `amber` / `red`.
+- `Pill` tones: `neutral` (default, no state), `accent` (selected / in use), `accent-strong` (the same, solid, for a count on a primary button such as 生成's 排队 N), `ok` (ready), `warn` (needs attention, partly done), `danger` (failed, blocked).
 - Same state, same form: a list shows a state either as a `Pill` or as a `StatusDot` with text, the same way on every row.
 - In progress is `accent` (a `ProgressBar` or an accent Pill), for downloads, installs, generation and training alike.
 
@@ -93,6 +103,7 @@ Format through `lib/format.ts`, never inline:
 | Recent moment | `relative` | 刚刚 / 5 分钟前 / 3 小时前 / 2 天前, then the date |
 | Size on disk | `bytes` | 858 MB |
 | Picture size | `dimensions` | 1024 × 1024 |
+| Pixel count | `pixelCount` | 约 105 万像素 |
 | Version | `version` | 1.2.0 (no "v") |
 | Strength 0–1 | `strength(v, 'share')` | 60% |
 | Weight (LoRA, control) | `strength(v, 'weight')` | 0.8; unset is 默认 |
