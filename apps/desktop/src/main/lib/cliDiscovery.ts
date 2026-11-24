@@ -49,10 +49,9 @@ export function findCli(name: string, { home = homedir(), env = process.env, pla
   const dirs = (env.PATH ?? env.Path ?? '').split(windows ? ';' : delimiter).map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'))
   dirs.push(
     ...(windows
-      ? [env.APPDATA && join(env.APPDATA, 'npm'), join(home, 'scoop', 'shims')]
-      : [join(home, '.local', 'bin'), '/opt/homebrew/bin', join(home, '.npm-global', 'bin')]
+      ? [env.APPDATA && join(env.APPDATA, 'npm'), join(home, 'scoop', 'shims'), env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Volta', 'bin')]
+      : [join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global', 'bin'), join(home, '.volta', 'bin')]
     ).filter((d): d is string => !!d),
-    join(home, '.volta', 'bin'),
   )
   if (windows) dirs.push(join(env.USERPROFILE || home, '.local', 'bin'))
   const extensions =
