@@ -39,6 +39,17 @@ describe('collab model picker grouping', () => {
     expect(new Set(choices.map((choice) => choice.value)).size).toBe(2)
   })
 
+  it('gives every choice a printable value, distinct even when provider and id read the same', () => {
+    const choices = modelGroups([
+      { id: 'x/y', label: 'plain' },
+      { id: 'y', label: 'nested', provider: 'x' },
+      { id: 'y', label: 'again', provider: 'x' },
+    ]).flatMap((group) => group.choices)
+    expect(new Set(choices.map((choice) => choice.value)).size).toBe(3)
+    // Printable ASCII only: a NUL or other control character made the DOM unreadable in devtools.
+    for (const choice of choices) expect(choice.value).toMatch(/^[ -~]+$/)
+  })
+
   it('offers nothing for an Agent that lists no models', () => {
     expect(modelGroups([])).toEqual([])
   })
