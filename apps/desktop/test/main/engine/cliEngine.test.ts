@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JobParams, JobRecord } from '@shared/types'
@@ -82,7 +82,12 @@ function binary(kind: CliEngineKind, behavior?: Behavior): string {
   mkdirSync(dir, { recursive: true })
   const path = join(dir, `moss-infer-${kind}${process.platform === 'win32' ? '.exe' : ''}`)
   writeFileSync(path, '')
-  if (behavior) writeFileSync(`${path}.json`, JSON.stringify(behavior))
+  if (behavior) {
+    // A fake started by an earlier run() may be reading this file right now; writing it in place
+    // truncates it first, and a fake that reads it empty exits 1. A rename swaps it whole.
+    writeFileSync(`${path}.json.tmp`, JSON.stringify(behavior))
+    renameSync(`${path}.json.tmp`, `${path}.json`)
+  }
   return path
 }
 
