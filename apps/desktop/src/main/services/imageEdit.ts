@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, renameSync } from 'node:fs'
-import { open, realpath, stat as pathStat } from 'node:fs/promises'
+import { mkdir, open, realpath, stat as pathStat } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { isNetworkPath, pathLinksToNetwork } from '../lib/localPath'
 import { z } from 'zod'
@@ -34,7 +34,12 @@ function records() {
   const channels = z.array(editChannel).safeParse(readJsonObject(file)?.channels)
   if (channels.success) return channels.data
   // Keep the damaged file for recovery and start empty, so channels can be added again in settings.
-  renameSync(file, `${file}.broken-${Date.now()}`)
+  try {
+    renameSync(file, `${file}.broken-${Date.now()}`)
+  } catch (error) {
+    // Windows refuses to move a file another program holds open; settings must still open.
+    console.warn('[image-edit] could not set the damaged channels file aside', error)
+  }
   return []
 }
 const vault = paths.imageEditCredentials
@@ -102,8 +107,26 @@ export async function discoverImageModels(draft: z.infer<typeof schemas.imageEdi
     throw new Error('无法探测模型，请检查渠道设置或手填模型名')
   }
 }
-export async function runImageEdit(input: z.infer<typeof schemas.imageEditRun>, approval?: { sourceStamp: string; signal?: AbortSignal }) {
-  const signal = approval?.signal
+// The 外接重绘 dialog names each run, so its 取消 can abort the request in flight.
+const dialogRuns = new Map<string, AbortController>()
+export async function runDialogImageEdit({ runId, ...input }: z.infer<typeof schemas.imageEditRun>) {
+  const controller = new AbortController()
+  if (runId) dialogRuns.set(runId, controller)
+  try {
+    return await runImageEdit(input, undefined, controller.signal)
+  } finally {
+    if (runId) dialogRuns.delete(runId)
+  }
+}
+export function cancelImageEdit(runId: string) {
+  enabled()
+  dialogRuns.get(runId)?.abort(new Error('已取消重绘'))
+}
+export async function runImageEdit(
+  input: z.infer<typeof schemas.imageEditRun>,
+  approval?: { sourceStamp: string; signal?: AbortSignal },
+  signal = approval?.signal,
+) {
   const { c, key, guard } = connection(input.channelId, input.revision, !!approval)
   const checkProject = async () => {
     signal?.throwIfAborted()
@@ -111,11 +134,16 @@ export async function runImageEdit(input: z.infer<typeof schemas.imageEditRun>, 
     const doc = join(dirname(dir), 'project.json')
     // The data root itself may be a link (MOSSSTUDIO_DATA, a Windows junction); nothing below it may be.
     const root = projectsRootDir(),
-      realRoot = await realpath(root)
+      realRoot = await realpath(root).catch(() => '')
     const unsafe = async (p: string) =>
-      isNetworkPath(p) || (await pathLinksToNetwork(p)) || (await realpath(p)) !== join(realRoot, relative(root, p))
-    if ((await unsafe(dir)) || (await unsafe(doc)) || getProject(input.projectId)?.id !== input.projectId)
-      throw new Error('项目位置已改变，请重新打开项目')
+      isNetworkPath(p) || (await pathLinksToNetwork(p)) || (await realpath(p).catch(() => '')) !== join(realRoot, relative(root, p))
+    const moved = new Error('项目位置已改变，请重新打开项目')
+    if ((await unsafe(doc)) || getProject(input.projectId)?.id !== input.projectId) throw moved
+    // Like studioAssets, create assets/ on first use. Not recursive: that would follow an existing link to check it.
+    await mkdir(dir).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EEXIST') throw new Error('无法创建项目的素材文件夹')
+    })
+    if (await unsafe(dir)) throw moved
   }
   await checkProject()
   const file = await open(await agentPicturePath(input.path), 'r')

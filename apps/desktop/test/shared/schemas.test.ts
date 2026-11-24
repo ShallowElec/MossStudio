@@ -87,8 +87,15 @@ const cases = {
   },
   imageEditRun: {
     valid: run,
-    rejects: { approval: { ...run, approved: true }, traversal: { ...run, projectId: '../p' }, prompt: { ...run, prompt: ' ' } },
+    accepts: { dialog: { ...run, runId: id } },
+    rejects: {
+      approval: { ...run, approved: true },
+      traversal: { ...run, projectId: '../p' },
+      prompt: { ...run, prompt: ' ' },
+      runId: { ...run, runId: 'run' },
+    },
   },
+  imageEditCancel: { valid: { runId: id }, rejects: { missing: {}, runId: { runId: 'run' } } },
   remoteWorkerLoras: {
     valid: { hostId: 'host' },
     accepts: { provider: { providerId: 'worker-host', candidates: true }, both: { hostId: 'host', providerId: 'worker-host' } },
@@ -1198,6 +1205,7 @@ const STRICT = new Set<keyof Schemas>([
   'imageEditChannelsRemove',
   'imageEditDiscoverModels',
   'imageEditRun',
+  'imageEditCancel',
   'engineSystemCuda',
   'mossInferCudaLibs',
   'loraProfilesList',

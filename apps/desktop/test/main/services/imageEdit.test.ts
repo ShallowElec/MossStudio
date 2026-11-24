@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 vi.mock('node:https', async (original) => ({ ...(await original<typeof import('node:https')>()) }))
 vi.mock('node:dns/promises', async (original) => ({ ...(await original<typeof import('node:dns/promises')>()) }))
+vi.mock('node:fs', async (original) => ({ ...(await original<typeof import('node:fs')>()) }))
 import { Readable } from 'node:stream'
-import { existsSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import * as fs from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import * as https from 'node:https'
 import * as dns from 'node:dns/promises'
 import { nativeImage, safeStorage } from 'electron'
@@ -316,6 +318,69 @@ describe('external redraw boundaries', () => {
     expect(wire.aborted).toBe(true)
     expect(readdirSync(projectAssetsDir(input.projectId))).toEqual(['source.png'])
   })
+  it('cancels a dialog run in flight and saves nothing, but only while the switch is on', async () => {
+    const { input } = fixture()
+    const runId = '7f9e2c41-5d3a-4b8e-9c1f-2a6b8d4e0f13'
+    let markSent!: (wire: AbortSignal) => void, respond!: () => void
+    const sent = new Promise<AbortSignal>((resolve) => {
+      markSent = resolve
+    })
+    const response = new Promise<void>((resolve) => {
+      respond = resolve
+    })
+    vi.spyOn(https, 'request').mockImplementation(((_url: URL, opts: { signal: AbortSignal }, cb: (res: Readable) => void) => {
+      const req = new EventEmitter(),
+        socket = new EventEmitter()
+      queueMicrotask(() => {
+        req.emit('socket', socket)
+        socket.emit('secureConnect')
+      })
+      return Object.assign(req, {
+        end: () => {
+          markSent(opts.signal)
+          void response.then(() =>
+            cb(Object.assign(Readable.from([Buffer.from(JSON.stringify({ data: [{ b64_json: samples.png }] }))]), { statusCode: 200 })),
+          )
+        },
+      })
+    }) as unknown as typeof https.request)
+    const running = edit.runDialogImageEdit({ ...input, runId })
+    const wire = await sent
+    edit.cancelImageEdit(runId)
+    respond()
+    await expect(running).rejects.toThrow('已取消重绘')
+    expect(wire.aborted).toBe(true)
+    expect(readdirSync(projectAssetsDir(input.projectId))).toEqual(['source.png'])
+    updateSettings({ externalImageEditEnabled: false })
+    expect(() => edit.cancelImageEdit(runId)).toThrow()
+  })
+  it('creates a missing assets folder instead of failing in English', async () => {
+    const { input } = fixture()
+    const other = saveProject({ name: 'empty', canvases: [] })
+    rmSync(projectAssetsDir(other.id), { recursive: true, force: true })
+    peer({ data: [{ b64_json: samples.png }] })
+    const result = await edit.runImageEdit({ ...input, projectId: other.id })
+    expect(result.path.startsWith(projectAssetsDir(other.id))).toBe(true)
+  })
+  it.each(['project folder', 'assets', 'project.json'] as const)(
+    'refuses a project whose %s is a link below the projects folder',
+    async (part) => {
+      const { input } = fixture()
+      const assets = projectAssetsDir(input.projectId)
+      const target = { 'project folder': dirname(assets), assets, 'project.json': join(dirname(assets), 'project.json') }[part]
+      const moved = join(`${root()}-elsewhere`, 'moved')
+      mkdirSync(dirname(moved), { recursive: true })
+      try {
+        renameSync(target, moved)
+        symlinkSync(moved, target, part === 'project.json' ? 'file' : 'junction')
+        const { connected } = peer({ data: [{ b64_json: samples.png }] })
+        await expect(edit.runImageEdit(input)).rejects.toThrow('项目位置已改变')
+        expect(connected).not.toHaveBeenCalled()
+      } finally {
+        rmSync(dirname(moved), { recursive: true, force: true })
+      }
+    },
+  )
   it('refuses a MIME mismatch instead of importing the inline bytes', async () => {
     const { input } = fixture('gemini-native')
     peer({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/jpeg', data: bytes.toString('base64') } }] } }] })
@@ -336,6 +401,16 @@ describe('external redraw boundaries', () => {
     expect(readFileSync(join(root(), backups[0]!), 'utf8')).toBe('broken')
     expect(edit.saveImageChannel(draft).name).toBe(draft.name)
     expect(edit.listImageChannels()).toHaveLength(1)
+  })
+  it('keeps settings usable when a damaged channels file cannot be moved aside', () => {
+    writeFileSync(paths.imageEditChannels(), 'broken')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+    })
+    expect(edit.listImageChannels()).toEqual([])
+    expect(warn).toHaveBeenCalledOnce()
+    expect(edit.saveImageChannel(draft).name).toBe(draft.name)
   })
   it('redraws in a project under a data folder reached through a link', async () => {
     const link = `${root()}-link`
