@@ -53,6 +53,8 @@ type Network = { endpoint: string; proxy?: string; token?: string; concurrency: 
 export function listRemoteDownloads(): DownloadTask[] {
   cache ??= readJson<DownloadTask[]>(cacheFile(), []).map((task) => ({
     ...task,
+    // Saved before tasks carried their owner: only the SSH script named its tasks `remote:`.
+    via: task.via ?? (task.id.startsWith('remote:') ? 'ssh' : 'daemon'),
     speedBps: 0,
     connectionError: ['running', 'verifying', 'queued'].includes(task.state) ? '正在重新连接远端，显示上次记录的进度' : undefined,
   }))
@@ -379,6 +381,7 @@ fi
         updateTasks(
           host,
           (await worker(host, operation)).map((item) => item.task),
+          'ssh',
         )
       })
     } catch (error) {
@@ -394,6 +397,7 @@ ${write('"$directory/shell-state"', state)}fi
         updateTasks(
           host,
           (await worker(host, operation)).map((item) => item.task),
+          'ssh',
         )
       }).catch(() => undefined)
     }
@@ -402,9 +406,16 @@ ${write('"$directory/shell-state"', state)}fi
   void pending.finally(() => preparing.delete(key))
 }
 
-function updateTasks(host: TrainingHost, tasks: DownloadTask[]): DownloadTask[] {
+/** `via` marks every task's owner; without it each task keeps the one it has. */
+function updateTasks(host: TrainingHost, tasks: DownloadTask[], via?: 'daemon' | 'ssh'): DownloadTask[] {
   listRemoteDownloads()
-  const incoming = tasks.map((task) => ({ ...task, hostId: host.id, hostName: host.name, connectionError: undefined }))
+  const incoming = tasks.map((task) => ({
+    ...task,
+    hostId: host.id,
+    hostName: host.name,
+    via: via ?? task.via,
+    connectionError: undefined,
+  }))
   const before = new Map(cache!.map((task) => [task.id, task]))
   cache = [...cache!.filter((task) => task.hostId !== host.id), ...incoming]
   atomicWriteJson(cacheFile(), cache)
@@ -437,7 +448,7 @@ async function downloadProfile(host: TrainingHost): Promise<RemoteWorkerProfile 
   try {
     return await workerProfileWith(host, 'downloads')
   } catch (error) {
-    if (listRemoteDownloads().some((task) => task.hostId === host.id && !task.id.startsWith('remote:'))) throw error
+    if (listRemoteDownloads().some((task) => task.hostId === host.id && task.via === 'daemon')) throw error
     return null
   }
 }
@@ -451,7 +462,7 @@ export async function refreshRemoteDownloads(hostId: string): Promise<DownloadTa
     try {
       // A daemon that fetches models itself owns their tasks; an older one keeps the SSH tasks.
       const profile = await downloadProfile(host)
-      if (profile) return updateTasks(host, await listRemoteWorkerDownloads(profile))
+      if (profile) return updateTasks(host, await listRemoteWorkerDownloads(profile), 'daemon')
       let entries = await worker(host)
       const activeLegacy = entries.filter(
         (entry) => entry.legacy && entry.desired === 'running' && ['queued', 'running', 'verifying'].includes(entry.task.state),
@@ -462,6 +473,7 @@ export async function refreshRemoteDownloads(hostId: string): Promise<DownloadTa
       return updateTasks(
         host,
         entries.map((entry) => entry.task),
+        'ssh',
       )
     } catch (error) {
       listRemoteDownloads()
@@ -527,8 +539,9 @@ export async function startRemoteDownload(
         token: network.token,
       })
       const kept = listRemoteDownloads().filter((task) => task.hostId === host.id && task.id !== created.id)
-      const tasks = await listRemoteWorkerDownloads(profile).catch(() => [...kept, created])
-      const updated = updateTasks(host, tasks)
+      const listed = await listRemoteWorkerDownloads(profile).catch(() => null)
+      // A failed list keeps the cached tasks, each with its own owner.
+      const updated = listed ? updateTasks(host, listed, 'daemon') : updateTasks(host, [...kept, { ...created, via: 'daemon' }])
       startRemoteDownloadMonitor()
       return updated.find((item) => item.id === created.id) ?? created
     }
@@ -554,6 +567,7 @@ export async function startRemoteDownload(
       updateTasks(
         host,
         entries.map((item) => item.task),
+        'ssh',
       )
       startRemoteDownloadMonitor()
       return entry.task
@@ -577,6 +591,7 @@ export async function startRemoteDownload(
     const tasks = updateTasks(
       host,
       updated.map((item) => item.task),
+      'ssh',
     )
     startRemoteDownloadMonitor()
     return tasks.find((item) => item.id === task.id)!
@@ -595,7 +610,7 @@ export async function controlRemoteDownload(
     if (profile) {
       const tasks = await controlRemoteWorkerDownload(profile, taskId, operation)
       startRemoteDownloadMonitor()
-      return updateTasks(host, tasks)
+      return updateTasks(host, tasks, 'daemon')
     }
     const entry = (await worker(host)).find((item) => item.task.id === taskId)
     if (!entry) throw new Error('远端下载任务不存在')
@@ -606,6 +621,7 @@ export async function controlRemoteDownload(
     return updateTasks(
       host,
       entries.map((item) => item.task),
+      'ssh',
     )
   })
 }

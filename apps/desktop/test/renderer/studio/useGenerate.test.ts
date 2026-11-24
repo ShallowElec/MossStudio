@@ -5,7 +5,7 @@ import { MAX_QUEUED_RUNS } from '@shared/canvasJobBranch'
 import { Ipc } from '@shared/channels'
 import type { Catalog, ManagedHost, ProjectCanvas } from '@shared/types'
 import { workerCanvasAdapter, type RemoteWorkerModelInventory } from '@shared/remoteWorker'
-import { workerAdapterEntries, type WorkerAdapterEntry } from '@renderer/pages/studio/remoteWorkerLoras'
+import { workerAdapterEntries, type WorkerAdapterEntry, type WorkerModelPick } from '@renderer/pages/studio/remoteWorkerLoras'
 import { catalogFixture, createMockBackend, SFT_BUNDLE_IDS } from '@test/mocks/backend'
 import { SUBMIT_TIMEOUT_MS, useGenerate } from '@renderer/pages/studio/useGenerate'
 import { dropRun, queuedRunsOf, runsOf } from '@renderer/pages/studio/runs'
@@ -44,7 +44,7 @@ function mount(
     workerAdapters?: readonly WorkerAdapterEntry[] | null
     /** What the Worker daemon lists; an older daemon's answer unless given. */
     workerModels?: RemoteWorkerModelInventory | null
-    workerModelId?: string | null
+    workerModelPick?: WorkerModelPick | null
   } = {},
 ) {
   const backend = createMockBackend('ready')
@@ -92,7 +92,7 @@ function mount(
       remoteHost: options.remoteHost ?? null,
       workerAdapters: options.workerAdapters,
       workerModels: options.workerModels === undefined ? { models: [], components: [], unsupported: true } : options.workerModels,
-      workerModelId: options.workerModelId,
+      workerModelPick: options.workerModelPick,
       notify,
     })
     return null
@@ -302,7 +302,7 @@ describe('studio/useGenerate on a Worker host', () => {
     const picked = mount([scene({ modelBundleId: 'moss-sft' })], {
       remoteHost: worker(),
       workerModels: inventory,
-      workerModelId: 'my-finetune',
+      workerModelPick: { id: 'my-finetune', over: 'moss-sft' },
     })
     expect(await picked.api().generate('scene')).toMatchObject({ queued: true })
     expect(picked.sent[0]).toMatchObject({ hostId: 'h1', modelName: 'My finetune', modelBinding: { bundleId: 'my-finetune' } })
@@ -314,6 +314,16 @@ describe('studio/useGenerate on a Worker host', () => {
     expect(await twin.api().generate('scene')).toMatchObject({ queued: true })
     expect(twin.sent[0]).toMatchObject({ modelBinding: { bundleId: 'sft-int8' } })
     expect(twin.board.current.map((item) => item.modelBundleId)).not.toContain('sft-int8')
+  })
+
+  it('runs a 画面’s own model when the Worker has it, not a pick made over another model', async () => {
+    const { api, sent } = mount([scene({ modelBundleId: 'moss-sft-int8' })], {
+      remoteHost: worker(),
+      workerModels: inventory,
+      workerModelPick: { id: 'my-finetune', over: 'moss-sft' },
+    })
+    expect(await api().generate('scene')).toMatchObject({ queued: true })
+    expect(sent[0]).toMatchObject({ modelBinding: { bundleId: 'sft-int8' } })
   })
 
   it('waits until the Worker’s model list is read rather than run its default model', async () => {
