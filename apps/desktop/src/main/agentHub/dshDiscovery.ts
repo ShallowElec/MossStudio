@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { lstat, open, readlink, realpath } from 'node:fs/promises'
+import { lstat, open, readdir, readFile, readlink, realpath } from 'node:fs/promises'
 import { isNetworkPath, pathLinksToNetwork } from '../lib/localPath'
 import { basename, join } from 'node:path'
 import { paths } from '../lib/paths'
@@ -22,6 +22,52 @@ export function desktopPids(ps: string): Array<{ pid: number; exact: boolean }> 
   })
 }
 
+// The kernel prints each 32-bit word of an address in host byte order; Electron's Linux builds are all little-endian.
+const PROC_LOOPBACK = new Map([
+  ['0100007F', '127.0.0.1'],
+  ['00000000000000000000000001000000', '::1'],
+])
+
+/** Loopback sockets in the LISTEN state (`0A`) from `/proc/net/tcp` or `/proc/net/tcp6` text, with each socket's inode. */
+export function procListeners(text: string): Array<{ inode: number; host: string; port: number }> {
+  return text.split('\n').flatMap((line) => {
+    const [, local, , state, , , , , , inode] = line.trim().split(/\s+/)
+    const addr = /^([\dA-F]+):([\dA-F]{4})$/i.exec(local ?? '')
+    const host = PROC_LOOPBACK.get(addr?.[1]?.toUpperCase() ?? '')
+    return addr && host && state === '0A' && /^\d+$/.test(inode ?? '') ? [{ inode: Number(inode), host, port: parseInt(addr[2]!, 16) }] : []
+  })
+}
+
+/** The inode of a `/proc/<pid>/fd/<n>` link target such as `socket:[12345]`. */
+export function socketInode(link: string): number | undefined {
+  const m = /^socket:\[(\d+)\]$/.exec(link)
+  return m ? Number(m[1]) : undefined
+}
+
+/** Linux: the loopback listeners `pids` own, read from /proc without starting a process; undefined when /proc cannot be read. */
+async function procSockets(pids: number[], signal: AbortSignal, timeoutMs: number) {
+  const stop = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+  const tables = await Promise.all(
+    ['/proc/net/tcp', '/proc/net/tcp6'].map((path) => readFile(path, { encoding: 'utf8', signal: stop }).catch(() => undefined)),
+  )
+  signal.throwIfAborted()
+  if (tables.every((table) => table === undefined)) return undefined
+  const owners = new Map<number, number>()
+  for (const pid of pids) {
+    for (const fd of await readdir(`/proc/${pid}/fd`).catch(() => [])) {
+      if (stop.aborted) break
+      const inode = socketInode(await readlink(`/proc/${pid}/fd/${fd}`).catch(() => ''))
+      if (inode !== undefined) owners.set(inode, pid)
+    }
+  }
+  return tables.flatMap((table) =>
+    procListeners(table ?? '').flatMap(({ inode, host, port }) => {
+      const pid = owners.get(inode)
+      return pid ? [{ pid, host, port }] : []
+    }),
+  )
+}
+
 /** Only inspect listening sockets owned by the desktop binary. No port scan, credentials, process arguments or contact with other servers. */
 export async function desktopListeners(signal: AbortSignal): Promise<DesktopListener[]> {
   const opts = { timeoutMs: 6000, signal }
@@ -42,11 +88,14 @@ export async function desktopListeners(signal: AbortSignal): Promise<DesktopList
     const { stdout } = await run('ps', ['-A', '-o', 'pid=,comm='], opts)
     const pids: number[] = []
     for (const { pid, exact } of desktopPids(stdout)) {
-      // Linux cuts comm to 15 characters; the executable's own name settles it.
-      if (exact || (process.platform === 'linux' && DESKTOP_NAME.test(basename(await readlink(`/proc/${pid}/exe`).catch(() => '')))))
-        pids.push(pid)
+      // Linux cuts comm to 15 characters; the executable's own name settles it. A binary replaced by an upgrade reads as `… (deleted)`.
+      const exe = async () => (await readlink(`/proc/${pid}/exe`).catch(() => '')).replace(/ \(deleted\)$/, '')
+      if (exact || (process.platform === 'linux' && DESKTOP_NAME.test(basename(await exe())))) pids.push(pid)
     }
-    if (pids.length) {
+    const found = pids.length && process.platform === 'linux' ? await procSockets(pids, signal, opts.timeoutMs) : undefined
+    for (const row of found ?? []) add(row.pid, row.host, row.port)
+    // macOS, and Linux without a readable /proc.
+    if (pids.length && !found) {
       const sockets = await run('lsof', ['-nP', '-a', '-p', pids.join(','), '-iTCP', '-sTCP:LISTEN', '-Fpn'], opts)
       let pid = 0
       for (const line of sockets.stdout.split('\n')) {
