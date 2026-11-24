@@ -18,7 +18,7 @@ import type { CapabilityRegistry, SynthesizedSkill } from './registry'
  * different agents and safety postures without duplicating tool definitions.
  */
 
-export type ToolProfileId = 'compact' | 'atomic' | 'proposal-only' | 'custom'
+export type ToolProfileId = 'compact' | 'moss-standard' | 'moss-layout' | 'atomic' | 'proposal-only' | 'custom'
 
 export interface ToolProfileOptions {
   profile: ToolProfileId
@@ -55,12 +55,52 @@ export const COMPACT_PROFILE_PACKS: readonly CapabilityId[] = [
   'remote.hosts',
 ]
 
+export const MOSS_STANDARD_PROFILE_PACKS: readonly CapabilityId[] = [
+  'studio.board.read',
+  'studio.ask',
+  'studio.board.cards',
+  'studio.board.sampling',
+  'studio.board.wires',
+  'studio.board.runs',
+  'studio.projects',
+  'models.catalog',
+  'library.assets',
+  'system.runtime',
+  'remote.hosts',
+  'skill.moss.standard',
+]
+
+export const MOSS_LAYOUT_PROFILE_PACKS: readonly CapabilityId[] = [
+  'studio.board.read',
+  'studio.ask',
+  'studio.board.cards',
+  'studio.board.regions',
+  'studio.board.sampling',
+  'studio.board.wires',
+  'studio.board.runs',
+  'studio.projects',
+  'models.catalog',
+  'library.assets',
+  'system.runtime',
+  'remote.hosts',
+  'skill.moss.standard',
+  'skill.moss.layout',
+]
+
+function presetPacksForProfile(profile: ToolProfileId): readonly CapabilityId[] | undefined {
+  if (profile === 'compact') return COMPACT_PROFILE_PACKS
+  if (profile === 'moss-standard') return MOSS_STANDARD_PROFILE_PACKS
+  if (profile === 'moss-layout') return MOSS_LAYOUT_PROFILE_PACKS
+  return undefined
+}
+
 /** Project actions, provider tool schemas and synchronized Skill markdown for a Tool Profile. */
 export function projectCapabilities(registry: CapabilityRegistry, options: ToolProfileOptions): ProjectedToolset {
+  const effectivePacks = options.enabledPacks ?? presetPacksForProfile(options.profile)
   const listed = registry.listActions({
     surface: options.surface,
     enabledFlags: options.enabledFlags,
-    enabledPacks: options.enabledPacks ?? (options.profile === 'compact' ? COMPACT_PROFILE_PACKS : undefined),
+    enabledPacks: effectivePacks,
     includeExternal: options.includeExternal,
     headlessOnly: options.headlessOnly,
     ...(options.profile === 'proposal-only' ? { excludeEffects: MUTATING_EFFECTS } : {}),
@@ -69,6 +109,7 @@ export function projectCapabilities(registry: CapabilityRegistry, options: ToolP
   const tools = registry.toToolDefinitions(actions, { nameStyle: options.nameStyle ?? 'canonical' })
   const skill = registry.synthesizeSkill({
     actions,
+    enabledPacks: effectivePacks,
     audience: options.audience,
   })
   return {

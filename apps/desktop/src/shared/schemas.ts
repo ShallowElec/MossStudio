@@ -468,8 +468,8 @@ export const schemas = {
       sessionId: agentSession,
       requestId: z.string().min(1).max(128).optional(),
       text: z.string().trim().min(1).max(6000),
-      studioContext: z.string().max(3500).optional(),
-      toolProfile: z.enum(['compact', 'atomic', 'proposal-only', 'custom', 'full']).optional(),
+      studioContext: z.string().max(6000).optional(),
+      toolProfile: z.enum(['compact', 'moss-standard', 'moss-layout', 'atomic', 'proposal-only', 'custom', 'full']).optional(),
       attachments: z
         .array(
           z
@@ -487,7 +487,7 @@ export const schemas = {
   agentHubResolveApproval: z.object({ id: z.string().min(1).max(128), decision: z.enum(['approve', 'reject']) }).strict(),
   capabilitiesList: z
     .object({
-      profile: z.enum(['compact', 'atomic', 'proposal-only', 'custom']).optional(),
+      profile: z.enum(['compact', 'moss-standard', 'moss-layout', 'atomic', 'proposal-only', 'custom']).optional(),
       surface: z.enum(['/studio', '/manga', '/library', '/models', '/training']).optional(),
       enabledPacks: z.array(z.string().min(1).max(120)).max(64).optional(),
       headlessOnly: z.boolean().optional(),
@@ -522,7 +522,7 @@ export const schemas = {
     .optional(),
 
   mcpSetProfile: z.object({
-    profile: z.enum(['compact', 'atomic', 'proposal-only', 'custom']),
+    profile: z.enum(['compact', 'moss-standard', 'moss-layout', 'atomic', 'proposal-only', 'custom']),
     enabledPacks: z.array(z.string().min(1).max(120)).max(64).optional(),
   }),
   settingsUpdate: z

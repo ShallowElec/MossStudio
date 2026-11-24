@@ -3,6 +3,8 @@ import { Boxes, ChevronDown, Copy, Plug } from 'lucide-react'
 import {
   ALL_CAPABILITY_PACKS,
   BUILTIN_CAPABILITY_REGISTRY,
+  MOSS_LAYOUT_PROFILE_PACKS,
+  MOSS_STANDARD_PROFILE_PACKS,
   projectCapabilities,
   type CapabilityId,
   type ToolProfileId,
@@ -18,12 +20,14 @@ const TOOL_PACKS_KEY = 'mossstudio.collab.toolPacks'
 
 export const PROFILE_LABELS: Record<ToolProfileId, string> = {
   compact: '精简工具组',
+  'moss-standard': '普通绘画预设',
+  'moss-layout': '分区构图预设',
   atomic: '原子全工具',
   'proposal-only': '仅提案确认',
   custom: '自定义包',
 }
 
-export const PROFILE_ORDER: readonly ToolProfileId[] = ['compact', 'atomic', 'proposal-only', 'custom']
+export const PROFILE_ORDER: readonly ToolProfileId[] = ['compact', 'moss-standard', 'moss-layout', 'atomic', 'proposal-only', 'custom']
 
 /** The packs the 精简 profile exposes: the board, models, pictures and the runtime, without GBC, comics or training. */
 export const COMPACT_PACKS: readonly CapabilityId[] = [
@@ -40,6 +44,9 @@ export const COMPACT_PACKS: readonly CapabilityId[] = [
   'system.runtime',
 ]
 
+export const MOSS_STANDARD_PACKS: readonly CapabilityId[] = MOSS_STANDARD_PROFILE_PACKS.filter((id) => id !== 'remote.hosts')
+export const MOSS_LAYOUT_PACKS: readonly CapabilityId[] = MOSS_LAYOUT_PROFILE_PACKS.filter((id) => id !== 'remote.hosts')
+
 export interface ToolProfileState {
   mode: ToolProfileId
   /** The packs of `custom`; kept while another mode is picked so switching back restores them. */
@@ -50,6 +57,7 @@ export interface PackRow {
   id: CapabilityId
   title: string
   actionCount: number
+  isSkill: boolean
 }
 
 /** Every built-in pack in registry order, feature-flagged ones included: the list is what may be offered. */
@@ -60,6 +68,7 @@ const PACK_ROWS: readonly PackRow[] = BUILTIN_CAPABILITY_REGISTRY.listPacks({ en
   id: pack.id,
   title: pack.title,
   actionCount: pack.actions.length,
+  isSkill: pack.id.startsWith('skill.'),
 }))
 
 export function listPackRows(imageEdit = false): readonly PackRow[] {
@@ -67,12 +76,19 @@ export function listPackRows(imageEdit = false): readonly PackRow[] {
 }
 
 const allPackIds = (imageEdit = false): CapabilityId[] => listPackRows(imageEdit).map((row) => row.id)
+// The guide packs are opt-in: the atomic and proposal-only projections leave them out, so the ticks do too.
+const toolPackIds = (imageEdit = false): CapabilityId[] =>
+  listPackRows(imageEdit)
+    .filter((row) => !row.isSkill)
+    .map((row) => row.id)
 
 /** The packs a mode actually exposes, for the ticks in the pack list. */
 export function effectivePacks(state: ToolProfileState, imageEdit = false): readonly CapabilityId[] {
   if (state.mode === 'custom') return state.packs.filter((id) => imageEdit || id !== 'image.edit')
   if (state.mode === 'compact') return COMPACT_PACKS
-  return allPackIds(imageEdit)
+  if (state.mode === 'moss-standard') return MOSS_STANDARD_PACKS
+  if (state.mode === 'moss-layout') return MOSS_LAYOUT_PACKS
+  return toolPackIds(imageEdit)
 }
 
 /** Ticking a pack always lands in `custom`, starting from what the current mode showed. */
@@ -108,9 +124,28 @@ function writeToolProfile(state: ToolProfileState): void {
   }
 }
 
-/** One line for the message context, so the Agent knows which tools the person allowed. */
+/** One line for the message context, so the Agent knows which tools and MOSS creative Skills the person enabled. */
 export function toolProfileLine(state: ToolProfileState): string {
-  return state.mode === 'custom' ? `Tools allowed: ${state.packs.join(', ') || 'none'}` : `Tools allowed: the ${state.mode} set`
+  const active = new Set(effectivePacks(state))
+  const standard = active.has('skill.moss.standard')
+  const layout = active.has('skill.moss.layout')
+  const toolsLine = state.mode === 'custom' ? `Tools allowed: ${state.packs.join(', ') || 'none'}` : `Tools allowed: the ${state.mode} set`
+  if (!standard && !layout) return toolsLine
+  const skillGuidance: string[] = ['Active MOSS Creative Skills:']
+  if (standard) {
+    skillGuidance.push(
+      '- [skill.moss.standard · 描述写法指南] Write prompts macro to micro: (1) medium/style/camera framing -> (2) environment & global lighting -> (3) subject pose/gaze/orientation -> (4) outer-to-inner attire & materials -> (5) props & 2-4 color palette. Describe visible optical/painterly traits rather than bare camera or engine names, and keep the attributes of each subject together when a pure Caption has several subjects.' +
+        (!layout
+          ? ' Pure Caption mode is selected: write cohesive prose via studio__board__set_prompt without region boxes unless asked.'
+          : ''),
+    )
+  }
+  if (layout) {
+    skillGuidance.push(
+      '- [skill.moss.layout · 分区构图指南] Spatial region mode is enabled: write global style/lighting (+ character sheet for multi-panel) in studio__board__set_prompt and place regions via studio__regions__add / studio__regions__add_text (bbox: normalized 0..1 {x,y,w,h}; never hand-write raw JSON or abs_centralized/yxyx). Use `object` (`Extreme close-up showing ONLY ...`) for inset close-ups; in text/speech bubbles put lettering/bubble geometry + pointer direction in `caption` and exact characters in `text`, then verify with studio__board__diagnose.',
+    )
+  }
+  return `${toolsLine}\n${skillGuidance.join('\n')}`
 }
 
 export function useToolFlags() {
@@ -229,7 +264,7 @@ export function CollabToolbar({
                 checked={ticked.has(row.id)}
                 onCheckedChange={() => onProfileChange(togglePack(profile, row.id, imageEdit))}
                 label={row.title}
-                description={`${row.actionCount} 项动作`}
+                description={row.isSkill ? '给 Agent 的写法指南' : `${row.actionCount} 项动作`}
                 className="gap-2 rounded-md px-2 py-1.5"
               />
             ))}

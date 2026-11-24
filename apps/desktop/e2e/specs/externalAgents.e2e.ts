@@ -146,6 +146,29 @@ describe('外部 Agent on', () => {
     await expect.poll(() => overlay.count()).toBe(0)
   })
 
+  it('the 工具集 popover keeps both guides off until a preset or a tick turns them on', async () => {
+    const page = await openStudio(app, 'externalAgents')
+    await openCollab(page)
+    const panel = page.locator('[data-collab-panel]')
+    await panel.locator('[data-tool-packs]').click()
+    const dialog = page.getByRole('dialog', { name: '工具集' })
+    await dialog.waitFor()
+    await expect.poll(() => dialog.getByText('描述写法指南').isVisible()).toBe(true)
+    await expect.poll(() => dialog.getByText('分区构图指南').isVisible()).toBe(true)
+    await expect.poll(() => dialog.getByRole('checkbox', { name: /描述写法指南/ }).isChecked()).toBe(false)
+    await expect.poll(() => dialog.getByRole('checkbox', { name: /分区构图指南/ }).isChecked()).toBe(false)
+
+    const profileSelect = dialog.getByLabel('协同工具集')
+    await profileSelect.selectOption('moss-standard')
+    await expect.poll(() => app.calls('mcp:set-profile').then((calls) => calls.at(-1))).toEqual({ profile: 'moss-standard' })
+    await expect.poll(() => dialog.getByRole('checkbox', { name: /描述写法指南/ }).isChecked()).toBe(true)
+    await expect.poll(() => dialog.getByRole('checkbox', { name: /分区构图指南/ }).isChecked()).toBe(false)
+
+    await profileSelect.selectOption('moss-layout')
+    await expect.poll(() => app.calls('mcp:set-profile').then((calls) => calls.at(-1))).toEqual({ profile: 'moss-layout' })
+    await expect.poll(() => dialog.getByRole('checkbox', { name: /分区构图指南/ }).isChecked()).toBe(true)
+  })
+
   it('connects DSH Desktop with a local pairing URL and scopes conversations by workspace', async () => {
     const page = await app.open({ scenario: 'externalAgents', route: '/studio', defer: true })
     await seedLoraBoard(page, { workerHost: false })

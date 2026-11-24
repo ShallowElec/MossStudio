@@ -25,7 +25,9 @@ Paths are relative to `apps/desktop/src/`.
 
 `shared/capabilities/` describes each action once: a dotted id (`studio.cards.create`), its pack, target (`main` or `renderer`), effects, policy floor (`auto`, `approval`, `human-only`), zod input schema and a one-line summary. `protocol.ts` holds `MUTATING_EFFECTS` (`write`, `run`, `delete`, `export`, `install`, `configure`), the one list main, the renderer and the MCP annotations use. Packs with a `featureFlag` (`remote.hosts`, `studio.gbc.parse`, `training.jobs`, `image.edit`) are invisible while that switch in 设置 › 功能 is off. `image.edit` (外接重绘) needs two switches, 外接重绘 (`externalImageEditEnabled`) and 外部 Agent, because its action is the first that uploads a local file to a third party (`capabilityFlags` in `main/capabilities/builtinHandlers.ts`). A Studio action that supersedes a 助手 tool names it in `legacyAlias` and reuses its schema from `shared/agent/schemas.ts`.
 
-`projectCapabilities` (`profiles.ts`) projects a toolset per profile: `compact` (the packs in `COMPACT_PROFILE_PACKS`), `atomic` (everything enabled), `proposal-only` (no mutating action) and `custom` (chosen packs).
+`projectCapabilities` (`profiles.ts`) projects a toolset per profile: `compact` (the packs in `COMPACT_PROFILE_PACKS`), `moss-standard` and `moss-layout` (`MOSS_STANDARD_PROFILE_PACKS`, `MOSS_LAYOUT_PROFILE_PACKS`), `atomic` (everything enabled), `proposal-only` (no mutating action) and `custom` (chosen packs).
+
+Two packs carry only a guide and no actions: `skill.moss.standard` (描述写法指南) and `skill.moss.layout` (分区构图指南), in `appPacks.ts`. The active Skill includes a guide only when its pack is named in the enabled packs: by `moss-standard`, by `moss-layout` (both guides), or ticked in `custom`. `compact`, `atomic` and `proposal-only` never include them (`GUIDE_ONLY_PACKS` in `registry.ts`). While one is on, the 协同 panel also adds a short summary of it to each message (`toolProfileLine` in `CollabToolbar.tsx`). The built-in 助手 does not use either.
 
 ## 3. The MCP server
 
@@ -40,7 +42,7 @@ Paths are relative to `apps/desktop/src/`.
 | A call still waiting when the client hangs up is aborted: its approval is dropped and nothing runs | `res.once('close')` |
 | Wire names encode dots as `__` (`studio__cards__create`) | `toMcpToolName` |
 
-Resources: the active Skill, the promptcraft and layout guides, the workbench context and `mossstudio://audit/recent` (external Agents' calls only). The two guides in `shared/capabilities/officialSkills.ts` are adapted from the MOSS-Image prompt-enhancer skill (Apache License 2.0) and say so.
+Resources: the active Skill, the promptcraft and layout guides, the workbench context and `mossstudio://audit/recent` (external Agents' calls only). The two guides in `shared/capabilities/officialSkills.ts` are adapted from the MOSS-Image prompt-enhancer skill (Apache License 2.0) and say so. `composeOfficialGuide` adds each guide to the full guide once, after the active Skill, whether or not its pack is on.
 
 ## 4. The dispatcher
 

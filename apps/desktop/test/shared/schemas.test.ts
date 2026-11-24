@@ -139,14 +139,28 @@ const cases = {
     rejects: { empty: { backendId: 'codex', sessionId: 's', text: '' } },
   },
   agentHubResolveApproval: { valid: { id: 'a', decision: 'approve' }, rejects: { missing: {} } },
-  capabilitiesList: { valid: {}, rejects: { profile: { profile: 'unknown' } } },
+  capabilitiesList: {
+    valid: {},
+    accepts: {
+      'moss-standard preset': { profile: 'moss-standard' },
+      'moss-layout preset': { profile: 'moss-layout' },
+    },
+    rejects: { profile: { profile: 'unknown' } },
+  },
   capabilitiesExecute: {
     valid: { name: 'models.catalog.installed' },
     rejects: { missing: {}, 'a claimed approval': { name: 'x', approved: true }, 'a claimed source': { name: 'x', source: 'assistant' } },
   },
   capabilitiesAudit: { valid: {}, rejects: { limit: { limit: 0 } } },
   mcpInfo: { valid: {}, rejects: { token: { includeToken: 'true' } } },
-  mcpSetProfile: { valid: { profile: 'compact' }, rejects: { profile: { profile: 'unknown' } } },
+  mcpSetProfile: {
+    valid: { profile: 'compact' },
+    accepts: {
+      'moss-standard preset': { profile: 'moss-standard' },
+      'moss-layout preset': { profile: 'moss-layout' },
+    },
+    rejects: { profile: { profile: 'unknown' } },
+  },
   settingsUpdate: {
     valid: {},
     accepts: {

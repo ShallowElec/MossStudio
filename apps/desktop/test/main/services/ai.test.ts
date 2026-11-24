@@ -275,6 +275,27 @@ describe('chat with an OpenAI-compatible provider', () => {
     expect(system).toContain('高级模式')
   })
 
+  it('keeps the 助手 on its own prompt, whatever guide packs external Agents may use', async () => {
+    const { api, id } = await provider('openai')
+    replies.push(() => Response.json({ choices: [{ message: { content: '好', tool_calls: [] } }] }))
+    await run(api, { providerId: id, message: 'x' }).promise
+    const system = (requests[0]!.body['messages'] as Array<{ content: string }>)[0]!.content
+    expect(
+      system.startsWith(`You are the agent inside MossStudio, a desktop workbench for the MOSS-Image model.
+
+MOSS-Image renders text extremely well and is controlled with a prompt plus an optional layout:
+- A Canvas has a size, sampler values (steps, cfg, seed) and a list of regions.
+- Each region has a kind (object / character / text), a bounding box and a caption; text regions carry a second string, text.
+- caption is English: a short description of what belongs in the region. On a text region it describes the lettering itself — style, weight, colour and placement — never the words.
+- text is the exact characters to render, in the user's language, exactly as they should appear: no surrounding quotes and no "reading" prefix.
+- Regions are what give layout control.
+
+Work in the user's language, but prompts and captions stay in English.
+Prefer doing over describing: when the user asks for a change, call the studio_* tools so the workbench actually changes, then summarise what you changed in one or two sentences.
+`),
+    ).toBe(true)
+  })
+
   it('handles non-streaming JSON replies', async () => {
     const { api, id } = await provider('openai')
     replies.push(() => Response.json({ choices: [{ message: { content: ' plain ', tool_calls: [] } }] }))

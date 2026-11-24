@@ -62,6 +62,9 @@ export { APP_ACTION_SCHEMAS, APP_CAPABILITY_PACKS, type AppActionArgs, type AppA
 export { MOSS_LAYOUT_DESIGN_SKILL_MD, MOSS_PROMPTCRAFT_SKILL_MD, composeOfficialGuide, type GuideTopic } from './officialSkills'
 
 export {
+  COMPACT_PROFILE_PACKS,
+  MOSS_LAYOUT_PROFILE_PACKS,
+  MOSS_STANDARD_PROFILE_PACKS,
   projectCapabilities,
   type CapabilityAuditEntry,
   type CapabilityAuditQuery,
