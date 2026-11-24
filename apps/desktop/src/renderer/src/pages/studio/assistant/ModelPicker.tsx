@@ -14,7 +14,7 @@ export interface ModelState {
 }
 
 export interface ModelChoice {
-  /** Distinct across providers, so two of them offering the same id can both be picked. */
+  /** Distinct across providers, so two of them offering the same id can both be picked: the leading position makes it unique, `provider/id` only makes it readable. */
   value: string
   model: AgentModelOption
   /** What the option reads: the model's name without the provider heading's own name. */
@@ -39,17 +39,14 @@ export function modelGroups(models: readonly AgentModelOption[]): ModelGroup[] {
   const groups: ModelGroup[] = []
   const byProvider = new Map<string, ModelGroup>()
   const plain: ModelGroup = { choices: [] }
-  const used = new Set<string>()
+  let position = 0
   for (const model of models) {
     const id = model.id?.trim()
     if (!id) continue
     const provider = model.provider?.trim() || undefined
     const named = model.label?.trim() || id
     const label = provider && named.endsWith(` · ${provider}`) ? named.slice(0, -provider.length - 3).trim() || id : named
-    const base = provider ? `${provider}\u0000${id}` : id
-    let value = base
-    for (let n = 2; used.has(value); n++) value = `${base}\u0000${n}`
-    used.add(value)
+    const value = `${position++}:${provider ? `${provider}/` : ''}${id}`
     const choice: ModelChoice = { value, model, label }
     if (!provider) {
       plain.choices.push(choice)
