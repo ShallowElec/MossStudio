@@ -30,6 +30,8 @@ export interface McpClientInstallerOptions {
   homeDir?: string
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
+  /** Folders outside the home folder to look for CLIs in; see `findCli`. */
+  systemDirs?: readonly string[]
   stdioBridgePath?: string
   discoveryPath?: string
   execPath?: string
@@ -45,6 +47,7 @@ interface Resolved {
   home: string
   env: NodeJS.ProcessEnv
   platform: NodeJS.Platform
+  systemDirs?: readonly string[]
   stdioBridgePath: string
   discoveryPath: string
   execPath: string
@@ -62,6 +65,7 @@ function resolve(options: McpClientInstallerOptions = {}): Resolved {
     home: options.homeDir ?? homedir(),
     env,
     platform,
+    systemDirs: options.systemDirs,
     stdioBridgePath: options.stdioBridgePath ?? state!.stdioBridgePath,
     discoveryPath: options.discoveryPath ?? state!.discoveryPath,
     execPath: options.execPath ?? process.execPath,
@@ -69,7 +73,7 @@ function resolve(options: McpClientInstallerOptions = {}): Resolved {
     runCli:
       options.runCli ??
       (async (command, args) => {
-        const launch = cliLaunch(command, args, { platform, env, home: options.homeDir }, options.execPath)
+        const launch = cliLaunch(command, args, { platform, env, home: options.homeDir, systemDirs: options.systemDirs }, options.execPath)
         // A Windows shim may resolve to this app's own binary, which runs the script only as node.
         return run(launch.command, launch.args, {
           timeoutMs: options.cliTimeoutMs ?? CLI_TIMEOUT_MS,

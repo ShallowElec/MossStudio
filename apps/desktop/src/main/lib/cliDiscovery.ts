@@ -7,7 +7,11 @@ interface Search {
   home?: string
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
+  /** Package-manager folders outside the home folder (Homebrew); tests replace them so the machine's own installs stay out. */
+  systemDirs?: readonly string[]
 }
+
+const SYSTEM_DIRS = ['/opt/homebrew/bin', '/usr/local/bin']
 
 type Candidate = { kind: 'ready'; path: string; script?: string } | { kind: 'unsupported' | 'missing' }
 
@@ -44,13 +48,16 @@ set pathext=%pathext:;.js;=;%
   return statSync(script, { throwIfNoEntry: false })?.isFile() ? script : undefined
 }
 
-export function findCli(name: string, { home = homedir(), env = process.env, platform = process.platform }: Search = {}): Candidate {
+export function findCli(
+  name: string,
+  { home = homedir(), env = process.env, platform = process.platform, systemDirs = SYSTEM_DIRS }: Search = {},
+): Candidate {
   const windows = platform === 'win32'
   const dirs = (env.PATH ?? env.Path ?? '').split(windows ? ';' : delimiter).map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'))
   dirs.push(
     ...(windows
       ? [env.APPDATA && join(env.APPDATA, 'npm'), join(home, 'scoop', 'shims'), env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Volta', 'bin')]
-      : [join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global', 'bin'), join(home, '.volta', 'bin')]
+      : [join(home, '.local', 'bin'), ...systemDirs, join(home, '.npm-global', 'bin'), join(home, '.volta', 'bin')]
     ).filter((d): d is string => !!d),
   )
   if (windows) dirs.push(join(env.USERPROFILE || home, '.local', 'bin'))

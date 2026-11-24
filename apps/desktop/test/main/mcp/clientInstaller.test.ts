@@ -77,6 +77,8 @@ function setup(clis: string[] = ['codex', 'claude', 'node'], registeredCodex?: R
     homeDir: home,
     env: { PATH: bin },
     platform: 'linux',
+    // Keeps a CI runner's own /usr/local/bin/node out of these tests.
+    systemDirs: [],
     stdioBridgePath: join(dir(), 'data', 'mcp', 'mossstudio-mcp-stdio.mjs'),
     discoveryPath: join(dir(), 'data', 'mcp-server.json'),
     execPath: '/opt/MossStudio/app-2.0.1/MossStudio',
