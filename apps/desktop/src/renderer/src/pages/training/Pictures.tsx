@@ -16,7 +16,7 @@ type PictureView = 'grid' | 'list'
 
 function Thumb({ image, className }: { image: DatasetImage; className?: string }): React.JSX.Element {
   return (
-    <PreviewButton path={image.path} title={image.name}>
+    <PreviewButton path={image.path} name={image.name}>
       <img
         src={cloverUrl(image.path)}
         alt={image.name}

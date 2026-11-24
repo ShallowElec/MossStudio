@@ -55,6 +55,21 @@ describe('external redraw', () => {
     await expect.poll(() => page.locator('article[data-canvas-card]').count()).toBe(2)
     expect(await app.calls('image-edit:run')).toEqual([expect.objectContaining({ path: source })])
     await app.screenshot(`external-redraw-${theme}`)
+    // 取消 while the service is still generating closes the dialog and stops that run; it adds no card.
+    await page.locator('article[data-canvas-card="src"]').click({ button: 'right' })
+    await page.getByText('外接重绘…', { exact: true }).click()
+    await page.evaluate(() => {
+      ;(window as unknown as { redraw: unknown }).redraw = window.__mock.hold('image-edit:run')
+    })
+    await dialog.getByLabel('重绘描述').fill('取消')
+    await dialog.getByRole('button', { name: '发送并重绘' }).click()
+    await dialog.getByRole('button', { name: '正在重绘…' }).waitFor()
+    await dialog.getByRole('button', { name: '取消', exact: true }).click()
+    await page.locator('dialog.app-dialog').waitFor({ state: 'detached' })
+    const [, held] = (await app.calls('image-edit:run')) as Array<{ runId: string }>
+    expect(await app.calls('image-edit:cancel')).toEqual([{ runId: held!.runId }])
+    await page.evaluate(() => (window as unknown as { redraw: { release: () => Promise<void> } }).redraw.release())
+    expect(await page.locator('article[data-canvas-card]').count()).toBe(2)
     // Simulate navigating away while the service is still generating. Its result belongs to the first board.
     await page.locator('article[data-canvas-card="src"]').click({ button: 'right' })
     await page.getByText('外接重绘…', { exact: true }).click()
@@ -63,13 +78,14 @@ describe('external redraw', () => {
     })
     await dialog.getByLabel('重绘描述').fill('延迟')
     await dialog.getByRole('button', { name: '发送并重绘' }).click()
-    await expect.poll(() => app.calls('image-edit:run')).toHaveLength(2)
+    await expect.poll(() => app.calls('image-edit:run')).toHaveLength(3)
     await page.evaluate(() => {
       window.location.hash = '#/settings/features'
     })
     await page.getByLabel('选择渠道').waitFor()
     // Leaving the Studio closes the dialog; the page learns it is hidden from a ResizeObserver, a frame later.
     await page.locator('dialog.app-dialog').waitFor({ state: 'detached' })
+    await expect.poll(() => app.calls('image-edit:cancel')).toHaveLength(2)
     await page.evaluate(() => {
       window.location.hash = '#/studio'
     })
