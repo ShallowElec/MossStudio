@@ -13,6 +13,7 @@ import {
   hiresChoice,
   hiresScaleFits,
   hiresSize,
+  outputSize,
   withHiresPatch,
   withHiresScale,
   withSampling,
@@ -47,6 +48,7 @@ export function SamplingSection({
   const clearUnsupported = (): void =>
     onChange((current) => withSampling(current, { shift: undefined, hires: undefined, stepCache: undefined, cfgTruncation: undefined }))
   const choice = hiresChoice(canvas)
+  const target = outputSize(canvas)
   const [custom, setCustom] = useState(false)
   useEffect(() => setCustom(false), [canvas.id])
   const shownChoice: HiresChoice = custom && choice !== 'off' ? 'custom' : choice
@@ -137,9 +139,9 @@ export function SamplingSection({
                 <div className="flex items-center gap-2">
                   <OptionalNumberInput
                     label="高清修复宽度"
-                    value={sampling.hires.width}
+                    value={target.width}
                     placeholder=""
-                    parse={(value) => clampHiresDimension(value, sampling.hires!.width)}
+                    parse={(value) => clampHiresDimension(value, target.width)}
                     onCommit={(width) => {
                       if (width !== undefined) onChange((current) => withHiresPatch(current, { width }))
                     }}
@@ -150,9 +152,9 @@ export function SamplingSection({
                   </span>
                   <OptionalNumberInput
                     label="高清修复高度"
-                    value={sampling.hires.height}
+                    value={target.height}
                     placeholder=""
-                    parse={(value) => clampHiresDimension(value, sampling.hires!.height)}
+                    parse={(value) => clampHiresDimension(value, target.height)}
                     onCommit={(height) => {
                       if (height !== undefined) onChange((current) => withHiresPatch(current, { height }))
                     }}
@@ -161,7 +163,7 @@ export function SamplingSection({
                 </div>
               ) : (
                 <p className="tabular text-caption text-ink-2">
-                  输出 {sampling.hires.width} × {sampling.hires.height}
+                  输出 {target.width} × {target.height}
                 </p>
               )}
               <SliderField

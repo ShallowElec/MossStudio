@@ -19,8 +19,10 @@ import {
   isWorkerDaemonHost,
   missingWorkerAdapters,
   resolveWorkerBundle,
+  workerModelOrder,
   workerModelsUnread,
   type WorkerAdapterEntry,
+  type WorkerModelPick,
 } from './remoteWorkerLoras'
 import { generatedSnapshot, generationCanvas, nodeBlockers, styleLoraNote, withUpscaleSize } from './nodes'
 import { queuedRunsOf, runsOf, shownRun, staleRunIds } from './runs'
@@ -86,8 +88,8 @@ export function useGenerate(options: {
   remoteHost: ManagedHost | null
   /** Real models detected on the picked Worker host (`unsupported` for an older daemon); null while not read. */
   workerModels?: RemoteWorkerModelInventory | null
-  /** The model last picked on a Worker; the 画面 keeps a model of this computer's library. */
-  workerModelId?: string | null
+  /** The model last picked on the picked Worker host; the 画面 keeps a model of this computer's library. */
+  workerModelPick?: WorkerModelPick | null
   /** The LoRA the picked Worker host has; null or absent while unknown (never reported missing then). */
   workerAdapters?: readonly WorkerAdapterEntry[] | null
   /** Registered control adapters (a canvas's control adapter id resolves to its file). */
@@ -133,10 +135,10 @@ export function useGenerate(options: {
 
       // A Worker host resolves against the real models detected on that Worker daemon.
       const workerHost = isWorkerDaemonHost(remoteHost) ? remoteHost : null
-      const { workerModels, workerModelId } = latest.current
+      const { workerModels, workerModelPick } = latest.current
       if (workerHost && !workerModels) return { error: workerModelsUnread(workerHost.name) }
       const choice = workerHost
-        ? resolveWorkerBundle(workerHost, workerModels, [workerModelId, source.modelBundleId, preferredBundleId], catalog)
+        ? resolveWorkerBundle(workerHost, workerModels, workerModelOrder(workerModelPick, source.modelBundleId, preferredBundleId), catalog)
         : resolveBundle(catalog, source.modelBundleId, preferredBundleId)
       if (!choice.bundle)
         return { error: choice.unavailable ? '这个画面用的模型已经不在模型库里，请换一个模型' : '还没有可用的模型，请先到模型页下载' }

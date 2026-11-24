@@ -145,9 +145,8 @@ export function DetailPanel({
           onClick={() =>
             openImagePreview({
               ...item,
-              title: item.name,
               artwork: true,
-              gallery: items.map((i) => ({ path: i.path, title: i.name, artwork: true })),
+              gallery: items.map((i) => ({ path: i.path, name: i.name, artwork: true })),
             })
           }
         >

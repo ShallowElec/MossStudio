@@ -215,7 +215,11 @@ function bundleState(
 /** Where the page points: this computer (its GPUs, once read, and which of them run a CLI engine) or another computer. */
 export interface ModelPlace {
   remote: boolean
-  /** Worker daemon host: runs moss-server with single-file support, so catalog single-file bundles fit too. */
+  /**
+   * Worker daemon host. Neither its `/v1/capabilities` nor its `/v1/models` says
+   * which model layouts it loads, so catalog single-file bundles are assumed to
+   * fit, as moss-server loads them; one it cannot load fails on the Worker.
+   */
   workerDaemon?: boolean
   gpus: readonly GpuInventoryDevice[]
   /** GPUs running 兼容模式 / AMD 原生, which read only the official bf16 folders. */

@@ -7,8 +7,10 @@ import { applyLoraAutoTriggers } from '../../../src/renderer/src/pages/studio/pr
 import {
   canvasModelForWorkerPick,
   missingWorkerAdapters,
+  parseWorkerModelPicks,
   resolveWorkerBundle,
   workerAdapterEntries,
+  workerModelOrder,
 } from '../../../src/renderer/src/pages/studio/remoteWorkerLoras'
 
 const SFT_INT8_IDS = ['moss-sft-comfy-int8_convrot', 'qwen35-comfy-int8_convrot', 'flux2-vae-comfy-small', 'moss-runtime-config']
@@ -91,6 +93,42 @@ describe('Worker real model resolution and strength=0 LoRAs', () => {
     const unsupported = resolveWorkerBundle(HOST, { models: [], components: [], unsupported: true }, [], null)
     expect(unsupported.bundle?.id).toBe('remote-worker:worker-gpu-1')
     expect(unsupported.installed).toBe(true)
+  })
+
+  it('prefers the 画面’s own model over a Worker pick made over another model', () => {
+    const pick = { id: 'my-finetune', over: 'moss-sft' }
+    const run = (canvasModel: string | undefined): string | undefined =>
+      resolveWorkerBundle(HOST, WORKER_INVENTORY, workerModelOrder(pick, canvasModel, null), null).bundle?.id
+    // The 画面 the pick was made on runs the pick.
+    expect(run('moss-sft')).toBe('my-finetune')
+    // Another 画面 whose model the Worker also has keeps it.
+    expect(run('moss-sft-int8')).toBe('sft-int8')
+    // A 画面 whose model the Worker lacks falls back to the pick.
+    expect(run('moss-elsewhere')).toBe('my-finetune')
+    expect(run(undefined)).toBe('my-finetune')
+  })
+
+  it('reads the Worker picks per host and drops malformed ones', () => {
+    expect(parseWorkerModelPicks(null)).toEqual(new Map())
+    expect(parseWorkerModelPicks('my-finetune')).toEqual(new Map())
+    expect(parseWorkerModelPicks('["a"]')).toEqual(new Map())
+    expect(
+      parseWorkerModelPicks(JSON.stringify({ a: { id: 'sft-int8', over: 'moss-sft' }, b: { id: 'my-finetune' }, c: { id: 3 }, d: null })),
+    ).toEqual(
+      new Map([
+        ['a', { id: 'sft-int8', over: 'moss-sft' }],
+        ['b', { id: 'my-finetune' }],
+      ]),
+    )
+  })
+
+  it('keeps a host id like __proto__ as a plain key, never on a prototype', () => {
+    const picks = parseWorkerModelPicks('{"__proto__": {"id": "sft-int8"}, "constructor": {"id": "my-finetune"}}')
+    expect(picks.get('__proto__')).toEqual({ id: 'sft-int8' })
+    expect(picks.get('constructor')).toEqual({ id: 'my-finetune' })
+    expect(picks.get('toString')).toBeUndefined()
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype)
+    expect(({} as Record<string, unknown>)['id']).toBeUndefined()
   })
 
   it('keeps a downloaded catalog model in the 画面 when a Worker model is picked, never the Worker’s own id', () => {

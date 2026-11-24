@@ -5,9 +5,12 @@ import { Ipc } from '@shared/channels'
 import { aiProviderFixture } from '@test/mocks/backend'
 import { flush, loadStore } from '../../helpers/renderer'
 
-beforeAll(() => {
+// The first import of the component tree loads the Markdown renderer behind components/ui (about 3 s
+// cold, several times that on a loaded runner). Load it once here so the tests' own 5 s cover only their work.
+beforeAll(async () => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-})
+  await import('@renderer/components/common/ProviderDialog')
+}, 60_000)
 
 let root: Root | null = null
 let container: HTMLElement | null = null

@@ -1,9 +1,15 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { AiProviderInfo } from '@shared/ai'
 import { aiProviderFixture } from '@test/mocks/backend'
 import { flush, loadStore } from '../../helpers/renderer'
+
+// The first import of the component tree loads the Markdown renderer behind components/ui (about 3 s
+// cold, several times that on a loaded runner). Load it once here so the tests' own 5 s cover only their work.
+beforeAll(async () => {
+  await import('@renderer/components/common/ProviderDialog')
+}, 60_000)
 
 let root: Root | null = null
 let container: HTMLElement | null = null

@@ -149,9 +149,11 @@ export function resolveJobInputs(
     params.references = { paths, ...(references.maxEdge !== undefined ? { maxEdge: references.maxEdge } : {}) }
   }
 
+  const output = outputSize(canvas)
   const sampling = cleanSampling(canvas.sampling)
   if (sampling) {
-    params.sampling = sampling
+    // The job gets the target the 画面 shows: a saved one over the engine's budget is fitted.
+    params.sampling = sampling.hires ? { ...sampling, hires: { ...sampling.hires, ...output } } : sampling
     if (context.worker) {
       if (Object.keys(sampling).some((key) => !isWorkerSamplingKey(key)))
         blockers.push({ id: 'input-unsupported', message: '远端主机只支持选择采样器和调度器，请在高级设置中清除其他采样设置' })
@@ -185,5 +187,5 @@ export function resolveJobInputs(
     }
   }
 
-  return { params, size: generationSize(canvas), output: outputSize(canvas), blockers }
+  return { params, size: generationSize(canvas), output, blockers }
 }

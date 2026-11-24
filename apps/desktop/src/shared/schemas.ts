@@ -162,6 +162,10 @@ export const jobInputsSchema = z
       }
       kinds.add(image.kind)
     })
+    // Here, not in samplingSchema: a project saved before the budget still opens, and its job is fitted.
+    if (value.sampling?.hires && !withinPixelBudget(value.sampling.hires)) {
+      ctx.addIssue({ code: 'custom', path: ['sampling', 'hires'], message: '高清修复总像素不能超过 4,200,000，请缩小高清修复尺寸' })
+    }
   })
 
 const projectCanvasSchema = z.object({
@@ -376,7 +380,9 @@ export const schemas = {
   imageEditChannelsSave: z.strictObject({ ...channelFields, ...editEndpoint }),
   imageEditChannelsRemove: z.strictObject({ id: z.uuid() }),
   imageEditDiscoverModels: z.strictObject(editEndpoint),
-  imageEditRun: imageEditArgs.extend({ channelId: z.uuid(), revision: z.uuid() }),
+  /** `runId` comes only from the 外接重绘 dialog; an Agent's arguments are checked against `imageEditArgs` first. */
+  imageEditRun: imageEditArgs.extend({ channelId: z.uuid(), revision: z.uuid(), runId: z.uuid().optional() }),
+  imageEditCancel: z.strictObject({ runId: z.uuid() }),
   remoteWorkerLoras: z
     .object({
       hostId: z.string().min(1).max(120).optional(),

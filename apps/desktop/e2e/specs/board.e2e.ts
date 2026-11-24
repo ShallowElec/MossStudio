@@ -539,10 +539,11 @@ describe('studio board', () => {
 
     // Dragging one picked card moves the other by the same amount.
     const before = { a: (await saved('img-1'))!, b: (await saved('img-2'))! }
-    const header = await center(page, 'article[data-canvas-card="img-2"] header')
-    await page.mouse.move(header.x + 30, header.y)
+    // The header's empty stretch: on this narrow card its buttons sit right of the middle.
+    const header = await center(page, 'article[data-canvas-card="img-2"] header > span')
+    await page.mouse.move(header.x, header.y)
     await page.mouse.down()
-    await page.mouse.move(header.x + 130, header.y + 40, { steps: 6 })
+    await page.mouse.move(header.x + 100, header.y + 40, { steps: 6 })
     await page.mouse.up()
     await expect.poll(async () => (await saved('img-2'))!.x - before.b.x, { timeout: 10_000 }).toBeGreaterThan(60)
     const moved = { a: (await saved('img-1'))!, b: (await saved('img-2'))! }
@@ -903,7 +904,8 @@ describe('studio board', () => {
     expect(await front.count()).toBe(1)
     const frame = await front.getAttribute('src')
     await card.hover()
-    await card.getByRole('button', { name: '放大预览：画面 1' }).click()
+    // In the header, so it never covers the picture corner where a region is grabbed.
+    await card.locator('header').getByRole('button', { name: '放大预览：画面 1' }).click()
     expect(await page.getByRole('dialog').getByRole('img').getAttribute('src')).toBe(frame)
     await page.keyboard.press('Escape')
 

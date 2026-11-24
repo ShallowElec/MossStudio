@@ -137,6 +137,12 @@ describe('canvas face preview', () => {
     expect(document.querySelector('dialog')?.textContent).not.toContain('另存为')
   })
 
+  it('keeps the zoom button in the header, off the picture corner and inside the card stacking order', () => {
+    const { zoom } = renderCard(base)
+    expect(zoom()!.closest('header')).not.toBeNull()
+    expect(zoom()!.className).not.toMatch(/(^|\s)(z-|absolute)/)
+  })
+
   it('offers no zoom on an empty running face even when the strip has older pictures', () => {
     const { host, zoom } = renderCard({ ...base, canvas: canvasFixture(), view: { ...base.view, active: true, state: 'running' }, strip })
     expect(host.querySelector('[data-card-body] img')).toBeNull()
