@@ -176,6 +176,7 @@ describe('refreshRemoteDownloads', () => {
         ...task(id),
         hostId: 'gpu',
         hostName: 'GPU box',
+        via: 'ssh',
         connectionError: undefined,
         state: 'running',
         bytes: 55,
@@ -265,6 +266,33 @@ describe('refreshRemoteDownloads', () => {
     remote = await import('@main/services/remoteDownloads')
     await expect(remote.refreshRemoteDownloads('w')).rejects.toThrow('daemon down')
     expect(remote.listRemoteDownloads()).toMatchObject([{ id: 'wdown-1', connectionError: 'daemon down' }])
+  })
+
+  it('marks who owns each task, so a daemon task named like an SSH one stays with the daemon', async () => {
+    const worker: TrainingHost = { ...host, id: 'w', remoteBackend: 'worker-daemon' }
+    hosts.list = [worker]
+    const listRemoteWorkerDownloads = vi.spyOn(await import('@main/services/remoteWorker'), 'listRemoteWorkerDownloads')
+    listRemoteWorkerDownloads.mockResolvedValue([task('remote:w:m:1', { state: 'running' })])
+    workerProfileWith.mockResolvedValue({ hostId: 'w' })
+    expect(await remote.refreshRemoteDownloads('w')).toMatchObject([{ id: 'remote:w:m:1', via: 'daemon' }])
+
+    workerProfileWith.mockRejectedValue(new Error('daemon down'))
+    workerPrints([native(task('remote:w:m:1'))])
+    await expect(remote.refreshRemoteDownloads('w')).rejects.toThrow('daemon down')
+    expect(remote.listRemoteDownloads()).toMatchObject([{ id: 'remote:w:m:1', via: 'daemon', connectionError: 'daemon down' }])
+    expect(sshExec).not.toHaveBeenCalled()
+    listRemoteWorkerDownloads.mockRestore()
+  })
+
+  it('reads the owner of tasks saved before it was recorded from their id', () => {
+    writeFileSync(
+      join(dataRoot(), 'remote-downloads.json'),
+      JSON.stringify([task('remote:gpu:m:1', { hostId: 'gpu' }), task('wdown-1', { hostId: 'w' })]),
+    )
+    expect(remote.listRemoteDownloads().map((t) => [t.id, t.via])).toEqual([
+      ['remote:gpu:m:1', 'ssh'],
+      ['wdown-1', 'daemon'],
+    ])
   })
 
   it('keeps the last snapshot with a connection error and redacts credentials when SSH fails', async () => {

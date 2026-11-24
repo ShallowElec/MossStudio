@@ -354,4 +354,29 @@ describe('Worker 远程主机 on', () => {
       .poll(() => app.calls('http:POST /api/engine-jobs'))
       .toMatchObject([{ hostId: 'worker-1', modelBinding: { bundleId: 'sft-int8' } }])
   })
+
+  it('keeps another 画面’s own model on the Worker after a Worker model is picked', async () => {
+    const page = await app.open({ scenario: 'workerHost', route: '/studio', defer: true })
+    await seedLoraBoard(page, { workerHost: true })
+    await page.evaluate(() => {
+      const project = window.__mock.state.projects[0]!
+      project.canvases[0]!.modelBundleId = 'moss-sft-int8'
+      project.canvases.push(window.__mock.fixtures.canvasFixture({ id: 'c2', title: '画面 2', x: 1200, modelBundleId: 'moss-sft-int8' }))
+    })
+    await app.start()
+    await openLoraRows(page)
+    const picker = page.locator('[data-model-picker]').first()
+    await expect.poll(() => picker.textContent()).toContain('INT8')
+    // On 画面 1 the Worker's MOSS-Image SFT stands in for its INT8 model.
+    await picker.click()
+    await page.locator('[role="menuitem"][title="MOSS-Image SFT"]').click()
+    await expect.poll(() => picker.textContent()).not.toContain('INT8')
+    // 画面 2 has its own model on the Worker too, and keeps it.
+    await page.locator('article[data-canvas-card="c2"] header button').first().click()
+    await expect.poll(() => picker.textContent()).toContain('INT8')
+    await page.locator('[data-studio-generate]').click()
+    await expect
+      .poll(() => app.calls('http:POST /api/engine-jobs'))
+      .toMatchObject([{ hostId: 'worker-1', modelBinding: { bundleId: 'sft-int8' } }])
+  })
 })
