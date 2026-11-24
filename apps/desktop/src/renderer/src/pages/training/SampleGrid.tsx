@@ -92,9 +92,14 @@ export function SampleGrid({
                   )
                 const picture = <img src={cloverUrl(image)} alt="" draggable={false} className="size-full object-cover" />
                 return (
-                  <div key={column.step} className={cn(cell, 'relative group')}>
+                  <div key={column.step} className={cn(cell, 'group relative bg-[var(--image-placeholder)]')}>
                     {pick ? (
-                      <button type="button" aria-label={`${prompt}，${column.label}`} onClick={pick} className="size-full">
+                      <button
+                        type="button"
+                        aria-label={`${prompt}，${column.label}`}
+                        onClick={pick}
+                        className="size-full transition-opacity hover:opacity-90"
+                      >
                         {picture}
                       </button>
                     ) : null}

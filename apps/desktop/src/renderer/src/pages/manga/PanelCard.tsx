@@ -73,7 +73,8 @@ export function PanelCard({
                 path={picture.path}
                 title={label}
                 artwork
-                gallery={panel.takes.map((take) => ({ ...take, title: label, artwork: true }))}
+                grayscale={series.style.monochrome}
+                gallery={panel.takes.map((take) => ({ ...take, title: label, artwork: true, grayscale: series.style.monochrome }))}
               >
                 <img
                   src={cloverUrl(picture.path)}
