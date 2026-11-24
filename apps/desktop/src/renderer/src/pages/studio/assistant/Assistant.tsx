@@ -91,7 +91,7 @@ const SUGGESTIONS = [
   { label: '做一套分镜', text: '帮我做一套 6 镜的分镜：先问我主题，再一次建好这些画面。' },
 ]
 
-function followUpFor(card: AgentCard, answer: AgentCardAnswer, problems: string[]): string {
+export function followUpFor(card: AgentCard, answer: AgentCardAnswer, problems: string[]): string {
   if (answer.applied) {
     const steps = card.steps ?? []
     const shown = steps
@@ -107,6 +107,8 @@ function followUpFor(card: AgentCard, answer: AgentCardAnswer, problems: string[
     if (answer.freeText?.trim()) return `先改一下：${answer.freeText.trim()}`
     return answer.selected.includes('approve') ? '批准，开始吧。' : '先别做。'
   }
+  // Skipping a plan is a no, not "carry on with defaults": the model must not apply it anyway.
+  if (card.kind === 'plan' && answer.skipped) return '方案先不应用。'
   if (answer.skipped) return `「${card.title}」先跳过，你按默认继续。`
   const labels = (card.options ?? []).filter((option) => answer.selected.includes(option.id)).map((option) => option.label)
   const lines = [labels.length ? labels.join('、') : answer.freeText?.trim() ? '' : '就按这个来。'].filter(Boolean)

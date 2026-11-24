@@ -90,7 +90,7 @@ A card (`shared/agent/cards.ts` `AgentCard`) is attached to the assistant messag
 | Card | Made by | Buttons | The follow-up message |
 | --- | --- | --- | --- |
 | choice (`assistant/ChoiceCard.tsx`) | `studio_ask_user` | Single or multiple options with a detail line, 跳过, 确定 | The chosen labels, plus 补充：the typed text; 跳过 sends 「question」先跳过，你按默认继续。 |
-| plan (`assistant/PlanCard.tsx`) | A turn in 审批 that held writes | The list of steps, 放弃, 调整…, 应用 | 已按方案改了 N 处 (with 还差：the first problem); 调整 sends 方案先不应用，改一下：the typed text |
+| plan (`assistant/PlanCard.tsx`) | A turn in 审批 that held writes | The list of steps, 放弃, 调整…, 应用 | 已按方案改了 N 处 (with 还差：the first problem); 放弃 sends 方案先不应用。; 调整 sends 方案先不应用，改一下：the typed text |
 | confirm (`assistant/ConfirmCard.tsx`) | `studio_ask_approval` | 拒绝, 改一句…, and the approve button (批准 unless the tool named it) | 批准，开始吧。 or 先别做。; 改一句 sends 先改一下：the typed text |
 
 Only one card waits at a time: the newest unanswered one sits above the composer and does not scroll with the chat. While it waits, text typed in the composer answers it (the placeholder changes: 或者直接写你的答案…, 想改哪里？写给助手…, 想先改什么？写给助手…); 调整… and 改一句… only move focus there. The answer is stored through `Ipc.aiCardAnswer` (`main/services/ai.ts` `answerAgentCard`) before the follow-up is sent. An answered card folds to one line in its message (the question; a plan reads 标题 · 已应用 N 处改动, 已放弃 or 提了调整).
