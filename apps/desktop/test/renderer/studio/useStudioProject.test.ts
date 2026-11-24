@@ -143,7 +143,7 @@ describe('useStudioProject', () => {
     expect(get().canvases[0]!.prompt).toBe('unsaved edit')
   })
 
-  it.each(['lightbox', 'ARIA dialog'] as const)(
+  it.each(['lightbox', 'ARIA modal dialog'] as const)(
     'does not shortcut-save behind an open %s, then saves the pending edit after closing',
     async (kind) => {
       const fake = fakeClient([doc('a')])
@@ -161,9 +161,13 @@ describe('useStudioProject', () => {
       }
       try {
         act(() => get().updateCanvas('a-c', { prompt: 'pending' }))
-        act(() => overlay.render(kind === 'lightbox' ? createElement(ImageLightbox) : createElement('div', { role: 'dialog' })))
+        act(() =>
+          overlay.render(
+            kind === 'lightbox' ? createElement(ImageLightbox) : createElement('div', { role: 'dialog', 'aria-modal': 'true' }),
+          ),
+        )
         if (kind === 'lightbox') act(() => openImagePreview({ path: '/preview.png' }))
-        expect(document.querySelector('dialog[open], [role="dialog"]')).not.toBeNull()
+        expect(document.querySelector('dialog[open], [aria-modal="true"]')).not.toBeNull()
         await pressSave()
         expect(fake.log).toEqual([])
         if (kind === 'lightbox') {
@@ -172,7 +176,8 @@ describe('useStudioProject', () => {
           act(() => {
             vi.advanceTimersByTime(300)
           })
-        } else act(() => overlay.render(createElement('div', { hidden: true }, createElement('div', { role: 'dialog' }))))
+        } else
+          act(() => overlay.render(createElement('div', { hidden: true }, createElement('div', { role: 'dialog', 'aria-modal': 'true' }))))
         await pressSave()
         expect(fake.log).toEqual(['save:a'])
         expect(fake.projects.get('a')!.canvases[0]!.prompt).toBe('pending')
@@ -182,6 +187,28 @@ describe('useStudioProject', () => {
       }
     },
   )
+
+  it('shortcut-saves with a non-modal popover such as 显卡状态 open', async () => {
+    const fake = fakeClient([doc('a')])
+    const { get } = await mount(fake.client)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const popover = document.createElement('div')
+    popover.setAttribute('role', 'dialog')
+    popover.setAttribute('aria-label', '显卡状态')
+    document.body.append(popover)
+    try {
+      act(() => get().updateCanvas('a-c', { prompt: 'pending' }))
+      const key = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+      await act(async () => {
+        document.activeElement!.dispatchEvent(key)
+      })
+      expect(key.defaultPrevented).toBe(true)
+      expect(fake.log).toEqual(['save:a'])
+      expect(fake.projects.get('a')!.canvases[0]!.prompt).toBe('pending')
+    } finally {
+      popover.remove()
+    }
+  })
 
   it('switches after a successful save of pending edits', async () => {
     const fake = fakeClient([doc('a'), doc('b')])
