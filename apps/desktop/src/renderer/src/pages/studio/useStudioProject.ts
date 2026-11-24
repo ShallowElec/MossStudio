@@ -559,12 +559,13 @@ export function useStudioProject(options: {
     }
   }, [])
 
-  // Ctrl/Cmd+S saves now instead of waiting for the timer.
+  // Ctrl/Cmd+S saves now instead of waiting for the timer. A modal dialog holds it back;
+  // a non-modal popover (显卡状态, 更新) leaves the board in reach, so it saves.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (!activeRef.current || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
       event.preventDefault()
-      const dialogs = document.querySelectorAll('dialog[open], [role="dialog"]')
+      const dialogs = document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')
       if (Array.from(dialogs).some((dialog) => !dialog.closest('[hidden], [inert], [aria-hidden="true"]'))) return
       if (isDirty()) void saveNow()
     }

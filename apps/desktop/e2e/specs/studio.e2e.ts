@@ -661,6 +661,28 @@ describe('studio', () => {
     await settle(page)
   })
 
+  it('saves on Ctrl+S while the 显卡状态 popover is open', async () => {
+    const page = await app.open({ scenario: 'ready', route: '/studio' })
+    await openStudio(page)
+    // A paused clock holds the autosave timer back, so only the shortcut can save.
+    // The page is reused by later tests, so its clock runs again whatever happens here.
+    await page.clock.install()
+    await page.clock.pauseAt(Date.now() + 1000)
+    try {
+      await describeCanvas(page, 'saved by shortcut')
+      await page.locator('[data-perf-monitor]').click()
+      const popover = page.getByRole('dialog', { name: '显卡状态' })
+      await popover.waitFor()
+      await page.keyboard.press('Control+s')
+      await expect
+        .poll(() => app.calls<{ canvases: unknown }>('projects:save').then((calls) => JSON.stringify(calls.at(-1)?.canvases ?? null)))
+        .toContain('saved by shortcut')
+      expect(await popover.isVisible()).toBe(true)
+    } finally {
+      await page.clock.resume()
+    }
+  })
+
   describe('a few-step model (MOSS-Image SFT Turbo INT8 8 步)', () => {
     const TURBO = ['moss-sft-turbo-comfy-int8_convrot', 'qwen35-comfy-int8_convrot', 'flux2-vae-comfy-small', 'moss-runtime-config']
     const install = async (page: Page, ids: string[], only: boolean): Promise<void> => {
