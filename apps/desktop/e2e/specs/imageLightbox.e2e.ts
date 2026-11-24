@@ -6,10 +6,21 @@ import { expectVisualRules } from '../support/visual'
 describe('fullscreen preview', () => {
   const app = useApp()
   it('encodes the previewed training sample at full resolution as PNG without sending its path to file IPC', async () => {
-    const page = await app.open({ scenario: 'trainings', route: '/training/tp-juzi' })
-    await page.locator('[data-sample-row] button[aria-label^="放大预览"]').first().click()
+    const page = await app.open({ scenario: 'trainings', route: '/training/tp-juzi', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.training.samples['tp-juzi']!.prompts[0] = 'a cat / a dog'
+    })
+    await app.start()
+    const trigger = page.locator('[data-sample-row] button[aria-label^="放大预览"]').first()
+    // The cell keeps its placeholder tone while the picture loads.
+    expect(await trigger.evaluate((el) => getComputedStyle(el.parentElement!).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)')
+    const title = (await trigger.getAttribute('aria-label'))!.replace('放大预览：', '')
+    await trigger.click()
     const dialog = page.getByRole('dialog'),
       img = dialog.getByRole('img')
+    // A sample prompt is not a file path: shown whole, slash included.
+    expect(title).toContain('a cat / a dog')
+    expect(await dialog.getByRole('heading').textContent()).toBe(title)
     await img.evaluate(async (el) => {
       await (el as HTMLImageElement).decode()
     })
@@ -41,6 +52,42 @@ describe('fullscreen preview', () => {
     expect(await png).toEqual({ type: 'image/png', signature: [137, 80, 78, 71, 13, 10, 26, 10], ...size })
     expect(await app.calls(Ipc.galleryCopyImage)).toEqual([])
     expect(await dialog.getByRole('button', { name: '另存为…' }).count()).toBe(0)
+  })
+  it('copies the shown pixels when the system cannot read the format, and zooms by wheel distance without scrolling', async () => {
+    const page = await app.open({ scenario: 'ready', route: '/library', defer: true })
+    await page.evaluate(() => {
+      window.__mock.state.gallery = [window.__mock.fixtures.galleryItemFixture(0)]
+      window.__mock.fail(window.__mock.Ipc.galleryCopyImage, { code: 'E_IMAGE_FORMAT', message: '这张图片的格式不能复制' })
+    })
+    await app.start()
+    await page.locator('[data-library-item]').first().click()
+    await page.getByRole('button', { name: '放大预览作品' }).click()
+    const dialog = page.getByRole('dialog'),
+      img = dialog.getByRole('img')
+    await img.evaluate(async (el) => {
+      await (el as HTMLImageElement).decode()
+    })
+    const written = page.evaluate(
+      () =>
+        new Promise<string[]>((resolve) => {
+          Object.defineProperty(navigator.clipboard, 'write', {
+            configurable: true,
+            value: async ([item]: ClipboardItem[]) => resolve([...item!.types]),
+          })
+        }),
+    )
+    await dialog.getByRole('button', { name: '复制图片' }).click()
+    expect(await written).toEqual(['image/png'])
+    await dialog.getByText('已复制图片').waitFor()
+
+    await dialog.getByRole('button', { name: '100%' }).click()
+    await page.evaluate(() => {
+      addEventListener('wheel', (e) => document.body.setAttribute('data-wheel-prevented', String(e.defaultPrevented)))
+    })
+    await dialog.locator('[data-preview-stage]').hover()
+    await page.mouse.wheel(0, -8)
+    await expect.poll(() => dialog.getByLabel('图片操作').locator('span').textContent()).toBe('102%')
+    expect(await page.locator('body').getAttribute('data-wheel-prevented')).toBe('true')
   })
   it.each(['light', 'dark'] as const)('keeps library selection and keyboard focus in %s mode', async (theme) => {
     const page = await app.open({ scenario: 'ready', route: '/library', theme, defer: true })

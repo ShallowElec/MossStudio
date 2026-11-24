@@ -371,7 +371,7 @@ function CanvasCardView(props: CanvasCardProps): React.JSX.Element {
           {face && !painting ? (
             <IconButton
               label={`放大预览：${canvas.title}`}
-              className="pointer-events-none absolute left-1 top-8 z-10 size-6 bg-raised opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/card:pointer-events-auto group-hover/card:opacity-100"
+              className={cn('size-6', !selected && 'opacity-0 focus-visible:opacity-100 [article:hover_&]:opacity-100')}
               onClick={() => {
                 const frame = face === preview && visibleFrame.current?.path === preview.path ? visibleFrame.current : face
                 const gallery = face === current ? outputs.map(({ path }) => ({ path, artwork: true, title: canvas.title })) : undefined

@@ -347,6 +347,29 @@ describe('manga', () => {
     await page.getByRole('heading', { name: '雨夜侦探' }).waitFor()
   })
 
+  it('previews a monochrome panel in grayscale, as the panel shows it', async () => {
+    const page = await openSeries(() => {
+      const series = window.__mock.fixtures.mangaSeriesFixture()
+      series.style.monochrome = true
+      const take = { path: '/fixture/outputs/ok.png', width: 1024, height: 768, seed: 1, jobId: 'job-old' }
+      Object.assign(series.chapters[0]!.pages[0]!.panels[0]!, { state: 'approved', takes: [take], chosen: 0 })
+      window.__mock.state.manga = [series]
+      localStorage.setItem('mossstudio.manga.open', 'manga-1')
+    })
+    const shown = panel(page, 'panel-1').getByRole('img', { name: /的画面$/ })
+    const filter = await shown.evaluate((el) => getComputedStyle(el).filter)
+    expect(filter).toContain('grayscale')
+    await panel(page, 'panel-1')
+      .getByRole('button', { name: /^放大预览/ })
+      .click()
+    expect(
+      await page
+        .getByRole('dialog')
+        .getByRole('img')
+        .evaluate((el) => getComputedStyle(el).filter),
+    ).toBe(filter)
+  })
+
   it('stops adding lines and characters at the limits, and refuses to export a page whose picture is gone', async () => {
     const page = await openSeries(() => {
       const { mangaSeriesFixture } = window.__mock.fixtures
