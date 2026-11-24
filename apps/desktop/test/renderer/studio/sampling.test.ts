@@ -99,6 +99,19 @@ describe('studio/sampling 高清修复', () => {
     expect(withSampling(on, { hires: { width: 4096, height: 2048 } }).sampling?.hires).toMatchObject({ width: 2880, height: 1456 })
   })
 
+  it('shows and edits a 高清修复 target saved over the pixel budget as the fitted size the job uses', () => {
+    // Valid on disk before the budget: a 2048² 画面 at ×2.
+    const saved = canvas({ width: 2048, height: 2048, sampling: { hires: { width: 4096, height: 4096, strength: 0.4 } } })
+    expect(outputSize(saved)).toEqual({ width: 2048, height: 2048 })
+    expect(hiresChoice(saved)).toBe('custom')
+    expect(samplingSummary(saved)).toBe('高清修复 2048×2048')
+    expect(withHiresPatch(saved, { steps: 8 }).sampling?.hires).toEqual({ width: 2048, height: 2048, strength: 0.4, steps: 8 })
+    // Typing one edge keeps the other as shown, not as saved.
+    expect(withHiresPatch(saved, { width: 1024 }).sampling?.hires).toMatchObject({ width: 1024, height: 2048 })
+    // Fitted, it can match a scale that fits the 画面.
+    expect(hiresChoice({ ...saved, width: 1024, height: 1024 })).toBe('2')
+  })
+
   it('knows the first-pass and output sizes, including a recorded base size', () => {
     const on = withHiresScale(canvas({ width: 1024, height: 1024 }), 2)
     expect(generationSize(on)).toEqual({ width: 1024, height: 1024 })

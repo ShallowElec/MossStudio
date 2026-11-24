@@ -132,6 +132,43 @@ export function resolveWorkerBundle(
   return { bundle: picked, installed: true, unavailable: false }
 }
 
+/** A model picked on one Worker host, and the 画面 model it was picked over there. */
+export interface WorkerModelPick {
+  id: string
+  over?: string
+}
+
+/**
+ * The ids a Worker run tries, in order (see resolveWorkerBundle). A 画面 whose
+ * own model the Worker also has runs that one: the host's pick stands in only
+ * for the model it was picked over, or when the Worker lacks the 画面's model.
+ */
+export function workerModelOrder(
+  pick: WorkerModelPick | null | undefined,
+  canvasModelId: string | undefined,
+  preferredId: string | null | undefined,
+): Array<string | null | undefined> {
+  return pick && pick.over === canvasModelId ? [pick.id, canvasModelId, preferredId] : [canvasModelId, pick?.id, preferredId]
+}
+
+/** The Worker picks kept in storage, by host id (a Map, so no host id reaches a prototype). A malformed entry is dropped. */
+export function parseWorkerModelPicks(raw: string | null): Map<string, WorkerModelPick> {
+  const picks = new Map<string, WorkerModelPick>()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw ?? '{}')
+  } catch {
+    return picks
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return picks
+  for (const [hostId, value] of Object.entries(parsed)) {
+    const pick = value as Partial<WorkerModelPick> | null
+    if (typeof pick?.id !== 'string' || !pick.id) continue
+    picks.set(hostId, typeof pick.over === 'string' ? { id: pick.id, over: pick.over } : { id: pick.id })
+  }
+  return picks
+}
+
 /**
  * The model a 画面 keeps when a Worker model is picked: the catalog model it
  * is, when that is downloaded on this computer, else the one it had. A Worker's

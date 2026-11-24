@@ -46,7 +46,7 @@ Adapted from https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-
 - **Global Canvas prompt (\`studio.board.set_prompt\`)**: acts as \`summary.caption\`. Lead with overall medium, art style, lighting, color harmony, and—for multi-panel or recurring characters—a concise character appearance sheet that every region below stays consistent with.
 - **Region labels (\`character\` vs \`object\` vs \`text\`)**:
   - Use \`character\` ONLY for regions containing a person/creature with a head/body. For inset close-ups of eyes, lips, hands, shoes, or props, use \`object\` and start the caption with \`Extreme close-up showing ONLY ...\`.
-  - Separate two characters into two distinct \`character\` regions with clear horizontal/vertical separation or intentional overlap, repeating core hair/eye/outfit anchors in each region caption so traits never swap.
+  - Separate two characters into two distinct \`character\` regions with clear horizontal/vertical separation or intentional overlap, repeating core hair/eye/outfit anchors in each region caption to keep traits apart.
   - A bounding box is a placement guide, NOT a drawn frame, card, or sticker; natural overlap and occlusion between boxes are supported. Make sure spatial words in captions ("on the left", "in the upper right") agree with their box coordinates.
 - **Typography & comic speech bubbles (\`studio.regions.add_text\`)**:
   - \`caption\` describes ONLY typography, lettering style, color, surface/container, and bubble geometry—never the rendered words themselves.

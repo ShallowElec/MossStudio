@@ -673,6 +673,8 @@ export interface DownloadTask {
   remotePath?: string
   revision?: string
   connectionError?: string
+  /** A remote task's owner: the host's Worker daemon or the SSH download script. */
+  via?: 'daemon' | 'ssh'
   id: string
   kind: 'model' | 'adapter'
   targetId: string

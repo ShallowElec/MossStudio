@@ -111,14 +111,14 @@ export function useAttachments(): AttachmentState {
 export function AttachmentTray({ state, disabled }: { state: AttachmentState; disabled?: boolean }): React.JSX.Element {
   const picker = useRef<HTMLInputElement>(null)
   const full = state.items.length >= MAX_ATTACHMENTS
-  const gallery = state.items.filter((item) => isRasterData(item.dataUrl)).map((item) => ({ path: item.dataUrl, title: item.name }))
+  const gallery = state.items.filter((item) => isRasterData(item.dataUrl)).map((item) => ({ path: item.dataUrl, name: item.name }))
   return (
     <div className="flex min-w-0 flex-col gap-1" data-attachment-tray>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         {state.items.map((item) => (
           <div key={item.id} className="relative size-11 shrink-0 overflow-hidden rounded-md bg-well" data-attachment={item.name}>
             {isRasterData(item.dataUrl) ? (
-              <PreviewButton path={item.dataUrl} title={item.name} gallery={gallery}>
+              <PreviewButton path={item.dataUrl} name={item.name} gallery={gallery}>
                 <img src={item.dataUrl} alt={item.name} className="size-full object-cover" draggable={false} />
               </PreviewButton>
             ) : (

@@ -76,8 +76,9 @@ const NO_PROJECTS: readonly CanvasProjectOption[] = []
 /** What an Agent says when its connection is gone rather than the request being wrong. */
 const LOST_CODES = /DISCONNECT|NOT_CONNECTED|NO_CONNECTION|CONNECTION_LOST/
 // The ACP driver's own messages (acpDriver.ts) carry no code. It also ends the Agent when a request times out.
+// 「请先连接」 names the Agent, so a remote host's 「请先连接远程主机」 is not read as a dropped Agent.
 const LOST_WORDS =
-  /连接已断开|已断开连接|进程已退出|输入通道已关闭|尚未连接|请先连接|消息流已中断|连接中断|请求超时|not connected|disconnected/i
+  /连接已断开|已断开连接|进程已退出|输入通道已关闭|尚未连接|请先连接\s?(?:Agent|DSH|后端)|消息流已中断|连接中断|请求超时|not connected|disconnected/i
 
 /**
  * Whether a failure means "the Agent is no longer connected", which the panel

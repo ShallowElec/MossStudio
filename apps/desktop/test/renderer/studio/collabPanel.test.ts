@@ -820,6 +820,11 @@ describe('CollabPanel', () => {
       expect(connectionLost(new ApiError({ code: 'INTERNAL', message }))).toBe(true)
       expect(connectionLost(new ApiError({ code: 'E_AGENT_STREAM', message }))).toBe(true)
     }
+    expect(connectionLost(new Error('请先连接 Agent'))).toBe(true)
+    expect(connectionLost(new Error('请先连接 DSH Desktop'))).toBe(true)
+    // The remote host's wording (remoteWorker.ts, workerHostManager.ts) is not about the Agent.
+    expect(connectionLost(new ApiError({ code: 'E_WORKER_CREDENTIAL', message: '请先连接远程主机' }))).toBe(false)
+    expect(connectionLost('请先连接远程主机')).toBe(false)
     expect(connectionLost(new ApiError({ code: 'E_AGENT_STREAM', message: 'Agent 这次没有回复成功，请稍后重试。' }))).toBe(false)
     expect(connectionLost(new Error('无法启动 Agent，请检查命令是否已安装'))).toBe(false)
     expect(connectionLost(new Error('这个 Agent 暂时不能切换模型'))).toBe(false)

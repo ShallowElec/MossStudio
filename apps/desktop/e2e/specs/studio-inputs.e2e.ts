@@ -237,6 +237,15 @@ describe('studio inputs', () => {
     expect(result).toMatchObject({ kind: 'result', width: 1536, height: 1536, baseSize: { width: 1024, height: 1024 } })
   })
 
+  it('runs a 高清修复 target saved over the pixel budget at the fitted size it shows', async () => {
+    const page = await openStudio(app, { sampling: { hires: { width: 4096, height: 4096, strength: 0.35 } } })
+    await page.getByRole('button', { name: /高级/ }).first().click()
+    await page.locator('[data-sampling-section]').getByText('输出 2048 × 2048').waitFor()
+    await generate(page).click()
+    const [job] = await submitted(page, 1)
+    expect(job!.sampling?.hires).toEqual({ width: 2048, height: 2048, strength: 0.35 })
+  })
+
   it('looks right with inputs set, light and dark', async () => {
     for (const theme of ['light', 'dark'] as const) {
       const page = await openStudio(app, {

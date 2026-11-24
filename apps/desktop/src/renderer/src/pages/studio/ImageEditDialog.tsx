@@ -18,6 +18,7 @@ export function ImageEditDialog({ path, project, onClose }: { path: string; proj
     [size, setSize] = useState(''),
     [busy, setBusy] = useState(false)
   const active = useRef(true)
+  const running = useRef<string | null>(null)
   useEffect(() => {
     active.current = true
     void call<ImageEditChannel[]>(Ipc.imageEditChannelsList)
@@ -25,6 +26,8 @@ export function ImageEditDialog({ path, project, onClose }: { path: string; proj
       .catch(() => setError('无法读取渠道'))
     return () => {
       active.current = false
+      // Closing the dialog, by 取消 or by leaving the Studio, stops the upload; its result would be dropped anyway.
+      if (running.current) void call(Ipc.imageEditCancel, { runId: running.current }).catch(() => undefined)
     }
   }, [])
   const c = rows.find((r) => r.id === id) ?? rows[0]
@@ -35,7 +38,8 @@ export function ImageEditDialog({ path, project, onClose }: { path: string; proj
     try {
       const projectId = project.projectId ?? (await project.saveNow())?.id
       if (!projectId || !active.current || project.currentId.current !== projectId) throw new Error('请重新打开项目')
-      const request = { projectId, path, prompt, channelId: c.id, revision: c.revision }
+      running.current = crypto.randomUUID()
+      const request = { projectId, path, prompt, channelId: c.id, revision: c.revision, runId: running.current }
       const picture = await call<{ path: string; width: number; height: number }>(Ipc.imageEditRun, request)
       if (!active.current || project.currentId.current !== projectId) return
       const card = createImageCanvas(project.canvasesRef.current, picture)
@@ -45,18 +49,24 @@ export function ImageEditDialog({ path, project, onClose }: { path: string; proj
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      running.current = null
       setBusy(false)
     }
   }
   return (
     <Modal
       open
-      onClose={busy ? () => {} : onClose}
+      onClose={onClose}
       title="外接重绘"
       footer={
-        <Button tone="primary" disabled={busy || !size || !c || !prompt.trim()} onClick={() => void run()}>
-          {busy ? '正在重绘…' : '发送并重绘'}
-        </Button>
+        <>
+          <Button tone="ghost" size="md" onClick={onClose}>
+            取消
+          </Button>
+          <Button tone="primary" size="md" disabled={busy || !size || !c || !prompt.trim()} onClick={() => void run()}>
+            {busy ? '正在重绘…' : '发送并重绘'}
+          </Button>
+        </>
       }
     >
       <div className="grid gap-3">

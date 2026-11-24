@@ -53,6 +53,13 @@ export const MCP_RESOURCE_URIS = {
   recentAudit: 'mossstudio://audit/recent',
 } as const
 
+/** The workflow part of `initialize`'s instructions; the stdio bridge sends a copy when it answers `initialize` offline. */
+export const MCP_WORKFLOW_INSTRUCTIONS = [
+  `Read resource "${MCP_RESOURCE_URIS.activeSkill}" or call tool "${toMcpToolName('system.guide.read')}" for the live tool workflow guide. Read mossstudio://skill/promptcraft and mossstudio://skill/layout for official MOSS creative guidance, or mossstudio://skill/full for the complete guide.`,
+  `Call "${toMcpToolName('studio.board.read_context')}" or "${toMcpToolName('system.context.get')}" before editing the board.`,
+  `For MOSS drawing and editing tasks, use MossStudio workbench tools (${toMcpToolName('studio.cards.create')}, ${toMcpToolName('studio.board.set_prompt')}, ${toMcpToolName('studio.sampling.set_loras')}, ${toMcpToolName('studio.runs.generate')}) so cards, progress, and outputs appear live on the open canvas; avoid bypassing the canvas with standalone shell scripts, and import any externally post-processed image back with ${toMcpToolName('studio.projects.import_image')}.`,
+].join(' ')
+
 export interface McpServerState {
   running: boolean
   url: string | null
@@ -323,9 +330,7 @@ export async function createMcpServer(options: McpServerOptions = {}): Promise<M
           },
           instructions: [
             `MossStudio MCP server active (profile=${profile}, tools=${projected.actions.length}).`,
-            `Read resource "${MCP_RESOURCE_URIS.activeSkill}" or call tool "${toMcpToolName('system.guide.read')}" for the live tool workflow guide. Read mossstudio://skill/promptcraft and mossstudio://skill/layout for official MOSS creative guidance, or mossstudio://skill/full for the complete guide.`,
-            `Call "${toMcpToolName('studio.board.read_context')}" or "${toMcpToolName('system.context.get')}" before editing the board.`,
-            `For MOSS drawing and editing tasks, use MossStudio workbench tools (${toMcpToolName('studio.cards.create')}, ${toMcpToolName('studio.board.set_prompt')}, ${toMcpToolName('studio.sampling.set_loras')}, ${toMcpToolName('studio.runs.generate')}) so cards, progress, and outputs appear live on the open canvas; avoid bypassing the canvas with standalone shell scripts, and import any externally post-processed image back with ${toMcpToolName('studio.projects.import_image')}.`,
+            MCP_WORKFLOW_INSTRUCTIONS,
           ].join(' '),
         }),
       }

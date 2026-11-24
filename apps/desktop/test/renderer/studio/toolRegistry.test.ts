@@ -1,6 +1,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
+import { PARSE_CHECKING } from '@shared/gbc'
 import { settingsFixture } from '@test/mocks/backend'
 import { boardTools } from '@renderer/pages/studio/builtinBoardTools'
 import { RECIPES } from '@renderer/pages/studio/recipes'
@@ -102,10 +103,76 @@ describe('board registry', () => {
       reason: '先选择一张有图片的卡片',
     })
     expect(boardTools.invoke('gbc.split', blank, run)).toBe(false)
-    expect(boardTools.invoke('gbc.split', { ...ctx, parseBlocker: '还没有安装' }, run)).toBe(false)
+    expect(boardTools.invoke('gbc.split', { ...ctx, parseBlocker: PARSE_CHECKING }, run)).toBe(false)
     expect(run).not.toHaveBeenCalled()
     expect(boardTools.invoke('gbc.split', ctx, run)).toBe(true)
     expect(run).toHaveBeenCalledWith({ type: 'split' })
+  })
+
+  it('keeps 拆成区域 on with its blocker as the card menu does, so choosing it leads to 设置', () => {
+    const blocked = { ...ctx, parseBlocker: '看图还没装好' }
+    expect(boardTools.list('hub', blocked).find(({ tool }) => tool.actionId === 'gbc.split')?.state).toEqual({
+      kind: 'ready',
+      hint: '看图还没装好',
+    })
+    expect(
+      boardTools.list('hub', { ...ctx, parseBlocker: PARSE_CHECKING }).find(({ tool }) => tool.actionId === 'gbc.split')?.state,
+    ).toEqual({
+      kind: 'disabled',
+      reason: PARSE_CHECKING,
+    })
+    const run = vi.fn()
+    expect(boardTools.invoke('gbc.split', blocked, run)).toBe(true)
+    expect(run).toHaveBeenCalledWith({ type: 'split' })
+
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    const host = document.createElement('div')
+    const root = createRoot(host)
+    try {
+      act(() => root.render(createElement(ToolHub, { context: blocked, execute: vi.fn() })))
+      act(() => host.querySelector('button')!.click())
+      const row = [...host.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find((el) => el.textContent?.includes('拆成区域'))!
+      expect(row.disabled).toBe(false)
+      expect(row.title).toBe('看图还没装好')
+      expect(row.textContent).toBe('拆成区域 看图还没装好')
+    } finally {
+      act(() => root.unmount())
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('stops only Delete and Backspace at the open picker, so Ctrl+Z and Ctrl+S still reach the board', () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    const host = document.body.appendChild(document.createElement('div'))
+    const root = createRoot(host)
+    const reached: string[] = []
+    const onKey = (event: KeyboardEvent): void => {
+      reached.push(`${event.ctrlKey ? 'Ctrl+' : ''}${event.key}`)
+    }
+    window.addEventListener('keydown', onKey)
+    try {
+      act(() => root.render(createElement(ToolHub, { context: ctx, execute: vi.fn() })))
+      act(() => host.querySelector<HTMLButtonElement>('[aria-haspopup]')!.click())
+      const item = host.querySelector<HTMLButtonElement>('[role=menuitem]')!
+      act(() => item.focus())
+      for (const [key, ctrlKey] of [
+        ['Delete', false],
+        ['Backspace', false],
+        ['z', true],
+        ['s', true],
+      ] as const) {
+        act(() => {
+          item.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true }))
+        })
+      }
+      expect(host.querySelector('[role=menu]')).not.toBeNull()
+      expect(reached).toEqual(['Ctrl+z', 'Ctrl+s'])
+    } finally {
+      window.removeEventListener('keydown', onKey)
+      act(() => root.unmount())
+      host.remove()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('offers the switch only as an opt-in and does not enable GBC with it', () => {

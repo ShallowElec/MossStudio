@@ -27,13 +27,28 @@ beforeEach(() => {
   trigger.focus()
   vi.stubGlobal('clover', { invoke })
   invoke.mockClear()
+  // The exit animation is its own test; elsewhere a closed preview leaves at once.
+  document.documentElement.dataset.uiAnimation = 'off'
 })
 afterEach(() => {
   act(() => root.unmount())
   host.remove()
   trigger.remove()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
+const refuse = (code: string, message: string): void => {
+  invoke.mockResolvedValueOnce({ ok: false, error: { code, message } } as never)
+}
+/** A decoded picture and a canvas that records how it was drawn; happy-dom has neither. */
+const decoded = () => {
+  Object.defineProperties(image(), { naturalWidth: { value: 200 }, naturalHeight: { value: 100 } })
+  const context = { filter: 'none', drawImage: vi.fn() }
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as never)
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done) => done(new Blob([], { type: 'image/png' })))
+  const write = vi.spyOn(navigator.clipboard, 'write').mockResolvedValue()
+  return { context, write }
+}
 it('opens only when requested, and restores focus after Escape or pressing the background', () => {
   expect(document.querySelector('dialog')).toBeNull()
   open()
@@ -124,10 +139,72 @@ it('does not report success or expose a filesystem path when native copy fails',
   expect(text).not.toContain('已复制图片')
   expect(text).toContain('失败')
 })
-it('does not echo directory names if a caller supplied a filename as the title', () => {
-  act(() => openImagePreview({ path: '/private/work/first.png', title: '/private/work/first.png' }))
+it('does not echo directory names if a caller supplied a path as the file name', () => {
+  act(() => openImagePreview({ path: '/private/work/first.png', name: '/private/work/first.png' }))
   expect(image().alt).toBe('first.png')
   expect(document.querySelector('dialog')?.textContent).not.toContain('/private')
+})
+it.each(['猫/狗', 'a cat / a dog，第500步'])('shows a title that is not a file path in full: %s', (title) => {
+  act(() => openImagePreview({ path: '/pictures/first.png', title, name: 'first.png' }))
+  expect(image().alt).toBe(title)
+  expect(document.querySelector('dialog h2')?.textContent).toBe(title)
+})
+it('keeps the reason main gives when native copy fails', async () => {
+  refuse('E_NOT_FOUND', '找不到这张图片，可能已被移动或删除')
+  open()
+  await act(async () => key('c', true))
+  expect(document.querySelector('dialog')?.textContent).toContain('找不到这张图片，可能已被移动或删除')
+})
+it('copies the shown pixels as PNG when main cannot read the format, and keeps its reason if they are not shown yet', async () => {
+  const reason = '这张图片的格式不能复制，可以用「另存为…」保存后再用'
+  refuse('E_IMAGE_FORMAT', reason)
+  open()
+  await act(async () => key('c', true))
+  expect(document.querySelector('dialog')?.textContent).toContain(reason)
+  refuse('E_IMAGE_FORMAT', reason)
+  const { context, write } = decoded()
+  await act(async () => button('复制图片').click())
+  expect(context.drawImage).toHaveBeenCalledWith(image(), 0, 0)
+  expect(write).toHaveBeenCalledOnce()
+  expect(document.querySelector('dialog')?.textContent).toContain('已复制图片')
+})
+it('shows and copies a grayscale picture in grayscale, not the colour file', async () => {
+  act(() => openImagePreview({ ...first, grayscale: true }))
+  expect(image().classList).toContain('grayscale')
+  const { context, write } = decoded()
+  await act(async () => key('c', true))
+  expect(invoke).not.toHaveBeenCalled()
+  expect(context.filter).toBe('grayscale(1)')
+  expect(write).toHaveBeenCalledOnce()
+})
+it('zooms in proportion to the wheel distance and keeps the wheel from scrolling the picture', () => {
+  open()
+  act(() => button('100%').click())
+  const wheel = (deltaY: number): WheelEvent => {
+    const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true })
+    act(() => {
+      image().dispatchEvent(event)
+    })
+    return event
+  }
+  expect(wheel(-4).defaultPrevented).toBe(true)
+  expect(parseFloat(image().style.width)).toBeCloseTo(202, 0)
+  act(() => button('100%').click())
+  wheel(-5000)
+  expect(parseFloat(image().style.width)).toBeCloseTo(256.8, 0)
+})
+it('lets the dialog animate out with the picture it showed, without taking keys meanwhile', async () => {
+  await act(async () => {
+    document.documentElement.dataset.uiAnimation = 'on'
+  })
+  open()
+  act(() => key('Escape'))
+  expect(document.querySelector('dialog')?.dataset.motionState).toBe('closed')
+  expect(image().src).toBe('clover://local?path=%2Fpictures%2Ffirst.png')
+  await act(async () => key('c', true))
+  expect(invoke).not.toHaveBeenCalled()
+  await act(() => new Promise((resolve) => setTimeout(resolve, 400)))
+  expect(document.querySelector('dialog')).toBeNull()
 })
 it('does not send a data preview to gallery IPC or offer file export', async () => {
   act(() => openImagePreview({ path: 'data:image/png;base64,AAAA' }))

@@ -113,7 +113,17 @@ const listKeys = {
   'prompts/list': 'prompts',
 }
 const changes = { tools: { listChanged: true }, resources: { listChanged: true }, prompts: { listChanged: true } }
-const catalogKey = (target, health = target) => JSON.stringify([target, health.profile, health.skillDigest])
+// The catalog comes only from /health: the discovery file's copy can lag behind live feature flags.
+const endpointKey = (target) => JSON.stringify([target.url, target.token])
+const catalogKey = (target, health) => JSON.stringify([endpointKey(target), health.profile, health.skillDigest])
+const initializedAt = (target) => `initialize ${endpointKey(target)}`
+// A copy of MCP_WORKFLOW_INSTRUCTIONS in apps/desktop/src/main/mcp/server.ts (a test checks the copy): the bridge
+// runs on its own, and a client initialized offline never asks for the server's own instructions.
+const workflowInstructions = [
+  'Read resource "mossstudio://skill/active" or call tool "system__guide__read" for the live tool workflow guide. Read mossstudio://skill/promptcraft and mossstudio://skill/layout for official MOSS creative guidance, or mossstudio://skill/full for the complete guide.',
+  'Call "studio__board__read_context" or "system__context__get" before editing the board.',
+  'For MOSS drawing and editing tasks, use MossStudio workbench tools (studio__cards__create, studio__board__set_prompt, studio__sampling__set_loras, studio__runs__generate) so cards, progress, and outputs appear live on the open canvas; avoid bypassing the canvas with standalone shell scripts, and import any externally post-processed image back with studio__projects__import_image.',
+].join(' ')
 
 function offlineResult(method, version) {
   if (method === 'initialize')
@@ -121,6 +131,7 @@ function offlineResult(method, version) {
       protocolVersion: ['2024-11-05', '2025-06-18'].includes(version) ? version : '2025-03-26',
       capabilities: changes,
       serverInfo: { name: 'mossstudio', version: 'stdio' },
+      instructions: `MossStudio is not running yet; its tools appear once it starts. ${workflowInstructions}`,
     }
   if (method === 'ping') return {}
   if (Object.hasOwn(listKeys, method)) return { [listKeys[method]]: [] }
@@ -146,6 +157,7 @@ export async function forwardJsonRpcLine(line, env = process.env, fetchImpl = fe
   const isList = Object.hasOwn(listKeys, method)
   let status
   const send = async (target) => {
+    status = undefined
     // Only the health probe needs to be quick; a busy MossStudio may take a while to list its tools.
     const timeout = AbortSignal.timeout(isList || method === 'initialize' || method === 'ping' ? 30_000 : 300_000)
     const response = await fetchImpl(target.url, {
@@ -158,8 +170,9 @@ export async function forwardJsonRpcLine(line, env = process.env, fetchImpl = fe
       redirect: 'manual',
       signal: signal ? anySignal([signal, timeout]) : timeout,
     })
-    status = response.status
     const text = await response.text()
+    // Set only once the body arrived, so a connection lost mid-body still warns the request may have run.
+    status = response.status
     if (isNotification) return null
     if (status < 200 || status >= 300) throw new Error(`HTTP ${status}`)
     const rpc = JSON.parse(text)
@@ -168,7 +181,8 @@ export async function forwardJsonRpcLine(line, env = process.env, fetchImpl = fe
       throw new Error('Invalid JSON-RPC reply')
     if (method === 'initialize' && rpc.result?.capabilities) {
       Object.assign(rpc.result.capabilities, changes)
-      selection.catalog = catalogKey(target)
+      // The first health check of this endpoint fills in the catalog the client is about to list, without a notice.
+      selection.catalog = initializedAt(target)
     }
     return rpc
   }
@@ -228,7 +242,10 @@ export function createBridge({ env = process.env, fetchImpl = fetch, write = wri
           signal: anySignal([probe.signal, AbortSignal.timeout(1500)]),
         })
         const body = await health.json()
-        if (health.ok && body?.ok && body.protocol === 'mcp') current = catalogKey(target, body)
+        if (health.ok && body?.ok && body.protocol === 'mcp') {
+          current = catalogKey(target, body)
+          if (selection.catalog === initializedAt(target)) selection.catalog = current
+        }
       }
     } catch {
       // A stale file, bad token or dead listener projects the same empty catalog as no file.

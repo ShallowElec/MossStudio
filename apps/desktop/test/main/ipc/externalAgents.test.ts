@@ -7,6 +7,7 @@ import * as discovery from '@main/lib/cliDiscovery'
 import { paths } from '@main/lib/paths'
 import { DEFAULT_SETTINGS, updateSettings } from '@main/services/settings'
 import { getActiveMcpServer, stopMcpServer } from '@main/mcp'
+import { flushCapabilityAudit } from '@main/capabilities/audit'
 import { registerIpc, syncExternalAgents } from '@main/ipc'
 
 registerIpc()
@@ -36,7 +37,11 @@ const invoke = (channel: string, payload?: unknown) =>
 beforeEach(() => {
   updateSettings({ externalAgentsEnabled: false })
 })
-afterEach(() => stopMcpServer())
+// A capability call appends its audit line after it answers; let it land before the temp data root is removed.
+afterEach(async () => {
+  await stopMcpServer()
+  await flushCapabilityAudit()
+})
 
 describe('设置 › 功能 › 外部 Agent', () => {
   it('is off for a new install and for a settings file written before the switch existed', () => {
@@ -69,6 +74,7 @@ describe('设置 › 功能 › 外部 Agent', () => {
       [Ipc.imageEditDiscoverModels, draft],
       [Ipc.imageEditChannelsRemove, { id }],
       [Ipc.imageEditRun, input],
+      [Ipc.imageEditCancel, { runId: id }],
     ] as const)
       expect(await invoke(ch, p)).toMatchObject({ ok: false, error: { code: 'E_FEATURE_OFF' } })
     expect(existsSync(paths.imageEditChannels())).toBe(false)

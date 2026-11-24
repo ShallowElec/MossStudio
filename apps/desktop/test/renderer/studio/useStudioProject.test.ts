@@ -170,8 +170,13 @@ describe('useStudioProject', () => {
         expect(document.querySelector('dialog[open], [aria-modal="true"]')).not.toBeNull()
         await pressSave()
         expect(fake.log).toEqual([])
-        if (kind === 'lightbox') act(() => document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭"]')!.click())
-        else
+        if (kind === 'lightbox') {
+          act(() => document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭"]')!.click())
+          // Like every dialog, the preview stays in the top layer until it has animated out (well before autosave).
+          act(() => {
+            vi.advanceTimersByTime(300)
+          })
+        } else
           act(() => overlay.render(createElement('div', { hidden: true }, createElement('div', { role: 'dialog', 'aria-modal': 'true' }))))
         await pressSave()
         expect(fake.log).toEqual(['save:a'])

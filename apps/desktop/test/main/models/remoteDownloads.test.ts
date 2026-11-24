@@ -176,6 +176,7 @@ describe('refreshRemoteDownloads', () => {
         ...task(id),
         hostId: 'gpu',
         hostName: 'GPU box',
+        via: 'ssh',
         connectionError: undefined,
         state: 'running',
         bytes: 55,
@@ -265,6 +266,50 @@ describe('refreshRemoteDownloads', () => {
     remote = await import('@main/services/remoteDownloads')
     await expect(remote.refreshRemoteDownloads('w')).rejects.toThrow('daemon down')
     expect(remote.listRemoteDownloads()).toMatchObject([{ id: 'wdown-1', connectionError: 'daemon down' }])
+  })
+
+  it('marks who owns each task, so a daemon task named like an SSH one stays with the daemon', async () => {
+    const worker: TrainingHost = { ...host, id: 'w', remoteBackend: 'worker-daemon' }
+    hosts.list = [worker]
+    const listRemoteWorkerDownloads = vi.spyOn(await import('@main/services/remoteWorker'), 'listRemoteWorkerDownloads')
+    listRemoteWorkerDownloads.mockResolvedValue([task('remote:w:m:1', { state: 'running' })])
+    workerProfileWith.mockResolvedValue({ hostId: 'w' })
+    expect(await remote.refreshRemoteDownloads('w')).toMatchObject([{ id: 'remote:w:m:1', via: 'daemon' }])
+
+    workerProfileWith.mockRejectedValue(new Error('daemon down'))
+    workerPrints([native(task('remote:w:m:1'))])
+    await expect(remote.refreshRemoteDownloads('w')).rejects.toThrow('daemon down')
+    expect(remote.listRemoteDownloads()).toMatchObject([{ id: 'remote:w:m:1', via: 'daemon', connectionError: 'daemon down' }])
+    expect(sshExec).not.toHaveBeenCalled()
+    listRemoteWorkerDownloads.mockRestore()
+  })
+
+  it('reads the owner of tasks saved before it was recorded from their id', () => {
+    writeFileSync(
+      join(dataRoot(), 'remote-downloads.json'),
+      JSON.stringify([task('remote:gpu:m:1', { hostId: 'gpu' }), task('wdown-1', { hostId: 'w' })]),
+    )
+    expect(remote.listRemoteDownloads().map((t) => [t.id, t.via])).toEqual([
+      ['remote:gpu:m:1', 'ssh'],
+      ['wdown-1', 'daemon'],
+    ])
+  })
+
+  it('keeps each cached task’s owner when the daemon’s list fails right after a download starts', async () => {
+    const worker: TrainingHost = { ...host, id: 'w', remoteBackend: 'worker-daemon' }
+    hosts.list = [worker]
+    writeFileSync(join(dataRoot(), 'remote-downloads.json'), JSON.stringify([task('remote:w:old:1', { hostId: 'w', via: 'ssh' })]))
+    const daemon = await import('@main/services/remoteWorker')
+    const start = vi.spyOn(daemon, 'startRemoteWorkerDownload').mockResolvedValue(task('wdown-2', { state: 'queued' }))
+    const list = vi.spyOn(daemon, 'listRemoteWorkerDownloads').mockRejectedValue(new Error('list failed'))
+    workerProfileWith.mockResolvedValue({ hostId: 'w' })
+    await remote.startRemoteDownload(worker, { id: 'm', name: 'Model', repo: 'org/m', revision: 'main', files: [], sizeBytes: 1 })
+    expect(remote.listRemoteDownloads().map((t) => [t.id, t.via])).toEqual([
+      ['remote:w:old:1', 'ssh'],
+      ['wdown-2', 'daemon'],
+    ])
+    start.mockRestore()
+    list.mockRestore()
   })
 
   it('keeps the last snapshot with a connection error and redacts credentials when SSH fails', async () => {
