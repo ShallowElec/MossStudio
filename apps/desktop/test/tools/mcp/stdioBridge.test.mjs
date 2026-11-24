@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { anySignal, createBridge, defaultDiscoveryPaths, forwardJsonRpcLine } from '../../../../../tools/mcp/mossstudio-mcp-stdio.mjs'
 import { createMainCapabilityDispatcher } from '../../../src/main/capabilities'
-import { createMcpServer, MCP_PROTOCOL_VERSION, MCP_SUPPORTED_VERSIONS } from '../../../src/main/mcp/server'
+import { createMcpServer, MCP_PROTOCOL_VERSION, MCP_SUPPORTED_VERSIONS, MCP_WORKFLOW_INSTRUCTIONS } from '../../../src/main/mcp/server'
 import { useTempDataRoot } from '../../helpers/tempDir'
 
 const env = { MOSSSTUDIO_MCP_URL: 'http://127.0.0.1:4321/mcp', MOSSSTUDIO_MCP_TOKEN: 'test-token-0123456789' }
@@ -268,6 +268,35 @@ describe('tools/mcp stdio bridge while MossStudio comes and goes', () => {
     )
   })
 
+  it('gives an offline initialize the same workflow guidance the server gives', async () => {
+    const offline = await forwardJsonRpcLine(line('initialize', 0), pin())
+    expect(offline?.result?.instructions).toContain(MCP_WORKFLOW_INSTRUCTIONS)
+    const server = await serve()
+    try {
+      expect((await forwardJsonRpcLine(line('initialize', 0), pin()))?.result?.instructions).toContain(MCP_WORKFLOW_INSTRUCTIONS)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('does not tell a freshly initialized client its catalog changed when the discovery file and health differ', async () => {
+    const fetchImpl = vi.fn(async (_url, init) => {
+      if (!init?.body) return Response.json({ ok: true, protocol: 'mcp', profile: 'compact', skillDigest: 'd' })
+      const { id } = JSON.parse(init.body)
+      return id === undefined ? new Response(null, { status: 202 }) : Response.json({ jsonrpc: '2.0', id, result: { capabilities: {} } })
+    })
+    const packets = []
+    const bridge = createBridge({ env: direct, fetchImpl, pollMs, write: (packet) => packets.push(packet) })
+    try {
+      await bridge.handleLine(line('initialize', 0))
+      await bridge.handleLine(line('notifications/initialized'))
+      await vi.waitFor(() => expect(fetchImpl.mock.calls.filter(([, init]) => !init?.body).length).toBeGreaterThan(2))
+      expect(packets).toEqual([{ jsonrpc: '2.0', id: 0, result: { capabilities } }])
+    } finally {
+      await bridge.close()
+    }
+  })
+
   it('reports a list that timed out as an error, never an empty catalog, and has the client ask again once healthy', async () => {
     let slow = true
     const fetchImpl = vi.fn(async (url, init) => {
@@ -299,6 +328,14 @@ describe('tools/mcp stdio bridge while MossStudio comes and goes', () => {
     [
       'dropped',
       () => Promise.reject(new TypeError('fetch failed', { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) })),
+    ],
+    [
+      'dropped after its headers',
+      async () => ({
+        status: 200,
+        text: () =>
+          Promise.reject(new TypeError('terminated', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) })),
+      }),
     ],
   ])('never invites a retry of a tool call that %s, since it may have run', async (_failure, failure) => {
     const packet = await forwardJsonRpcLine(line('tools/call', 'gen', { name: 'create' }), direct, failure)
@@ -397,6 +434,23 @@ describe('tools/mcp stdio bridge while MossStudio comes and goes', () => {
       jsonrpc: '2.0',
       id: 'list',
       result: { tools: [{ name: 'fresh' }] },
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('answers the empty offline list when the retry after a 401 finds nothing listening', async () => {
+    const old = { url: direct.MOSSSTUDIO_MCP_URL, token: direct.MOSSSTUDIO_MCP_TOKEN }
+    await writeFile(file(), JSON.stringify(old))
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url) !== old.url)
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) })
+      await writeFile(file(), JSON.stringify({ url: 'http://127.0.0.1:50102/mcp', token: 'test-token-second-endpoint' }))
+      return new Response(null, { status: 401 })
+    })
+    expect(await forwardJsonRpcLine(line('tools/list', 'list'), pin(), fetchImpl)).toEqual({
+      jsonrpc: '2.0',
+      id: 'list',
+      result: { tools: [] },
     })
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
