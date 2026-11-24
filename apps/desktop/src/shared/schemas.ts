@@ -380,7 +380,9 @@ export const schemas = {
   imageEditChannelsSave: z.strictObject({ ...channelFields, ...editEndpoint }),
   imageEditChannelsRemove: z.strictObject({ id: z.uuid() }),
   imageEditDiscoverModels: z.strictObject(editEndpoint),
-  imageEditRun: imageEditArgs.extend({ channelId: z.uuid(), revision: z.uuid() }),
+  /** `runId` comes only from the 外接重绘 dialog; an Agent's arguments are checked against `imageEditArgs` first. */
+  imageEditRun: imageEditArgs.extend({ channelId: z.uuid(), revision: z.uuid(), runId: z.uuid().optional() }),
+  imageEditCancel: z.strictObject({ runId: z.uuid() }),
   remoteWorkerLoras: z
     .object({
       hostId: z.string().min(1).max(120).optional(),

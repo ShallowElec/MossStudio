@@ -4,6 +4,8 @@ export const Ipc = {
   imageEditChannelsRemove: 'image-edit:channels-remove',
   imageEditDiscoverModels: 'image-edit:discover-models',
   imageEditRun: 'image-edit:run',
+  /** `{ runId }`: aborts that 外接重绘 dialog run, unless its picture was already written. */
+  imageEditCancel: 'image-edit:cancel',
   remoteWorkerLoras: 'remote-worker:loras',
   remoteWorkerLoraRegister: 'remote-worker:lora-register',
   remoteWorkerModels: 'remote-worker:models',

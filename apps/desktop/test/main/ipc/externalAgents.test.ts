@@ -74,6 +74,7 @@ describe('设置 › 功能 › 外部 Agent', () => {
       [Ipc.imageEditDiscoverModels, draft],
       [Ipc.imageEditChannelsRemove, { id }],
       [Ipc.imageEditRun, input],
+      [Ipc.imageEditCancel, { runId: id }],
     ] as const)
       expect(await invoke(ch, p)).toMatchObject({ ok: false, error: { code: 'E_FEATURE_OFF' } })
     expect(existsSync(paths.imageEditChannels())).toBe(false)

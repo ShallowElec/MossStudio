@@ -291,9 +291,15 @@ function defaultHandlers(): Map<string, Handler> {
   })
   editHandler(Ipc.imageEditChannelsRemove, (payload) => edits.delete(schemas.imageEditChannelsRemove.parse(payload).id))
   editHandler(Ipc.imageEditDiscoverModels, () => ['image-test', 'text-test'])
+  // A canceled run fails like main's, so a held run released after 取消 adds no card.
+  const canceledEdits = new Set<string>()
   editHandler(Ipc.imageEditRun, (payload) => {
-    const { projectId } = schemas.imageEditRun.parse(payload)
+    const { projectId, runId } = schemas.imageEditRun.parse(payload)
+    if (runId && canceledEdits.has(runId)) throw new MockIpcError('E_MOCK', '已取消重绘')
     return { path: `/projects/${projectId}/assets/edited.png`, width: 512, height: 512 }
+  })
+  editHandler(Ipc.imageEditCancel, (payload) => {
+    canceledEdits.add(schemas.imageEditCancel.parse(payload).runId)
   })
   // 外部 Agent: every channel answers E_FEATURE_OFF while the switch is off, as main does.
   const external =

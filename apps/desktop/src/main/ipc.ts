@@ -111,7 +111,14 @@ import { pushTestNotification } from './services/desktopNotifications'
 import { isInside } from './lib/paths'
 import { codedError, errorCode } from './lib/codedError'
 import { getEngineFeatures } from './services/engineFeatures'
-import { listImageChannels, saveImageChannel, removeImageChannel, discoverImageModels, runImageEdit } from './services/imageEdit'
+import {
+  listImageChannels,
+  saveImageChannel,
+  removeImageChannel,
+  discoverImageModels,
+  runDialogImageEdit,
+  cancelImageEdit,
+} from './services/imageEdit'
 import { importImageBytes, importImageFile, pruneProjectMasks, saveMask } from './services/studioAssets'
 import { listControlAdapters, removeControlAdapter } from './services/controlAdapters'
 import { applyThemeSource, applyUiScale, controlWindow, openWindow } from './windows'
@@ -367,7 +374,8 @@ export function registerIpc(): void {
   handle(Ipc.imageEditChannelsSave, schemas.imageEditChannelsSave, saveImageChannel)
   handle(Ipc.imageEditChannelsRemove, schemas.imageEditChannelsRemove, ({ id }) => removeImageChannel(id))
   handle(Ipc.imageEditDiscoverModels, schemas.imageEditDiscoverModels, discoverImageModels)
-  handle(Ipc.imageEditRun, schemas.imageEditRun, (input) => runImageEdit(input))
+  handle(Ipc.imageEditRun, schemas.imageEditRun, runDialogImageEdit)
+  handle(Ipc.imageEditCancel, schemas.imageEditCancel, ({ runId }) => cancelImageEdit(runId))
   const capabilities = createBuiltinMainDispatcher()
   attachCapabilityApproval(capabilities)
 
