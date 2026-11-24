@@ -105,6 +105,8 @@ import { usePictureRegions } from './usePictureRegions'
 const BUNDLE_KEY = 'mossstudio.modelBundleId'
 const HOST_KEY = 'mossstudio.studioHostId'
 const WORKER_MODEL_KEY = 'mossstudio.workerModelPicks'
+/** The one Worker pick for every host before picks were kept per host; it is not carried over. */
+const LEGACY_WORKER_MODEL_KEY = 'mossstudio.workerModelId'
 const ASSISTANT_MODE_KEY = 'mossstudio.assistantMode'
 const WIDTH_KEY = 'mossstudio.studioPanelWidths'
 const UNDERLAY_HANDOFF_KEY = 'clover.studioBackground'
@@ -200,6 +202,7 @@ export function StudioPage(): React.JSX.Element {
   const [remoteHostId, setRemoteHostId] = useState(() => readStorage(HOST_KEY) ?? '')
   // The model picked on each Worker host, kept apart from the 画面's own (see canvasModelForWorkerPick).
   const [workerPicks, setWorkerPicks] = useState(() => parseWorkerModelPicks(readStorage(WORKER_MODEL_KEY)))
+  useEffect(() => writeStorage(LEGACY_WORKER_MODEL_KEY, null), [])
   const [tool, setTool] = useState<BoardTool>('select')
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null)
   const [activePanelId, setActivePanelId] = useState<PanelId | null>(null)
@@ -235,7 +238,7 @@ export function StudioPage(): React.JSX.Element {
   // A Worker daemon picked as 运行位置 reports its own detected models and registered LoRAs.
   const workerHost = isWorkerDaemonHost(remoteHost) ? remoteHost : null
   const workerModels = useWorkerModels(workerHost?.id ?? null)
-  const workerModelPick = workerHost ? (workerPicks[workerHost.id] ?? null) : null
+  const workerModelPick = workerHost ? (workerPicks.get(workerHost.id) ?? null) : null
   const workerLoras = useWorkerLoras(workerHost?.id ?? null)
   const workerAdapters = useMemo(() => (workerLoras.items ? workerAdapterEntries(workerLoras.items) : null), [workerLoras.items])
   const bundle = workerHost
@@ -1132,10 +1135,11 @@ export function StudioPage(): React.JSX.Element {
               const to = item ? workerModelBundles([item])[0] : undefined
               const over = canvasModelForWorkerPick(item, catalog, selected?.modelBundleId)
               changeSelected((canvas) => ({ ...canvas, ...samplingForBundle(canvas, from, to), modelBundleId: over }))
-              const { [workerHost.id]: _previous, ...others } = workerPicks
-              const picks = id ? { ...others, [workerHost.id]: { id, over } } : others
+              const picks = new Map(workerPicks)
+              if (id) picks.set(workerHost.id, { id, over })
+              else picks.delete(workerHost.id)
               setWorkerPicks(picks)
-              writeStorage(WORKER_MODEL_KEY, JSON.stringify(picks))
+              writeStorage(WORKER_MODEL_KEY, JSON.stringify(Object.fromEntries(picks)))
               return
             }
             const to = catalog?.bundles.find((item) => item.id === id)

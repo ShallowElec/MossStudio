@@ -151,20 +151,20 @@ export function workerModelOrder(
   return pick && pick.over === canvasModelId ? [pick.id, canvasModelId, preferredId] : [canvasModelId, pick?.id, preferredId]
 }
 
-/** The Worker picks kept in storage, by host id. A malformed entry is dropped. */
-export function parseWorkerModelPicks(raw: string | null): Record<string, WorkerModelPick> {
+/** The Worker picks kept in storage, by host id (a Map, so no host id reaches a prototype). A malformed entry is dropped. */
+export function parseWorkerModelPicks(raw: string | null): Map<string, WorkerModelPick> {
+  const picks = new Map<string, WorkerModelPick>()
   let parsed: unknown
   try {
     parsed = JSON.parse(raw ?? '{}')
   } catch {
-    return {}
+    return picks
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-  const picks: Record<string, WorkerModelPick> = {}
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return picks
   for (const [hostId, value] of Object.entries(parsed)) {
     const pick = value as Partial<WorkerModelPick> | null
     if (typeof pick?.id !== 'string' || !pick.id) continue
-    picks[hostId] = typeof pick.over === 'string' ? { id: pick.id, over: pick.over } : { id: pick.id }
+    picks.set(hostId, typeof pick.over === 'string' ? { id: pick.id, over: pick.over } : { id: pick.id })
   }
   return picks
 }

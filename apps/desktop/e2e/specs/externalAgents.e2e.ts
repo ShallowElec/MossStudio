@@ -362,11 +362,14 @@ describe('Worker 远程主机 on', () => {
       const project = window.__mock.state.projects[0]!
       project.canvases[0]!.modelBundleId = 'moss-sft-int8'
       project.canvases.push(window.__mock.fixtures.canvasFixture({ id: 'c2', title: '画面 2', x: 1200, modelBundleId: 'moss-sft-int8' }))
+      // The one pick for every host from before picks were kept per host: neither used nor kept.
+      localStorage.setItem('mossstudio.workerModelId', 'moss-sft')
     })
     await app.start()
     await openLoraRows(page)
     const picker = page.locator('[data-model-picker]').first()
     await expect.poll(() => picker.textContent()).toContain('INT8')
+    expect(await page.evaluate(() => localStorage.getItem('mossstudio.workerModelId'))).toBeNull()
     // On 画面 1 the Worker's MOSS-Image SFT stands in for its INT8 model.
     await picker.click()
     await page.locator('[role="menuitem"][title="MOSS-Image SFT"]').click()

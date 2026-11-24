@@ -406,9 +406,16 @@ ${write('"$directory/shell-state"', state)}fi
   void pending.finally(() => preparing.delete(key))
 }
 
-function updateTasks(host: TrainingHost, tasks: DownloadTask[], via: 'daemon' | 'ssh'): DownloadTask[] {
+/** `via` marks every task's owner; without it each task keeps the one it has. */
+function updateTasks(host: TrainingHost, tasks: DownloadTask[], via?: 'daemon' | 'ssh'): DownloadTask[] {
   listRemoteDownloads()
-  const incoming = tasks.map((task) => ({ ...task, hostId: host.id, hostName: host.name, via, connectionError: undefined }))
+  const incoming = tasks.map((task) => ({
+    ...task,
+    hostId: host.id,
+    hostName: host.name,
+    via: via ?? task.via,
+    connectionError: undefined,
+  }))
   const before = new Map(cache!.map((task) => [task.id, task]))
   cache = [...cache!.filter((task) => task.hostId !== host.id), ...incoming]
   atomicWriteJson(cacheFile(), cache)
@@ -532,8 +539,9 @@ export async function startRemoteDownload(
         token: network.token,
       })
       const kept = listRemoteDownloads().filter((task) => task.hostId === host.id && task.id !== created.id)
-      const tasks = await listRemoteWorkerDownloads(profile).catch(() => [...kept, created])
-      const updated = updateTasks(host, tasks, 'daemon')
+      const listed = await listRemoteWorkerDownloads(profile).catch(() => null)
+      // A failed list keeps the cached tasks, each with its own owner.
+      const updated = listed ? updateTasks(host, listed, 'daemon') : updateTasks(host, [...kept, { ...created, via: 'daemon' }])
       startRemoteDownloadMonitor()
       return updated.find((item) => item.id === created.id) ?? created
     }

@@ -109,12 +109,26 @@ describe('Worker real model resolution and strength=0 LoRAs', () => {
   })
 
   it('reads the Worker picks per host and drops malformed ones', () => {
-    expect(parseWorkerModelPicks(null)).toEqual({})
-    expect(parseWorkerModelPicks('my-finetune')).toEqual({})
-    expect(parseWorkerModelPicks('["a"]')).toEqual({})
+    expect(parseWorkerModelPicks(null)).toEqual(new Map())
+    expect(parseWorkerModelPicks('my-finetune')).toEqual(new Map())
+    expect(parseWorkerModelPicks('["a"]')).toEqual(new Map())
     expect(
       parseWorkerModelPicks(JSON.stringify({ a: { id: 'sft-int8', over: 'moss-sft' }, b: { id: 'my-finetune' }, c: { id: 3 }, d: null })),
-    ).toEqual({ a: { id: 'sft-int8', over: 'moss-sft' }, b: { id: 'my-finetune' } })
+    ).toEqual(
+      new Map([
+        ['a', { id: 'sft-int8', over: 'moss-sft' }],
+        ['b', { id: 'my-finetune' }],
+      ]),
+    )
+  })
+
+  it('keeps a host id like __proto__ as a plain key, never on a prototype', () => {
+    const picks = parseWorkerModelPicks('{"__proto__": {"id": "sft-int8"}, "constructor": {"id": "my-finetune"}}')
+    expect(picks.get('__proto__')).toEqual({ id: 'sft-int8' })
+    expect(picks.get('constructor')).toEqual({ id: 'my-finetune' })
+    expect(picks.get('toString')).toBeUndefined()
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype)
+    expect(({} as Record<string, unknown>)['id']).toBeUndefined()
   })
 
   it('keeps a downloaded catalog model in the 画面 when a Worker model is picked, never the Worker’s own id', () => {
