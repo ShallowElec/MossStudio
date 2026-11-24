@@ -1,7 +1,7 @@
 ---
 status: current
-last-verified: 2026-11-08 (fec4fe3)
-code: apps/desktop/src/renderer/src/pages/studio/assistant/, apps/desktop/src/renderer/src/components/common/ProviderDialog.tsx, apps/desktop/src/renderer/src/lib/agent/, apps/desktop/src/renderer/src/lib/agentTools.ts, apps/desktop/src/shared/agent/, apps/desktop/src/shared/ai.ts, apps/desktop/src/main/services/ai.ts
+last-verified: 2026-11-24 (e07751d)
+code: apps/desktop/src/renderer/src/pages/studio/assistant/, apps/desktop/src/renderer/src/components/common/ProviderDialog.tsx, apps/desktop/src/renderer/src/lib/agent/, apps/desktop/src/renderer/src/lib/agentTools.ts, apps/desktop/src/shared/agent/, apps/desktop/src/shared/ai.ts, apps/desktop/src/main/services/ai.ts, apps/desktop/src/renderer/src/pages/studio/StudioPanels.tsx
 ---
 
 # Studio assistant
@@ -12,7 +12,7 @@ Paths are relative to `apps/desktop/src/`; `assistant/` stands for `renderer/src
 
 ## 1. The panel
 
-The 助手 button in the title bar opens the right sidebar; the panel stays mounted while hidden so a running turn survives (`renderer/src/pages/studio/StudioPage.tsx`). Its one header row (`assistant/Assistant.tsx`): a 语言模型 menu listing the connected providers with 连接设置… last (a new chat starts on 设置 › 语言模型 › 助手和漫画, and picking another here saves it there; a reopened conversation keeps its own), a 自主 | 审批 switch, 历史对话 and 新对话. An empty chat shows three starters (润色描述, 拆成区域, 做一套分镜). A reply's actions appear on hover: 用作描述, 复制, 重新回答. Enter sends, Shift+Enter breaks a line.
+The 助手 button in the title bar opens the right sidebar, which it shares with 解析; the panel stays mounted while hidden, also while 解析 is open, so a running turn survives (`StudioPanels` in `renderer/src/pages/studio/StudioPanels.tsx`). Its one header row (`assistant/Assistant.tsx`): 协同 while 外部 Agent is on (section 10), a 语言模型 menu listing the connected providers with 连接设置… last (a new chat starts on 设置 › 语言模型 › 助手和漫画, and picking another here saves it there; a reopened conversation keeps its own), a 自主 | 审批 switch, 历史对话 and 新对话. An empty chat shows three starters (润色描述, 拆成区域, 做一套分镜). A reply's actions appear on hover: 用作描述, 复制, 重新回答. Enter sends, Shift+Enter breaks a line.
 
 ## 2. Providers
 
@@ -30,7 +30,7 @@ Every message carries the project as it is at send time: `lib/agentTools.ts` `fo
 | Registry | `shared/agent/registry.ts` (`AGENT_TOOLS`) | Per tool: `title` (Chinese, for the chat line), `pack`, `risk` (`read`, `write`, `run`, `ask`), `requires` (`editable`), `description` for the model, `summarize(args)` |
 | Provider list | `toolDefinitions(resolveToolset({ page: 'studio' }))` in `main/ipc.ts` | JSON Schema from `z.toJSONSchema`, without `$schema` |
 | Handlers | `renderer/src/lib/agent/executor.ts` (`HANDLERS`) | One per `ToolName`; the table is exhaustive, so a tool without a handler fails to compile |
-| Studio API | `renderer/src/lib/agent/types.ts` (`StudioToolApi`), implemented in `StudioPage.tsx` | `state`, `readContext`, `readCanvas`, `setPrompt`, `setSampler`, `addLayer`, `addTextLayer`, `updateLayer`, `removeLayer`, `createScenes`, `selectCanvas`, `generate`, `problems`, and `oneStep`, which makes a turn's board changes one undo step (section 7) |
+| Studio API | `renderer/src/lib/agent/types.ts` (`StudioToolApi`), implemented in `StudioPage.tsx` | `state`, `readContext`, `snapshot`, `readCanvas`, `setPrompt`, `setSampler`, `addLayer`, `addTextLayer`, `updateLayer`, `removeLayer`, `createScenes`, `selectCanvas`, `generate`, `problems`, and `oneStep`, which makes a turn's board changes one undo step (section 7) |
 | Bridge | `lib/agentTools.ts` (`installStudioToolBridge`) | `Events.aiToolCall` from main (`AiToolCallRequest`, which names the turn in `turnId`) runs `executeStudioTool`; the result goes back through `Ipc.aiToolResult` |
 
 `resolveToolset` mounts `canvas.read` and `ask` everywhere, `canvas.write` and `storyboard` on the Studio only, and nothing when the provider cannot call tools. The `library` pack exists as a name only (section 11).
@@ -43,7 +43,7 @@ Every message carries the project as it is at send time: `lib/agentTools.ts` `fo
 | `studio_ask_user` | 问你一句 | `ask`, ask | Shows a choice card with 2 to 5 options | fewer than 2 options |
 | `studio_ask_approval` | 等你确认 | `ask`, ask | Shows a confirm card (approve, reject, change it) | never |
 | `studio_set_prompt` | 改写描述 | `canvas.write`, write | Writes the description of the selected 画面 or 风格 | see precheck |
-| `studio_set_sampler` | 调整参数 | `canvas.write`, write | Size (snapped to the 16 px grid), steps (snapped to the nearest 质量 preset), CFG, seed (then locked) | a 放大's size (只能改放大倍数); no fields |
+| `studio_set_sampler` | 调整参数 | `canvas.write`, write | Size (snapped to the 16 px grid), steps (snapped to the nearest 质量 preset), CFG, seed (then locked) | a 画面 whose run is going (这张画面正在生成…); a 放大's size (只能改放大倍数); no fields |
 | `studio_add_layer` | 添加区域 | `canvas.write`, write | Adds an `object` or `character` region with a normalised box | on a 放大; `label: "text"` is redirected to the next tool with a `fix` |
 | `studio_add_text_layer` | 添加文字 | `canvas.write`, write | Adds a text region; `caption` is the lettering style, `text` the exact words, both required | on a 放大 |
 | `studio_update_layer` | 修改区域 | `canvas.write`, write | Changes caption, text, box, visibility or opacity of region `index` | no such index |
@@ -89,8 +89,8 @@ A card (`shared/agent/cards.ts` `AgentCard`) is attached to the assistant messag
 
 | Card | Made by | Buttons | The follow-up message |
 | --- | --- | --- | --- |
-| choice (`assistant/ChoiceCard.tsx`) | `studio_ask_user` | Single or multiple options with a detail line, 跳过, 确定 | The chosen labels, plus 补充：the typed text; 跳过 sends 「question」先跳过，你按默认继续。 |
-| plan (`assistant/PlanCard.tsx`) | A turn in 审批 that held writes | The list of steps, 放弃, 调整…, 应用 | 已按方案改了 N 处 (with 还差：the first problem); 调整 sends 方案先不应用，改一下：the typed text |
+| choice (`assistant/ChoiceCard.tsx`) | `studio_ask_user` | Single or multiple options with a detail line, 跳过, 确定 | The chosen labels, plus 补充：the typed text; nothing picked or typed sends 就按这个来。; 跳过 sends 「question」先跳过，你按默认继续。 |
+| plan (`assistant/PlanCard.tsx`) | A turn in 审批 that held writes | The list of steps, 放弃, 调整…, 应用 | 已执行方案： and the first three step labels (等 N 处 when there are more), then 还差：the first problem or ，已经生效，不用再确认。; 调整 sends 方案先不应用，改一下：the typed text; 放弃 sends the choice card's skip text, 「title」先跳过，你按默认继续。 |
 | confirm (`assistant/ConfirmCard.tsx`) | `studio_ask_approval` | 拒绝, 改一句…, and the approve button (批准 unless the tool named it) | 批准，开始吧。 or 先别做。; 改一句 sends 先改一下：the typed text |
 
 Only one card waits at a time: the newest unanswered one sits above the composer and does not scroll with the chat. While it waits, text typed in the composer answers it (the placeholder changes: 或者直接写你的答案…, 想改哪里？写给助手…, 想先改什么？写给助手…); 调整… and 改一句… only move focus there. The answer is stored through `Ipc.aiCardAnswer` (`main/services/ai.ts` `answerAgentCard`) before the follow-up is sent. An answered card folds to one line in its message (the question; a plan reads 标题 · 已应用 N 处改动, 已放弃 or 提了调整).
@@ -105,7 +105,7 @@ The 助手 is not the only Agent that can change the board: with 设置 › 功�
 
 ## 11. Not built
 
-From `docs/design/agent-tool-rack.md`, still open at fec4fe3: thumbnails for composition choices (options are text only); the `library` pack (`pick_reference` from 作品); a `MAX_TOOL_ROUNDS` that grows for a storyboard; a check of all plan steps before 应用 runs the first; a way to answer a card without sending at once.
+Still open: thumbnails for composition choices (options are text only); the `library` pack (`pick_reference` from 作品); a `MAX_TOOL_ROUNDS` that grows for a storyboard; a check of all plan steps before 应用 runs the first; a way to answer a card without sending at once.
 
 ## 12. Tests
 
