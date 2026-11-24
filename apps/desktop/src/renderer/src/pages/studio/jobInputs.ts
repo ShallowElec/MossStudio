@@ -157,7 +157,11 @@ export function resolveJobInputs(
     if (context.worker) {
       if (Object.keys(sampling).some((key) => !isWorkerSamplingKey(key)))
         blockers.push({ id: 'input-unsupported', message: '远端主机只支持选择采样器和调度器，请在高级设置中清除其他采样设置' })
-      else if (!features?.samplers || Object.entries(sampling).some(([key, value]) => !features.values[key]?.includes(value)))
+      // While the host's answer is read, its lists are unknown, not empty: main checks them again when the job starts.
+      else if (
+        context.features !== undefined &&
+        (!features?.samplers || Object.entries(sampling).some(([key, value]) => !features.values[key]?.includes(value)))
+      )
         blockers.push({ id: 'input-unsupported', message: '远端主机未提供所选的采样器或调度器，请改回默认或重新连接' })
     } else if (features) {
       const samplerChange = features.cli ? !cliSamplingAccepted(sampling) : Boolean(sampling.sampler || sampling.scheduler)

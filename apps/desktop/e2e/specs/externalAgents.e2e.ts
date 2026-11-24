@@ -330,6 +330,26 @@ describe('Worker 远程主机 on', () => {
       .toMatchObject([{ hostId: 'worker-1', sampling: { sampler: 'euler', scheduler: 'karras' } }])
   })
 
+  it('does not report a saved Worker sampler missing while the host’s answer is still read', async () => {
+    const page = await app.open({ scenario: 'workerHost', route: '/studio', defer: true })
+    await seedLoraBoard(page, { workerHost: true })
+    await page.evaluate(() => {
+      window.__mock.state.projects[0]!.canvases[0]!.sampling = { sampler: 'euler' }
+      // The host's answer stays unread until the run asks for it again.
+      ;(window as unknown as { heldFeatures: unknown }).heldFeatures = [0, 1, 2, 3].map(() => window.__mock.hold('engine:features'))
+    })
+    await app.start()
+    const generate = page.locator('[data-studio-generate]')
+    await expect.poll(() => generate.isDisabled()).toBe(false)
+    expect(await page.getByText('远端主机未提供所选的采样器或调度器', { exact: false }).count()).toBe(0)
+    await generate.click()
+    await page.evaluate(async () => {
+      const held = (window as unknown as { heldFeatures: Array<{ release: () => Promise<void> }> }).heldFeatures
+      for (const call of held) await call.release()
+    })
+    await expect.poll(() => app.calls('http:POST /api/engine-jobs')).toMatchObject([{ hostId: 'worker-1', sampling: { sampler: 'euler' } }])
+  })
+
   it('the LoRA picker lists the Worker’s own LoRA when it is the 运行位置', async () => {
     const page = await openStudio(app, 'workerHost')
     await openLoraRows(page)

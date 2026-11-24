@@ -55,7 +55,8 @@ export function SamplingSection({
 
   return (
     <div className="flex flex-col gap-5" data-sampling-section>
-      {features === null ? <Notice>引擎准备好后才能选择新的采样值。</Notice> : null}
+      {/* On a Worker a saved value can still be cleared; elsewhere every select is off. */}
+      {features === null ? <Notice>{worker ? '引擎准备好后才能选择新的采样值。' : '引擎准备好后才能改采样设置。'}</Notice> : null}
 
       {showSamplers ? (
         <>
