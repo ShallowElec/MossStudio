@@ -79,6 +79,24 @@ describe('工具与节点', () => {
     expect(await menu.count()).toBe(0)
   })
 
+  it('leaves Ctrl+Z to the board while focus is in the picker', async () => {
+    const page = await app.open({ settings: { toolHubEnabled: true } })
+    const toolbar = page.getByRole('toolbar', { name: '画布工具' })
+    const trigger = toolbar.getByRole('button', { name: '工具与节点' })
+    const menu = toolbar.getByRole('menu', { name: '工具与节点' })
+    const cards = page.locator('article[data-canvas-card]')
+    await cards.first().waitFor()
+    const before = await cards.count()
+    await trigger.click()
+    await menu.getByRole('menuitem', { name: '新建风格', exact: true }).click()
+    await expect.poll(() => cards.count()).toBe(before + 1)
+    await trigger.click()
+    await menu.getByRole('menuitem', { disabled: false }).first().focus()
+    await page.keyboard.press('Control+z')
+    await expect.poll(() => cards.count()).toBe(before)
+    expect(await menu.isVisible()).toBe(true)
+  })
+
   it('splits the selected picture using the existing GBC parse command', async () => {
     const page = await app.open({ scenario: 'ready', settings: { toolHubEnabled: true, gbcEnabled: true }, defer: true })
     const path = '/fixture/projects/project-1/assets/cat-1600x1200.png'

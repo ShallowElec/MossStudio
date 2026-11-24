@@ -1,4 +1,5 @@
 import { GalleryHorizontal, ScanLine, ScanSearch, Workflow } from 'lucide-react'
+import { PARSE_CHECKING } from '@shared/gbc'
 import { nodeRegistry } from './nodeRegistry'
 import { RECIPES } from './recipes'
 import { createToolRegistry, type Availability, type BoardAction } from './toolRegistry'
@@ -64,13 +65,14 @@ export const boardTools = createToolRegistry([
     icon: ScanLine,
     description: '把所选图片拆成带描述的区域',
     command: { type: 'split' },
+    // As in the card menu: only 正在检查 turns it off; another blocker shows and choosing it leads to 设置.
     availability: (ctx) =>
       ctx.parseBlocker === undefined
         ? hidden
         : !ctx.pictureId
           ? disabled('先选择一张有图片的卡片')
-          : ctx.parseBlocker
-            ? disabled(ctx.parseBlocker)
-            : ready(),
+          : ctx.parseBlocker === PARSE_CHECKING
+            ? disabled(PARSE_CHECKING)
+            : { kind: 'ready', hint: ctx.parseBlocker ?? undefined },
   },
 ])
