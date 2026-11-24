@@ -54,3 +54,20 @@ it('lets a Worker canvas reset saved enum choices to default when its capabiliti
     act(() => root.unmount())
   }
 })
+
+it('says the sampling settings wait for the engine, and on a Worker that only new values wait', () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const card = canvas({ sampling: { sampler: 'euler' } })
+  const host = document.createElement('div')
+  const root = createRoot(host)
+  try {
+    act(() => root.render(createElement(SamplingSection, { canvas: card, features: null, worker: false, onChange: vi.fn() })))
+    expect(host.textContent).toContain('引擎准备好后才能改采样设置。')
+    expect(host.querySelector<HTMLSelectElement>('#studio-sampler')!.disabled).toBe(true)
+    act(() => root.render(createElement(SamplingSection, { canvas: card, features: null, worker: true, onChange: vi.fn() })))
+    expect(host.textContent).toContain('引擎准备好后才能选择新的采样值。')
+    expect(host.querySelector<HTMLSelectElement>('#studio-sampler')!.disabled).toBe(false)
+  } finally {
+    act(() => root.unmount())
+  }
+})

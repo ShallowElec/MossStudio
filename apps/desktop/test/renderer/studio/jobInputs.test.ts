@@ -256,6 +256,14 @@ describe('studio/jobInputs on a Worker host', () => {
     }
   })
 
+  it('does not report a sampler or scheduler missing while the Worker’s answer is still read', () => {
+    const ctx = { ...worker(), features: undefined }
+    expect(resolveJobInputs(target({ sampling: { sampler: 'euler' } }), ctx)).toMatchObject({
+      blockers: [],
+      params: { sampling: { sampler: 'euler' } },
+    })
+  })
+
   it('does not guess explicit choices when the Worker cannot be queried, but allows defaults', () => {
     const ctx = { ...worker(), features: null }
     expect(resolveJobInputs(target({ sampling: { scheduler: 'moss' } }), ctx).blockers).toMatchObject([{ id: 'input-unsupported' }])
