@@ -45,9 +45,9 @@ export function InspectorPanel({
     onChangeLayers((items) => items.map((item) => (item.id === id ? { ...item, ...value } : item)))
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex min-w-0 flex-col gap-5">
       {region ? (
-        <section aria-label="区域" className="flex flex-col gap-2.5">
+        <section aria-label="区域" className="flex min-w-0 flex-col gap-2.5">
           <FieldLabel as="h3">{KIND_LABEL[region.kind]}区域</FieldLabel>
           <Segmented<ProjectLayerKind>
             block

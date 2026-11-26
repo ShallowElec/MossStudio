@@ -1,6 +1,11 @@
 /* Studio: panels are told apart by tone only; these are the few things Tailwind
    utilities cannot express on their own. */
 
+/* Reserve the 10px scrollbar gutter so toggling fields (such as the text-region input) never shifts the sidebar width. */
+.studio-scroll {
+  scrollbar-gutter: stable;
+}
+
 /* Panel resize handle: invisible hit area on the panel edge. */
 .studio-divider {
   position: absolute;

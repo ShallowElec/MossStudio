@@ -316,7 +316,7 @@ function CanvasParams({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-5">
+      <div className="studio-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto pl-5 pr-3.5 pb-4 pt-5">
         {readOnly ? <Notice className="mb-5">参数已固定，复制成新画面后可改</Notice> : null}
         <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-6">
           <section className="flex flex-col gap-2.5">
@@ -901,7 +901,7 @@ function StylePanel({
   const users = styleUsers(canvas.id, inputs?.canvases ?? [])
   const loraUnsupported = inputs?.features ? !inputs.features.lora : false
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto px-5 pb-4 pt-5">
+    <div className="studio-scroll flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto pl-5 pr-3.5 pb-4 pt-5">
       <div className="flex min-w-0 flex-col gap-6">
         <section className="flex flex-col gap-2.5">
           <FieldLabel htmlFor="studio-style-name">风格名称</FieldLabel>
