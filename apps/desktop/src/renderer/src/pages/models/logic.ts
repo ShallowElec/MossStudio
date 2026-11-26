@@ -1,4 +1,5 @@
 import { bestBundleFor, bundleGpusProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle } from '@shared/bundleFit'
+import type { SlotKey } from '@shared/modelCombos'
 import type { AdapterEntry, DownloadTask, GpuInventoryDevice, ModelBundle, ModelEntry, ModelSource, ModelSourcesView } from '@shared/types'
 import { isSharedModelId } from '@shared/sharedModels'
 import { goneOwnPart, isLostOwnFile, isOwnFile, lostFile } from '@shared/modelImport'
@@ -682,4 +683,27 @@ export const modelSourceKindLabels: Record<ModelSource['kind'], string> = {
 export function runningServicesText(services: NonNullable<ModelSourcesView['services']>): string {
   if (!services.length) return '没有发现正在运行的 ComfyUI、Stable Diffusion WebUI 或 Forge'
   return [...new Set(services.map((service) => modelSourceKindLabels[service.kind]))].join('、') + ' 正在运行'
+}
+
+const SHARED_SLOT: Partial<Record<ModelEntry['role'], SlotKey>> = {
+  dit: 'dit',
+  text_encoder: 'textEncoder',
+  vae: 'vae',
+}
+
+/** Builds initial 自己组合 slot IDs from available shared-directory component files, prioritizing `focus` for its slot. */
+export function sharedCombinationInitial(
+  sharedModels: readonly Pick<ModelEntry, 'id' | 'role'>[],
+  focus?: Pick<ModelEntry, 'id' | 'role'>,
+): Partial<Record<SlotKey, string>> {
+  const slots: Partial<Record<SlotKey, string>> = {}
+  for (const model of sharedModels) {
+    const slot = SHARED_SLOT[model.role]
+    if (slot && !slots[slot]) slots[slot] = model.id
+  }
+  if (focus) {
+    const slot = SHARED_SLOT[focus.role]
+    if (slot) slots[slot] = focus.id
+  }
+  return slots
 }

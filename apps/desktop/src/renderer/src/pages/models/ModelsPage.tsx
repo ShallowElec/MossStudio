@@ -42,6 +42,7 @@ import {
   downloadGroups,
   modelSections,
   parseModelsQuery,
+  sharedCombinationInitial,
   type BundleView,
   type DownloadGroup,
 } from './logic'
@@ -174,6 +175,7 @@ function ModelsTab({
     [catalog, location.tasks, location.isModelInstalled, remote, workerDaemon, gpus, cliGpus],
   )
   const sharedModels = catalog.models.filter((model) => model.tags.includes('shared-directory') && model.installed)
+  const hasCombinableShared = sharedModels.some((model) => model.role === 'dit' || model.role === 'text_encoder' || model.role === 'vae')
   const sharedFiles = sources.flatMap((source) => source.files)
   const availablePaths = new Set(sharedFiles.filter((file) => file.state === 'available').map((file) => file.path))
   const incompatible = [
@@ -255,14 +257,36 @@ function ModelsTab({
             <ModelSources onSources={setSources} />
           </Section>
           {sources.length || sharedModels.length ? (
-            <Section title="可用模型">
+            <Section
+              title="可用模型"
+              description="来自共享目录的兼容文件，单文件部件组合后即可在创作中使用。"
+              actions={
+                hasCombinableShared ? (
+                  <Button tone="secondary" onClick={() => setCombining({ initial: sharedCombinationInitial(sharedModels) })}>
+                    用这些文件组合
+                  </Button>
+                ) : undefined
+              }
+            >
               {sharedModels.length ? (
                 <Group>
-                  {sharedModels.map((model) => (
-                    <Row key={model.id} title={model.name} description={sharedRoleLabels[model.role]}>
-                      <SizeText bytes={model.installedBytes || model.sizeBytes} />
-                    </Row>
-                  ))}
+                  {sharedModels.map((model) => {
+                    const combinable = model.role === 'dit' || model.role === 'text_encoder' || model.role === 'vae'
+                    return (
+                      <Row key={model.id} title={model.name} description={sharedRoleLabels[model.role]}>
+                        <SizeText bytes={model.installedBytes || model.sizeBytes} />
+                        {combinable ? (
+                          <Button
+                            size="xs"
+                            tone="ghost"
+                            onClick={() => setCombining({ initial: sharedCombinationInitial(sharedModels, model) })}
+                          >
+                            去组合
+                          </Button>
+                        ) : null}
+                      </Row>
+                    )
+                  })}
                 </Group>
               ) : (
                 <EmptyState
