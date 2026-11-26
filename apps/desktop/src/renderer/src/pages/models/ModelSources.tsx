@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Ipc } from '@shared/channels'
+import { Events, Ipc } from '@shared/channels'
 import type { ModelSource, ModelSourcesView } from '@shared/types'
 import { Notice } from '../../components/common/Notice'
 import { MenuItem, Popover } from '../../components/common/Popover'
 import { Button, EmptyState, Group, LoadingRow, Row } from '../../components/ui'
-import { call } from '../../lib/api'
+import { call, onEvent } from '../../lib/api'
 import { modelSourceKindLabels as kindLabels, runningServicesText } from './logic'
 
 type SourcesChannel =
@@ -28,28 +28,66 @@ export function ModelSources({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const last = useRef<{ channel: SourcesChannel; input?: SourcesInput }>({ channel: Ipc.modelSourcesList })
+  const mounted = useRef(true)
+  const requestSeq = useRef(0)
+  const mutating = useRef(false)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   const run = useCallback(
     async (channel: SourcesChannel, input?: SourcesInput): Promise<void> => {
+      const seq = ++requestSeq.current
+      const isMutation = channel !== Ipc.modelSourcesList
+      if (isMutation) mutating.current = true
       last.current = { channel, input }
       setBusy(true)
       setError(null)
       try {
         const result = await call<ModelSourcesView>(channel, input)
+        if (!mounted.current || seq !== requestSeq.current) return
         setView(result)
         onSources?.(result.sources)
       } catch (cause) {
+        if (!mounted.current || seq !== requestSeq.current) return
         setError(cause instanceof Error ? cause.message : String(cause))
       } finally {
-        setBusy(false)
+        if (isMutation) mutating.current = false
+        if (mounted.current && seq === requestSeq.current) setBusy(false)
       }
     },
     [onSources],
   )
 
+  const refreshQuiet = useCallback(async (): Promise<void> => {
+    // Mutating actions already return the updated view after emitting Events.modelsChanged (and scan includes running services).
+    if (mutating.current) return
+    const seq = ++requestSeq.current
+    try {
+      const result = await call<ModelSourcesView>(Ipc.modelSourcesList)
+      if (!mounted.current || seq !== requestSeq.current) return
+      setView(result)
+      onSources?.(result.sources)
+    } catch {
+      // Background sync failure stays quiet; manual actions report errors.
+    }
+  }, [onSources])
+
   useEffect(() => {
     if (pathname === '/models' || pathname === '/setup') void run(Ipc.modelSourcesList)
   }, [run, reload, pathname])
+
+  useEffect(() => {
+    if (pathname !== '/models' && pathname !== '/setup') return
+    return onEvent<{ reason?: string } | undefined>(Events.modelsChanged, (payload) => {
+      const reason = payload?.reason
+      if (reason === 'shared-sources' || reason === 'settings') void refreshQuiet()
+    })
+  }, [pathname, refreshQuiet])
 
   return (
     <div className="flex flex-col gap-3">
