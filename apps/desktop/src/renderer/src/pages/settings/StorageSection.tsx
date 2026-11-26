@@ -48,7 +48,7 @@ export function StorageSection(): React.JSX.Element {
           </StackRow>
           <FolderRow
             title="模型文件夹"
-            description="下载的模型保存在这里。更改后，新的下载会保存到新位置，已下载的模型不会移动。"
+            description="下载的模型保存在这里。更改后，新的下载会保存到新位置，已下载的模型不会移动。如需复用 ComfyUI 等已有模型，请在「模型 › 共享模型目录」中添加，不要把这里设为对方的模型目录。"
             value={settings.modelsRoot}
             fallback={info?.modelsPath}
             pickTitle="选择模型文件夹"

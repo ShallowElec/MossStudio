@@ -2,7 +2,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path'
 import { parse as parseYaml } from 'yaml'
-import type { ModelSource, ModelSourceKind, ScannedModel } from '@shared/types'
+import type { ModelSource, ModelSourceIssue, ModelSourceKind, ScannedModel } from '@shared/types'
 import { expandPathVariables, isNetworkPath, linksToNetwork, modelPathKey } from '../lib/localPath'
 import { isInside } from '../lib/paths'
 import { windowsModelLocations } from './modelSourceDiscovery'
@@ -10,8 +10,15 @@ import { probeLocalModelServices } from './modelSourceServices'
 
 type SourceLocation = Pick<ModelSource, 'kind' | 'path'>
 /** `network` marks a value that named a network place before path functions could normalise it away. */
-type ModelRoot = { path: string; role?: ScannedModel['role']; network?: boolean }
-type DesktopProfile = { path: string; roots: ModelRoot[]; aliases: string[]; configs: string[]; issues: string[] }
+type ModelRoot = { path: string; role?: ScannedModel['role']; network?: boolean; origin?: string }
+type DesktopProfile = {
+  path: string
+  roots: ModelRoot[]
+  aliases: string[]
+  configs: string[]
+  issues: string[]
+  issueDetails: ModelSourceIssue[]
+}
 
 const modelRoles: Partial<Record<string, ModelRoot['role']>> = {
   checkpoints: 'dit',
@@ -76,7 +83,7 @@ function comfyRoots(file: string, yaml: string): ModelRoot[] {
         const entry = line.trim()
         if (!entry) continue
         const network = (basePath !== null && isNetworkPath(basePath)) || isNetworkPath(entry)
-        result.push({ path: resolve(base, entry), role: modelRoles[key], network })
+        result.push({ path: resolve(base, entry), role: modelRoles[key], network, origin: file })
       }
     }
   }
@@ -99,7 +106,7 @@ function desktopProfileLocations(): string[] {
 }
 
 async function readDesktopProfile(path: string): Promise<DesktopProfile> {
-  const profile: DesktopProfile = { path, roots: [], aliases: [], configs: [], issues: [] }
+  const profile: DesktopProfile = { path, roots: [], aliases: [], configs: [], issues: [], issueDetails: [] }
   for (const name of ['config.json', 'settings.json']) {
     const file = join(path, name)
     if (!(await isFile(file))) continue
@@ -107,18 +114,26 @@ async function readDesktopProfile(path: string): Promise<DesktopProfile> {
       const settings = record(JSON.parse(await readConfig(file)))
       if (Array.isArray(settings.modelsDirs)) {
         for (const value of settings.modelsDirs) {
-          if (typeof value === 'string' && isAbsolute(value)) profile.roots.push({ path: value, network: isNetworkPath(value) })
+          if (typeof value === 'string' && isAbsolute(value)) {
+            profile.roots.push({ path: value, network: isNetworkPath(value), origin: file })
+          }
         }
       }
       if (typeof settings.basePath === 'string' && isAbsolute(settings.basePath)) {
         profile.aliases.push(settings.basePath)
         if (await isLocalDirectory(join(settings.basePath, 'models'), isNetworkPath(settings.basePath))) {
-          profile.roots.push({ path: join(settings.basePath, 'models') })
+          profile.roots.push({ path: join(settings.basePath, 'models'), origin: file })
         }
       }
       if (typeof settings.installDir === 'string' && isAbsolute(settings.installDir)) profile.aliases.push(settings.installDir)
     } catch {
       profile.issues.push('读不到配置文件，或配置格式有误：' + file)
+      profile.issueDetails.push({
+        id: 'bad-config:' + modelPathKey(file),
+        message: '读不到配置文件，或配置格式有误',
+        origin: file,
+        suggestion: '请检查该配置文件的格式和读取权限；已自动跳过该配置，不影响读取默认 models 目录。',
+      })
     }
   }
   for (const name of configNames) {
@@ -200,29 +215,37 @@ const webuiModelOptions = [
   { flag: 'controlnet-dir', folder: 'ControlNet', role: 'full' },
 ] as const
 
-async function webuiRoots(base: string, kind: 'webui' | 'forge', issues: string[]): Promise<ModelRoot[]> {
+async function webuiRoots(base: string, kind: 'webui' | 'forge', issues: string[], issueDetails: ModelSourceIssue[]): Promise<ModelRoot[]> {
   const roots: ModelRoot[] = []
   const scripts = ['webui-user.bat', 'webui-user.sh']
   if (process.platform !== 'win32') scripts.reverse()
-  const args = new Map<string, string>()
+  const args = new Map<string, { value: string; file: string }>()
   for (const name of scripts) {
     const file = join(base, name)
     if (!(await isFile(file))) continue
     try {
-      for (const [key, value] of webuiArguments(await readConfig(file))) args.set(key, value)
+      for (const [key, value] of webuiArguments(await readConfig(file))) args.set(key, { value, file })
     } catch {
       issues.push('读不到启动配置：' + file)
+      issueDetails.push({
+        id: 'bad-script:' + modelPathKey(file),
+        message: '读不到启动配置',
+        origin: file,
+        suggestion: '请检查该启动脚本的读取权限；已自动跳过该配置，不影响读取默认 models 目录。',
+      })
     }
   }
   const pathFor = (flag: string): ModelRoot | undefined => {
-    const value = args.get(flag)
-    if (!value) return undefined
-    const path = expandPathVariables(value.replace(/%~dp0/gi, base + sep).replace(/%CD%/gi, base))
+    const entry = args.get(flag)
+    if (!entry) return undefined
+    const path = expandPathVariables(entry.value.replace(/%~dp0/gi, base + sep).replace(/%CD%/gi, base))
     // A variable left unexpanded is not on the allowlist; the setting is dropped rather than guessed.
-    return /%[^%]+%|\$\{|\$\w/.test(path) ? undefined : { path: resolve(base, path), network: isNetworkPath(path) }
+    return /%[^%]+%|\$\{|\$\w/.test(path) ? undefined : { path: resolve(base, path), network: isNetworkPath(path), origin: entry.file }
   }
   const data = pathFor('data-dir')
-  if (data && (await isLocalDirectory(join(data.path, 'models'), data.network))) roots.push({ path: join(data.path, 'models') })
+  if (data && (await isLocalDirectory(join(data.path, 'models'), data.network))) {
+    roots.push({ path: join(data.path, 'models'), origin: data.origin })
+  }
   const models = pathFor('models-dir')
   if (models) roots.push(models)
   const reference = kind === 'forge' ? pathFor('forge-ref-a1111-home') : undefined
@@ -230,7 +253,9 @@ async function webuiRoots(base: string, kind: 'webui' | 'forge', issues: string[
     const explicit = pathFor(flag)
     const referenced = reference && join(reference.path, 'models', folder)
     if (explicit) roots.push({ ...explicit, role })
-    else if (referenced && (await isLocalDirectory(referenced, reference.network))) roots.push({ path: referenced, role })
+    else if (referenced && (await isLocalDirectory(referenced, reference.network))) {
+      roots.push({ path: referenced, role, origin: reference.origin })
+    }
   }
   return roots
 }
@@ -238,12 +263,30 @@ async function webuiRoots(base: string, kind: 'webui' | 'forge', issues: string[
 export async function sourceRoots(
   source: SourceLocation,
   profileLocations = desktopProfileLocations(),
-): Promise<{ roots: string[]; roles: Map<string, ScannedModel['role']>; issues: string[] }> {
+): Promise<{ roots: string[]; roles: Map<string, ScannedModel['role']>; issues: string[]; issueDetails: ModelSourceIssue[] }> {
   const roots: ModelRoot[] = []
   const issues: string[] = []
+  const issueDetails: ModelSourceIssue[] = []
   const roles = new Map<string, ScannedModel['role']>()
+  const addDetail = (detail: ModelSourceIssue): void => {
+    if (!issueDetails.some((item) => item.id === detail.id)) issueDetails.push(detail)
+  }
   const info = await stat(source.path).catch(() => null)
-  if (!info) return { roots: [], roles, issues: ['找不到此位置，请检查磁盘连接或更换路径'] }
+  if (!info) {
+    return {
+      roots: [],
+      roles,
+      issues: ['找不到此位置，请检查磁盘连接或更换路径'],
+      issueDetails: [
+        {
+          id: 'missing-source:' + modelPathKey(source.path),
+          message: '找不到此位置',
+          origin: source.path,
+          suggestion: '请检查磁盘连接或路径是否已移动，也可以点击「更换路径」重新选择。',
+        },
+      ],
+    }
+  }
   const configs = new Set<string>()
   if (info.isFile() && source.kind === 'comfyui') {
     configs.add(source.path)
@@ -264,7 +307,7 @@ export async function sourceRoots(
           if (await isFile(file)) configs.add(file)
         }
       } else if (kind === 'webui' || kind === 'forge') {
-        roots.push(...(await webuiRoots(base, kind, issues)))
+        roots.push(...(await webuiRoots(base, kind, issues, issueDetails)))
       }
     }
     if (kind === 'comfyui') {
@@ -277,11 +320,18 @@ export async function sourceRoots(
         roots.push(...profile.roots)
         profile.configs.forEach((file) => configs.add(file))
         issues.push(...profile.issues)
+        profile.issueDetails.forEach(addDetail)
       }
     }
     if (!roots.length && !configs.size && !issues.length && !(await installationKind(install))) roots.push({ path: source.path })
   } else {
     issues.push('请选择共享模型目录')
+    addDetail({
+      id: 'invalid-source:' + modelPathKey(source.path),
+      message: '请选择共享模型目录',
+      origin: source.path,
+      suggestion: '请选择文件夹或 ComfyUI 的 extra_model_paths.yaml 配置文件。',
+    })
   }
 
   for (const file of configs) {
@@ -291,26 +341,39 @@ export async function sourceRoots(
         const config = record(JSON.parse(await readConfig(file)))
         if (Array.isArray(config.modelsDirs)) {
           for (const path of config.modelsDirs) {
-            if (typeof path === 'string' && isAbsolute(path)) roots.push({ path, network: isNetworkPath(path) })
+            if (typeof path === 'string' && isAbsolute(path)) roots.push({ path, network: isNetworkPath(path), origin: file })
           }
         }
         if (typeof config.basePath === 'string' && isAbsolute(config.basePath)) {
-          roots.push({ path: join(config.basePath, 'models'), network: isNetworkPath(config.basePath) })
+          roots.push({ path: join(config.basePath, 'models'), network: isNetworkPath(config.basePath), origin: file })
         }
       } else roots.push(...comfyRoots(file, await readConfig(file)))
     } catch {
       issues.push('读不到配置文件，或配置格式有误：' + file)
+      addDetail({
+        id: 'bad-config:' + modelPathKey(file),
+        message: '读不到配置文件，或配置格式有误',
+        origin: file,
+        suggestion: '请检查该配置文件的格式和读取权限；已自动跳过该配置，不影响读取默认 models 目录。',
+      })
     }
   }
 
   const unique = new Map<string, string>()
   const resolved = new Map<string, string | null>()
+  const missingByOrigin = new Map<string, Map<string, string>>()
   // Only the folder the person picked may be on the network; a config file or a link must not send the app there.
   const picked = (path: string): boolean => isInside(source.path, path)
   const skippedNetwork = '已跳过网络位置，请把模型放在本机磁盘上，或直接添加那个文件夹'
-  for (const { path, role, network } of roots) {
+  for (const { path, role, network, origin } of roots) {
     if ((network || isNetworkPath(path) || (await linksToNetwork(path))) && !picked(path)) {
       issues.push(skippedNetwork)
+      addDetail({
+        id: 'network:' + modelPathKey(origin ?? source.path),
+        message: '已跳过配置中的网络位置',
+        origin: origin ?? source.path,
+        suggestion: '请把模型放在本机磁盘上，或通过「添加来源」直接选择该网络文件夹；如不需要可忽略此提示。',
+      })
       continue
     }
     if (!resolved.has(path)) {
@@ -320,15 +383,66 @@ export async function sourceRoots(
     const actual = resolved.get(path)
     // A folder above the last part can still be a link to a share. linksToNetwork reads only the last part,
     // so such a share is contacted by realpath, but it is never scanned or loaded unless the person picked it.
-    if (actual && isNetworkPath(actual) && !picked(actual)) issues.push(skippedNetwork)
-    else if (actual && isTooBroadModelFolder(actual)) issues.push('已跳过磁盘根目录或用户主目录，请选择具体的模型目录')
-    else if (actual) {
+    if (actual && isNetworkPath(actual) && !picked(actual)) {
+      issues.push(skippedNetwork)
+      addDetail({
+        id: 'network:' + modelPathKey(origin ?? source.path),
+        message: '已跳过配置中的网络位置',
+        origin: origin ?? source.path,
+        suggestion: '请把模型放在本机磁盘上，或通过「添加来源」直接选择该网络文件夹；如不需要可忽略此提示。',
+      })
+    } else if (actual && isTooBroadModelFolder(actual)) {
+      issues.push('已跳过磁盘根目录或用户主目录，请选择具体的模型目录')
+      addDetail({
+        id: 'too-broad:' + modelPathKey(origin ?? source.path),
+        message: '已跳过磁盘根目录或用户主目录',
+        origin: origin ?? source.path,
+        suggestion: '请在配置中改用具体的模型子目录；不影响其他有效目录，也可以直接忽略。',
+      })
+    } else if (actual) {
       unique.set(modelPathKey(actual), actual)
       if (role) roles.set(actual, role)
-    } else issues.push('读不到模型目录：' + path)
+    } else if (origin) {
+      // Missing paths in extra_model_paths.yaml / launch scripts are skipped like ComfyUI does,
+      // and surfaced with their config file origin so the user can clean them up or dismiss the notice.
+      let entries = missingByOrigin.get(origin)
+      if (!entries) {
+        entries = new Map<string, string>()
+        missingByOrigin.set(origin, entries)
+      }
+      const key = modelPathKey(path)
+      if (!entries.has(key)) entries.set(key, path)
+    } else {
+      issues.push('读不到模型目录：' + path)
+      addDetail({
+        id: 'missing-dir:' + modelPathKey(path),
+        message: '读不到模型目录',
+        origin: path,
+        suggestion: '请检查该目录是否存在或具备读取权限，也可以点击「更换路径」重新选择。',
+      })
+    }
   }
-  if (!unique.size && !issues.length) issues.push('这个位置没有配置模型目录')
-  return { roots: [...unique.values()], roles, issues: [...new Set(issues)] }
+  for (const [origin, entries] of missingByOrigin) {
+    const missingPaths = [...entries.values()]
+    issues.push(`已跳过配置中不存在的模型目录（来自 ${origin}）：${missingPaths.join('、')}`)
+    addDetail({
+      id: 'missing-config-dirs:' + modelPathKey(origin) + ':' + [...entries.keys()].sort().join('|'),
+      message: missingPaths.length === 1 ? '已跳过配置中不存在的模型目录' : `已跳过配置中 ${missingPaths.length} 个不存在的模型目录`,
+      origin,
+      suggestion: '已像 ComfyUI 一样自动跳过，不影响读取当前目录里的其他模型；若这些旧路径已删除或迁移，可清理该配置文件，或点击「忽略」。',
+      details: missingPaths,
+    })
+  }
+  if (!unique.size && !issues.length) {
+    issues.push('这个位置没有配置模型目录')
+    addDetail({
+      id: 'empty-source:' + modelPathKey(source.path),
+      message: '这个位置没有配置模型目录',
+      origin: source.path,
+      suggestion: '请选择包含 models 文件夹的安装目录，或直接选择存放模型文件的文件夹。',
+    })
+  }
+  return { roots: [...unique.values()], roles, issues: [...new Set(issues)], issueDetails }
 }
 
 export async function guessModelSourceKind(path: string): Promise<ModelSourceKind> {

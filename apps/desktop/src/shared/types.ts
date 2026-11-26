@@ -153,6 +153,19 @@ export interface ModelSourceFile {
   reason?: string
 }
 
+export interface ModelSourceIssue {
+  /** Stable key within a source so the UI can dismiss this exact warning across scans. */
+  id: string
+  /** Plain one-line summary of what happened. */
+  message: string
+  /** Where the problem came from (e.g. a config file path or MossStudio download folder). */
+  origin?: string
+  /** Actionable suggestion for resolving or safely ignoring the issue. */
+  suggestion?: string
+  /** Extra paths grouped under the same issue (e.g. missing folders listed in one config file). */
+  details?: string[]
+}
+
 export interface ModelSourceStatus extends ModelSource {
   roots: string[]
   available: number
@@ -160,6 +173,7 @@ export interface ModelSourceStatus extends ModelSource {
   incompatible: number
   files: ModelSourceFile[]
   issues: string[]
+  issueDetails?: ModelSourceIssue[]
 }
 
 export interface ModelSourcesView {
