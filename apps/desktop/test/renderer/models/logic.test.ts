@@ -9,16 +9,22 @@ import {
   bundleTone,
   bundleView,
   bundlesUsing,
+  clearDismissedForSource,
   downloadGroups,
   itemState,
   localFilesOnly,
   modelSections,
   parseModelsQuery,
+  partitionSourceIssues,
+  readDismissedSourceIssues,
   runningServicesText,
   sizeText,
+  sourceIssueItems,
+  sourceIssueKey,
   taskFor,
   taskProgress,
   visibleTasks,
+  writeDismissedSourceIssues,
 } from '@renderer/pages/models/logic'
 import { GPU_GTX_1660, GPU_RTX_3060, catalogFixture, downloadFixture, gpuDeviceFixture } from '../../mocks/backend'
 
@@ -592,5 +598,51 @@ describe('a model whose own file moved', () => {
     expect(sections.featured?.bundle.id).toBe('moss-sft-int8')
     expect(sections.mine.map((view) => view.bundle.id)).toEqual(['moss-sft', 'combo-1'])
     expect(sections.certified.map((view) => view.bundle.id)).not.toContain('moss-sft')
+  })
+})
+
+describe('shared model source issues', () => {
+  it('prefers structured issueDetails and falls back to legacy plain issues', () => {
+    expect(sourceIssueItems({ issues: ['读不到模型目录'], issueDetails: undefined })).toEqual([
+      { id: 'legacy:读不到模型目录', message: '读不到模型目录' },
+    ])
+    const detail = {
+      id: 'missing-config-dirs:extra',
+      message: '已跳过配置中 2 个不存在的模型目录',
+      origin: 'F:\\ComfyUI\\extra_model_paths.yaml',
+      suggestion: '可清理该配置或忽略',
+      details: ['D:\\old\\a', 'D:\\old\\b'],
+    }
+    expect(sourceIssueItems({ issues: ['fallback'], issueDetails: [detail] })).toEqual([detail])
+  })
+
+  it('partitions dismissed issues per source and persists them cleanly', () => {
+    const store = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+    }
+    const source = {
+      id: 'src-1',
+      issues: [],
+      issueDetails: [
+        { id: 'a', message: '提示 A', origin: 'extra_model_paths.yaml' },
+        { id: 'b', message: '提示 B', origin: 'Moss Studio 下载位置' },
+      ],
+    }
+    const dismissed = new Set([sourceIssueKey('src-1', 'a'), sourceIssueKey('src-2', 'b')])
+    writeDismissedSourceIssues(dismissed, storage)
+    const reloaded = readDismissedSourceIssues(storage)
+    expect(partitionSourceIssues(source, reloaded)).toEqual({
+      visible: [source.issueDetails[1]],
+      dismissedCount: 1,
+    })
+    const cleared = clearDismissedForSource(reloaded, 'src-1')
+    expect(partitionSourceIssues(source, cleared)).toEqual({
+      visible: source.issueDetails,
+      dismissedCount: 0,
+    })
+    expect(cleared.has(sourceIssueKey('src-2', 'b'))).toBe(true)
   })
 })

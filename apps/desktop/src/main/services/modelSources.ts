@@ -9,6 +9,7 @@ import type {
   ModelImportProblem,
   ModelSource,
   ModelSourceFile,
+  ModelSourceIssue,
   ModelSourceStatus,
   ModelSourcesView,
   ScannedModel,
@@ -43,6 +44,13 @@ const scanFileSchema = z.object({
   mtimeMs: z.number(),
   layout: z.enum(['comfyui-single-file', 'diffusers-folder', 'unknown']),
 })
+const sourceIssueSchema = z.object({
+  id: z.string(),
+  message: z.string(),
+  origin: z.string().optional(),
+  suggestion: z.string().optional(),
+  details: z.array(z.string()).optional(),
+})
 const sourceStatusSchema = discoveredSourceSchema.extend({
   id: z.string(),
   roots: z.array(z.string()),
@@ -50,6 +58,7 @@ const sourceStatusSchema = discoveredSourceSchema.extend({
   pending: z.number(),
   incompatible: z.number(),
   issues: z.array(z.string()),
+  issueDetails: z.array(sourceIssueSchema).optional(),
   files: z.array(
     scanFileSchema.pick({ path: true, name: true, size: true }).extend({
       role: z.enum(['dit', 'text_encoder', 'vae', 'support', 'full', 'lora', 'control_adapter']),
@@ -134,11 +143,18 @@ function writableKey(writable: string[]): string {
  * skipped, and a download folder inside a root is left out of its scan. A per-role
  * folder may point into a ComfyUI tree, so both keep working without listing a file twice.
  */
-function separateFromDownloads(root: string, writable: string[]): { readable: boolean; exclude: string[] } {
+function separateFromDownloads(root: string, writable: string[]): { readable: boolean; blockedBy: string[]; exclude: string[] } {
+  const blockedBy = writable.filter((target) => isInside(target, root))
   return {
-    readable: !writable.some((target) => isInside(target, root)),
+    readable: blockedBy.length === 0,
+    blockedBy,
     exclude: writable.filter((target) => isInside(root, target)),
   }
+}
+
+function pushIssueDetail(status: ModelSourceStatus, detail: ModelSourceIssue): void {
+  status.issueDetails ??= []
+  if (!status.issueDetails.some((item) => item.id === detail.id)) status.issueDetails.push(detail)
 }
 
 /** A cached answer for an unchanged file, or null when the engine must be asked and is not there. Engine errors throw. */
@@ -273,9 +289,24 @@ async function scanSources(settings: Settings, generation: number, changed: bool
       incompatible: 0,
       files: [],
       issues: [...resolved.issues],
+      issueDetails: [...resolved.issueDetails],
     }
     nextStatuses.push(status)
-    if (parts.some((part) => !part.readable || part.exclude.length)) status.issues.push('已跳过与 Moss Studio 下载位置重叠的目录')
+    const overlappedParts = parts.filter((part) => !part.readable || part.exclude.length)
+    if (overlappedParts.length) {
+      status.issues.push('已跳过与 Moss Studio 下载位置重叠的目录')
+      const downloadFolders = [...new Set(overlappedParts.flatMap((part) => [...part.blockedBy, ...part.exclude]))]
+      const skippedAll = !parts.some((part) => part.readable)
+      pushIssueDetail(status, {
+        id: 'overlap:' + downloadFolders.map(modelPathKey).sort().join('|'),
+        message: '已跳过与 Moss Studio 下载位置重叠的目录',
+        origin: 'Moss Studio 下载位置：' + downloadFolders.join('、'),
+        suggestion: skippedAll
+          ? '当前共享目录与 Moss Studio 下载位置完全重叠，已被跳过。请到「设置 › 存储」将下载位置改为独立目录，再点击「自动扫描」。'
+          : '已自动排除重叠的子目录，其余目录仍会正常扫描；如需完整扫描此目录，请到「设置 › 存储」将下载位置改为独立目录，或点击「忽略」。',
+        details: [...new Set(overlappedParts.flatMap((part) => (part.readable ? part.exclude : [part.root])))],
+      })
+    }
     const files = new Map<string, ScannedModel>()
     for (const { root, exclude } of parts.filter((part) => part.readable)) {
       try {
@@ -291,10 +322,24 @@ async function scanSources(settings: Settings, generation: number, changed: bool
           else if (!files.has(id)) files.set(id, file)
         }
         for (const item of scan.skipped) {
-          status.issues.push(/已停止|已跳过/.test(item.reason) ? item.reason : '部分文件夹无法读取：' + item.path)
+          const known = /已停止|已跳过/.test(item.reason)
+          const text = known ? item.reason : '部分文件夹无法读取：' + item.path
+          status.issues.push(text)
+          pushIssueDetail(status, {
+            id: 'scan-skip:' + modelPathKey(item.path) + ':' + text,
+            message: known ? item.reason : '部分文件夹无法读取',
+            origin: item.path,
+            suggestion: known ? '已自动跳过该项，不影响其他模型；不需要时可以忽略此提示。' : '请检查该文件夹的读取权限，或点击「忽略」。',
+          })
         }
       } catch {
         status.issues.push('读不到模型目录：' + root)
+        pushIssueDetail(status, {
+          id: 'scan-read-error:' + modelPathKey(root),
+          message: '读不到模型目录',
+          origin: root,
+          suggestion: '请检查该目录是否存在或具备读取权限，然后点击「自动扫描」。',
+        })
       }
     }
     groups.push({ status, files })
@@ -335,7 +380,15 @@ async function scanSources(settings: Settings, generation: number, changed: bool
         status[entry.state]++
         status.files.push(entry)
       }
-      if (failure) status.issues.push('引擎没能检查部分文件，下次自动扫描会重试：' + failure)
+      if (failure) {
+        status.issues.push('引擎没能检查部分文件，下次自动扫描会重试：' + failure)
+        pushIssueDetail(status, {
+          id: 'engine-inspect-failed:' + failure,
+          message: '引擎没能检查部分文件：' + failure,
+          origin: 'MossInfer 引擎检查',
+          suggestion: '请稍后点击「自动扫描」重试；若持续失败，可到「设置 › 引擎」检查引擎状态。',
+        })
+      }
     }
   }
 
@@ -352,14 +405,33 @@ async function scanSources(settings: Settings, generation: number, changed: bool
     } catch (error) {
       console.warn('[model-sources] engine inspect failed', error)
       await inspectGroups(null)
+      const reason = errorText(error)
       for (const { status } of groups) {
-        if (status.pending) status.issues.push('引擎没能检查部分文件，下次自动扫描会重试：' + errorText(error))
+        if (status.pending) {
+          status.issues.push('引擎没能检查部分文件，下次自动扫描会重试：' + reason)
+          pushIssueDetail(status, {
+            id: 'engine-inspect-failed:' + reason,
+            message: '引擎没能检查部分文件：' + reason,
+            origin: 'MossInfer 引擎检查',
+            suggestion: '请稍后点击「自动扫描」重试；若持续失败，可到「设置 › 引擎」检查引擎状态。',
+          })
+        }
       }
     }
   } else {
     await inspectGroups(null)
     if (needsEngine) {
-      for (const { status } of groups) if (status.pending) status.issues.push('还没有安装引擎，装好后点击「自动扫描」检查这些文件')
+      for (const { status } of groups) {
+        if (status.pending) {
+          status.issues.push('还没有安装引擎，装好后点击「自动扫描」检查这些文件')
+          pushIssueDetail(status, {
+            id: 'engine-not-installed',
+            message: '还没有安装引擎，暂时无法检查这些文件',
+            origin: 'MossInfer 引擎',
+            suggestion: '请先安装引擎，装好后点击「自动扫描」检查这些模型文件。',
+          })
+        }
+      }
     }
   }
   if (generation !== scanGeneration) return
@@ -466,6 +538,7 @@ export async function modelSourcesView(settings: Settings, mode: 'cached' | 'con
           incompatible: 0,
           files: [],
           issues: [],
+          issueDetails: [],
         },
     ),
     services: discovery.services,

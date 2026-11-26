@@ -187,6 +187,38 @@ describe('shared folder paths', () => {
     const result = await sourceRoots({ kind: 'comfyui', path: temp() })
     expect(result.roots).toEqual([primary])
     expect(result.issues).toEqual([expect.stringContaining('配置格式有误')])
+    expect(result.issueDetails).toEqual([
+      expect.objectContaining({
+        message: '读不到配置文件，或配置格式有误',
+        origin: join(temp(), 'extra_model_paths.yaml'),
+        suggestion: expect.stringContaining('不影响读取默认 models 目录'),
+      }),
+    ])
+  })
+
+  it('silently skips missing extra_model_paths.yaml directories while recording their config origin and suggestion', async () => {
+    const base = temp()
+    const primary = join(base, 'models')
+    const config = join(base, 'extra_model_paths.yaml')
+    await mkdir(primary)
+    await writeFile(
+      config,
+      'a1111:\n  base_path: ./不存在的webui\n  checkpoints: models/Stable-diffusion\n  vae: models/VAE\n  loras: |\n    models/Lora\n    models/LyCORIS\n',
+    )
+    const result = await sourceRoots({ kind: 'comfyui', path: primary }, [])
+    expect(result.roots).toEqual([primary])
+    expect(result.issueDetails).toHaveLength(1)
+    expect(result.issueDetails[0]).toMatchObject({
+      message: '已跳过配置中 4 个不存在的模型目录',
+      origin: config,
+      suggestion: expect.stringContaining('忽略'),
+      details: [
+        join(base, '不存在的webui', 'models', 'Stable-diffusion'),
+        join(base, '不存在的webui', 'models', 'VAE'),
+        join(base, '不存在的webui', 'models', 'Lora'),
+        join(base, '不存在的webui', 'models', 'LyCORIS'),
+      ],
+    })
   })
 
   it('recognises a Comfy Desktop install and reads its user profile', async () => {
@@ -433,7 +465,7 @@ describe('shared folder safety', () => {
     const result = await sourceRoots({ kind: 'comfyui', path: base }, [])
     expect(result.roots).toEqual([join(base, 'models')])
     expect(result.issues.length).toBeGreaterThan(0)
-    expect(JSON.stringify(result.issues)).not.toContain(secret)
+    expect(JSON.stringify([result.issues, result.issueDetails])).not.toContain(secret)
   })
 
   it('skips network places named by a config or a launch script, without echoing them', async () => {
@@ -458,7 +490,7 @@ b:
     const forge = await sourceRoots({ kind: 'forge', path: base }, [])
     expect(forge.roots).toEqual([join(webui, 'models')])
     expect(forge.issues).toEqual([expect.stringContaining('已跳过网络位置')])
-    expect(JSON.stringify([comfy.issues, forge.issues])).not.toMatch(/attacker|host/)
+    expect(JSON.stringify([comfy.issues, comfy.issueDetails, forge.issues, forge.issueDetails])).not.toMatch(/attacker|host/)
   })
 
   it('skips the home folder or a filesystem root named by a config', async () => {
@@ -535,6 +567,13 @@ describe('shared model scan', () => {
     expect(sharedModels().map((model) => model.name)).toEqual(['shared.safetensors'])
     const [status] = (await modelSourcesView(getSettings(), 'connected')).sources
     expect(status?.issues).toContain('已跳过与 Moss Studio 下载位置重叠的目录')
+    expect(status?.issueDetails).toEqual([
+      expect.objectContaining({
+        message: '已跳过与 Moss Studio 下载位置重叠的目录',
+        origin: expect.stringContaining(checkpoints),
+        suggestion: expect.stringContaining('设置 › 存储'),
+      }),
+    ])
 
     // Moving the per-role folder away (设置 › 存储) rescans the whole tree.
     updateSettings({ modelDirectories: { ...settingsFixture().modelDirectories, dit: null } })

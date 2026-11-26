@@ -1,5 +1,15 @@
 import { bestBundleFor, bundleGpusProblem, bundleWeightProblem, isFileBundle, isLocalOnlyBundle } from '@shared/bundleFit'
-import type { AdapterEntry, DownloadTask, GpuInventoryDevice, ModelBundle, ModelEntry, ModelSource, ModelSourcesView } from '@shared/types'
+import type {
+  AdapterEntry,
+  DownloadTask,
+  GpuInventoryDevice,
+  ModelBundle,
+  ModelEntry,
+  ModelSource,
+  ModelSourceIssue,
+  ModelSourceStatus,
+  ModelSourcesView,
+} from '@shared/types'
 import { isSharedModelId } from '@shared/sharedModels'
 import { goneOwnPart, isLostOwnFile, isOwnFile, lostFile } from '@shared/modelImport'
 import { eta, MODEL_READY_TEXT } from '../../lib/format'
@@ -682,4 +692,56 @@ export const modelSourceKindLabels: Record<ModelSource['kind'], string> = {
 export function runningServicesText(services: NonNullable<ModelSourcesView['services']>): string {
   if (!services.length) return '没有发现正在运行的 ComfyUI、Stable Diffusion WebUI 或 Forge'
   return [...new Set(services.map((service) => modelSourceKindLabels[service.kind]))].join('、') + ' 正在运行'
+}
+
+const DISMISSED_SOURCE_ISSUES_KEY = 'moss.modelSources.dismissedIssues'
+const MAX_DISMISSED_SOURCE_ISSUES = 200
+
+/** Structured issues for one source, falling back to plain strings from older caches. */
+export function sourceIssueItems(source: Pick<ModelSourceStatus, 'issues' | 'issueDetails'>): ModelSourceIssue[] {
+  if (source.issueDetails?.length) return source.issueDetails
+  return source.issues.map((message) => ({ id: 'legacy:' + message, message }))
+}
+
+export function sourceIssueKey(sourceId: string, issueId: string): string {
+  return `${sourceId}\0${issueId}`
+}
+
+export function partitionSourceIssues(
+  source: Pick<ModelSourceStatus, 'id' | 'issues' | 'issueDetails'>,
+  dismissed: ReadonlySet<string>,
+): { visible: ModelSourceIssue[]; dismissedCount: number } {
+  const all = sourceIssueItems(source)
+  const visible = all.filter((item) => !dismissed.has(sourceIssueKey(source.id, item.id)))
+  return { visible, dismissedCount: all.length - visible.length }
+}
+
+export function clearDismissedForSource(dismissed: ReadonlySet<string>, sourceId: string): Set<string> {
+  const prefix = `${sourceId}\0`
+  return new Set([...dismissed].filter((key) => !key.startsWith(prefix)))
+}
+
+export function readDismissedSourceIssues(storage: Pick<Storage, 'getItem'> | null = globalThis.localStorage ?? null): Set<string> {
+  try {
+    const raw = storage?.getItem(DISMISSED_SOURCE_ISSUES_KEY)
+    if (!raw) return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? new Set(parsed.filter((item): item is string => typeof item === 'string')) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+export function writeDismissedSourceIssues(
+  keys: ReadonlySet<string>,
+  storage: Pick<Storage, 'setItem' | 'removeItem'> | null = globalThis.localStorage ?? null,
+): void {
+  try {
+    if (!storage) return
+    const list = [...keys].slice(-MAX_DISMISSED_SOURCE_ISSUES)
+    if (list.length) storage.setItem(DISMISSED_SOURCE_ISSUES_KEY, JSON.stringify(list))
+    else storage.removeItem(DISMISSED_SOURCE_ISSUES_KEY)
+  } catch {
+    // Storage full or disabled: keep the in-memory dismissal for this session.
+  }
 }
