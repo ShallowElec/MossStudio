@@ -15,6 +15,7 @@ import {
   modelSections,
   parseModelsQuery,
   runningServicesText,
+  sharedCombinationInitial,
   sizeText,
   taskFor,
   taskProgress,
@@ -592,5 +593,26 @@ describe('a model whose own file moved', () => {
     expect(sections.featured?.bundle.id).toBe('moss-sft-int8')
     expect(sections.mine.map((view) => view.bundle.id)).toEqual(['moss-sft', 'combo-1'])
     expect(sections.certified.map((view) => view.bundle.id)).not.toContain('moss-sft')
+  })
+
+  it('builds initial 自己组合 slots from shared models and overrides the focused slot', () => {
+    const shared = [
+      { id: 'shared-full', role: 'full' as const },
+      { id: 'shared-dit-1', role: 'dit' as const },
+      { id: 'shared-dit-2', role: 'dit' as const },
+      { id: 'shared-te', role: 'text_encoder' as const },
+      { id: 'shared-vae', role: 'vae' as const },
+    ]
+    expect(sharedCombinationInitial(shared)).toEqual({
+      dit: 'shared-dit-1',
+      textEncoder: 'shared-te',
+      vae: 'shared-vae',
+    })
+    expect(sharedCombinationInitial(shared, shared[2])).toEqual({
+      dit: 'shared-dit-2',
+      textEncoder: 'shared-te',
+      vae: 'shared-vae',
+    })
+    expect(sharedCombinationInitial([{ id: 'shared-full', role: 'full' }])).toEqual({})
   })
 })

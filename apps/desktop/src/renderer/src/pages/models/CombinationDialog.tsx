@@ -19,12 +19,30 @@ import type { ModelLocation } from './useModelLocation'
 
 export type SlotValues = Record<SlotKey, string>
 
+function pathKey(path: string): string {
+  return /^[a-z]:[\\/]/i.test(path) ? path.toLowerCase() : path
+}
+
 function defaults(catalog: Catalog, location: ModelLocation, initial?: Partial<Record<SlotKey, string | null>>): SlotValues {
   const recommended = recommendedBundle(catalog.bundles.filter((bundle) => !bundle.custom))
   const pick = (slot: SlotKey): string => {
-    const given = initial?.[slot]
-    if (given) return given
     const choices = slotChoices(catalog.models, slot, location.isModelInstalled)
+    const given = initial?.[slot]
+    if (given) {
+      const direct = choices.find((choice) => choice.id === given || choice.ids.includes(given))
+      if (direct) return direct.id
+      const givenPath = catalog.models.find((model) => model.id === given)?.localPath
+      if (givenPath) {
+        const key = pathKey(givenPath)
+        const twin = choices.find((choice) =>
+          choice.ids.some((id) => {
+            const path = catalog.models.find((model) => model.id === id)?.localPath
+            return path !== undefined && pathKey(path) === key
+          }),
+        )
+        if (twin) return twin.id
+      }
+    }
     const wanted = recommended?.components[slot]
     return (choices.find((choice) => wanted && choice.ids.includes(wanted)) ?? choices[0])?.id ?? ''
   }
